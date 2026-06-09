@@ -1,0 +1,207 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Muhan Li (iffi/iffiX)
+
+#ifndef INIT_DEF_H
+#define INIT_DEF_H
+
+#include <pybind11/stl_bind.h>
+
+#include "rise_origin/rise_origin.h"
+
+PYBIND11_MAKE_OPAQUE(std::vector<int16_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<uint16_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<int32_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<uint32_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<int64_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<uint64_t>);
+PYBIND11_MAKE_OPAQUE(std::vector<char>);
+PYBIND11_MAKE_OPAQUE(std::vector<unsigned char>);
+
+PYBIND11_MAKE_OPAQUE(std::vector<bool>);
+PYBIND11_MAKE_OPAQUE(std::vector<float>);
+PYBIND11_MAKE_OPAQUE(std::vector<double>);
+
+PYBIND11_MAKE_OPAQUE(std::vector<std::string>);
+PYBIND11_MAKE_OPAQUE(std::vector<RS_MathExprToken>);
+
+namespace py = pybind11;
+
+inline void initRSPYDefinitions(py::module &m) {
+    m.attr("RS_NULL_INDEX") = RS_NULL_INDEX;
+
+    py::enum_<RSE_FloatType>(m, "RSE_FloatType")
+        .value("RSE_FLOAT_32", RSE_FLOAT_32)
+        .value("RSE_FLOAT_64", RSE_FLOAT_64)
+        .export_values();
+
+    py::bind_vector<std::vector<int16_t>>(m, "VecInt16");
+    py::bind_vector<std::vector<uint16_t>>(m, "VecUInt16");
+    py::bind_vector<std::vector<int32_t>>(m, "VecInt32");
+    py::bind_vector<std::vector<uint32_t>>(m, "VecUInt32");
+    py::bind_vector<std::vector<int64_t>>(m, "VecInt64");
+    py::bind_vector<std::vector<uint64_t>>(m, "VecUInt64");
+    py::bind_vector<std::vector<char>>(m, "VecChar");
+    py::bind_vector<std::vector<unsigned char>>(m, "VecUChar");
+
+    py::bind_vector<std::vector<bool>>(m, "VecBool");
+    py::bind_vector<std::vector<float>>(m, "VecFloat");
+    py::bind_vector<std::vector<double>>(m, "VecDouble");
+
+    py::bind_vector<std::vector<std::string>>(m, "VecString");
+    py::bind_vector<std::vector<RS_MathExprToken>>(m, "VecMathExprToken");
+
+    py::class_<RVec3rf>(m, "RVec3rf")
+        .def(py::init<>())
+        .def(py::init<RFloat, RFloat, RFloat>())
+        .def_readwrite("x", &RVec3rf::x)
+        .def_readwrite("y", &RVec3rf::y)
+        .def_readwrite("z", &RVec3rf::z);
+
+    py::class_<RQuat3rf>(m, "RQuat3rf")
+        .def(py::init<>())
+        .def(py::init<RFloat, RFloat, RFloat, RFloat>())
+        .def_readwrite("x", &RQuat3rf::x)
+        .def_readwrite("y", &RQuat3rf::y)
+        .def_readwrite("z", &RQuat3rf::z)
+        .def_readwrite("w", &RQuat3rf::w);
+
+    py::class_<RColor3b>(m, "RColor3b")
+        .def(py::init<>())
+        .def(py::init<unsigned char, unsigned char, unsigned char>())
+        .def_readwrite("r", &RColor3b::r)
+        .def_readwrite("g", &RColor3b::g)
+        .def_readwrite("b", &RColor3b::b);
+
+    py::class_<RBound3rf>(m, "RBound3rf")
+        .def(py::init<>())
+        .def(py::init<RFloat, RFloat, RFloat, RFloat, RFloat, RFloat>())
+        .def_readwrite("min_x", &RBound3rf::min_x)
+        .def_readwrite("max_x", &RBound3rf::max_x)
+        .def_readwrite("min_y", &RBound3rf::min_y)
+        .def_readwrite("max_y", &RBound3rf::max_y)
+        .def_readwrite("min_z", &RBound3rf::min_z)
+        .def_readwrite("max_z", &RBound3rf::max_z);
+
+    py::class_<RBound3rui>(m, "RBound3rui")
+        .def(py::init<>())
+        .def(py::init<RIndex, RIndex, RIndex, RIndex, RIndex, RIndex>())
+        .def_readwrite("min_x", &RBound3rui::min_x)
+        .def_readwrite("max_x", &RBound3rui::max_x)
+        .def_readwrite("min_y", &RBound3rui::min_y)
+        .def_readwrite("max_y", &RBound3rui::max_y)
+        .def_readwrite("min_z", &RBound3rui::min_z)
+        .def_readwrite("max_z", &RBound3rui::max_z);
+
+    py::class_<RBound3ri>(m, "RBound3ri")
+        .def(py::init<>())
+        .def(
+            py::init<
+                RSignedIndex,
+                RSignedIndex,
+                RSignedIndex,
+                RSignedIndex,
+                RSignedIndex,
+                RSignedIndex>()
+        )
+        .def_readwrite("min_x", &RBound3ri::min_x)
+        .def_readwrite("max_x", &RBound3ri::max_x)
+        .def_readwrite("min_y", &RBound3ri::min_y)
+        .def_readwrite("max_y", &RBound3ri::max_y)
+        .def_readwrite("min_z", &RBound3ri::min_z)
+        .def_readwrite("max_z", &RBound3ri::max_z);
+
+    py::enum_<RS_MathExprOperator>(m, "RS_MathExprOperator")
+        .value("meEND", meEND)
+        .value("meCONST", meCONST)
+        .value("meE", meE)
+        .value("mePI", mePI)
+        .value("meVAR", meVAR)
+        .value("meADD", meADD)
+        .value("meSUB", meSUB)
+        .value("meMUL", meMUL)
+        .value("meDIV", meDIV)
+        .value("meMOD", meMOD)
+        .value("mePOW", mePOW)
+        .value("meSQRT", meSQRT)
+        .value("meSIN", meSIN)
+        .value("meCOS", meCOS)
+        .value("meTAN", meTAN)
+        .value("meATAN", meATAN)
+        .value("meLOG", meLOG)
+        .value("meINT", meINT)
+        .value("meABS", meABS)
+        .value("meGREATERTHAN", meGREATERTHAN)
+        .value("meLESSTHAN", meLESSTHAN)
+        .value("meGREATEROREQUAL", meGREATEROREQUAL)
+        .value("meLESSOREQUAL", meLESSOREQUAL)
+        .value("meNOTEQUAL", meNOTEQUAL)
+        .value("meEQUAL", meEQUAL)
+        .value("meAND", meAND)
+        .value("meOR", meOR)
+        .export_values();
+
+    py::class_<RS_MathExprToken>(m, "RS_MathExprToken")
+        .def(py::init<>())
+        .def(py::init<RS_MathExprOperator>())
+        .def(py::init([](RS_MathExprOperator op, py::object val) {
+            RS_MathExprToken token(op);
+            if (op == meCONST) {
+                token.value = val.cast<RFloat>();
+            } else if (op == meVAR) {
+                token.value = val.cast<std::vector<std::string>>();
+            }
+            return token;
+        }))
+        .def_readwrite("op", &RS_MathExprToken::op)
+        .def_property(
+            "value",
+            // Getter
+            [](const RS_MathExprToken &token) -> py::object {
+                if (token.op == meCONST) {
+                    try {
+                        return py::cast(token.value.as<RFloat>());
+                    } catch (const RS_InvalidCastException &) {
+                        return py::none();
+                    }
+                } else if (token.op == meVAR) {
+                    try {
+                        return py::cast(token.value.as<std::vector<std::string>>());
+                    } catch (const RS_InvalidCastException &) {
+                        return py::none();
+                    }
+                }
+                return py::none();
+            },
+            // Setter
+            [](RS_MathExprToken &token, py::object val) {
+                if (token.op == meCONST) {
+                    token.value = val.cast<RFloat>();
+                } else if (token.op == meVAR) {
+                    token.value = val.cast<std::vector<std::string>>();
+                }
+            }
+        );
+
+    py::class_<RS_MathExpr>(m, "RS_MathExpr")
+        .def(py::init<>())
+        .def("empty", &RS_MathExpr::empty)
+        .def("__getitem__", [](const RS_MathExpr &expr, int idx) { return expr[idx]; })
+        .def(
+            "__setitem__",
+            [](RS_MathExpr &expr, int idx, const RS_MathExprToken &token) { expr[idx] = token; }
+        )
+        .def_readwrite("expr", &RS_MathExpr::expr)
+        .def(
+            "__str__",
+            [](const RS_MathExpr &expr) {
+                std::stringstream ss;
+                ss << "MathExpr(" << expr.expr.size() << " tokens)";
+                return ss.str();
+            }
+        )
+        .def("from_string", [](RS_MathExpr &expr, const std::string &expr_string) {
+            expr = expr_string;
+            return expr;
+        });
+}
+#endif  // INIT_DEF_H

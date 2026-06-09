@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Muhan Li (iffi/iffiX)
+
+[build-system]
+requires = ["scikit-build-core>=0.12.2"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "rise-origin-core-cuda13"
+dynamic = ["version"]
+description = "rise-origin CUDA 13 backend"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Muhan Li", email = "muhanli@beyond-infinity.top" }]
+dependencies = []
+
+[tool.scikit-build]
+cmake.version = ">=3.22"
+cmake.build-type = "Release"
+cmake.source-dir = "../.."
+wheel.packages = ["rise_origin_python_core"]
+sdist.include = ["../../lib/**", "../../include/**", "../../cmake/**", "../../src/**", "../../CMakeLists.txt"]
+
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "../../VERSION"
+regex = '(?P<value>.+)'
+
+[tool.scikit-build.cmake.define]
+# Turing (RTX 20xx) through Blackwell (RTX 50xx); CUDA 13 dropped pre-Turing.
+CMAKE_CUDA_ARCHITECTURES = "75-real;80-real;86-real;89-real;90-real;100-real;120-real;120-virtual"
+RISE_ORIGIN_BACKEND = "cuda"
+BUILD_RISE_ORIGIN = "ON"
+BUILD_RISE_ORIGIN_TEST = "OFF"
+
+[tool.cibuildwheel]
+build = "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"
+manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64"
+before-all = """
+dnf -y install dnf-plugins-core epel-release && \
+dnf config-manager --set-enabled powertools && \
+dnf -y install gcc-toolset-11 boost-devel hdf5-devel libxcrypt-devel && \
+dnf config-manager --add-repo https://developer.download.nvidia.com/compute/cuda/repos/rhel8/x86_64/cuda-rhel8.repo && \
+dnf -y install cuda-toolkit-13-0 && \
+/opt/python/cp312-cp312/bin/pip install --prefix=/usr/local tbb==2023.0.0 tbb-devel==2023.0.0
+"""
+environment = { PATH = "/opt/rh/gcc-toolset-11/root/usr/bin:/usr/local/cuda/bin:$PATH", LD_LIBRARY_PATH = "/usr/local/lib:/usr/local/cuda/lib64:$LD_LIBRARY_PATH", CC = "/opt/rh/gcc-toolset-11/root/usr/bin/gcc", CXX = "/opt/rh/gcc-toolset-11/root/usr/bin/g++", CUDAHOSTCXX = "/opt/rh/gcc-toolset-11/root/usr/bin/g++" }
+repair-wheel-command = """auditwheel repair -w {dest_dir} {wheel} \
+    --exclude libcuda.so* \
+    --exclude libcudart.so* \
+    --exclude libnvrtc.so* \
+    --exclude libnvJitLink.so* \
+    --exclude libcublas* \
+    --exclude libcurand* \
+    --exclude libcusparse* \
+    --exclude libcusolver* \
+    --exclude libcufft*"""

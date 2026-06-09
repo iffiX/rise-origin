@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright 2026 Muhan Li (iffi/iffiX)
+
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rise-origin"
+dynamic = ["version"]
+description = "Voxel-only rise origin simulator basis"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+authors = [{ name = "Muhan Li", email = "muhanli@beyond-infinity.top" }]
+dependencies = [
+    "numpy>=1.24",
+    # for GUI
+    "pygame>=2.5",
+    "imageio>=2.31",
+    "imageio-ffmpeg>=0.4",
+    "pyquaternion>=0.9",
+]
+
+[project.optional-dependencies]
+cpu = [
+    "rise-origin-core-cpu",
+]
+cuda12 = [
+    "rise-origin-core-cuda12",
+    "nvidia-cuda-runtime-cu12 >= 12.2",
+]
+cuda13 = [
+    "rise-origin-core-cuda13",
+    # CUDA 13 dropped the -cuXX suffix; the major is encoded in the version.
+    "nvidia-cuda-runtime >= 13, < 14",
+]
+test = [
+    "pytest>=7",
+    "pytest-xdist",
+]
+dev = [
+    "ruff",
+    "mypy",
+    "black",
+]
+docs = [
+    "sphinx>=7",
+    "myst-parser",
+    "linkify-it-py",
+    "pydata-sphinx-theme",
+    "breathe",
+    "matplotlib",
+]
+
+# Ship the frontend package and all of its subpackages
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["rise_origin", "rise_origin.*"]
+exclude = ["rise_origin.cpu*", "rise_origin.cuda12*", "rise_origin.cuda13*"]
+
+[tool.setuptools.package-data]
+rise_origin = ["py.typed"]
+
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
