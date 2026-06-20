@@ -1,23 +1,20 @@
 <RSC>
-    <Structures>
-        <Structure>
+    <Entities>
+        <StructureVoxel>
             <Name>structure_0</Name>
             <IsFixed>0</IsFixed>
-            <VoxelSize>0.01</VoxelSize>
-            <ExpansionSignalNum>0</ExpansionSignalNum>
-            <HingeSignalNum>1</HingeSignalNum>
             <OriginPosition>0,0,0.1</OriginPosition>
             <Orientation>0,0,0,1</Orientation>
             <MaterialReferences>material_0, material_1, material_2</MaterialReferences>
             <Bodies>
                 <Body>
-                    <BodySid>0</BodySid>
                     <RelativeOrientation>0,0,0,1</RelativeOrientation>
                     <RelativeOriginPosition>0,0,0</RelativeOriginPosition>
-                    <XVoxels>3</XVoxels>
-                    <YVoxels>3</YVoxels>
-                    <ZVoxels>9</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>3</X_Voxels>
+                    <Y_Voxels>3</Y_Voxels>
+                    <Z_Voxels>9</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>2,2,2,2,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,2,2,2,2,2</Layer>
@@ -27,8 +24,8 @@
                         <Layer>2,2,2,2,1,2,2,2,2</Layer>
                         <Layer>2,2,2,2,1,2,2,2,2</Layer>
                         <Layer>2,2,2,2,1,2,2,2,2</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1,1,1,1,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,1,1,1,1,1</Layer>
@@ -38,87 +35,107 @@
                         <Layer>1,1,1,1,2,1,1,1,1</Layer>
                         <Layer>1,1,1,1,2,1,1,1,1</Layer>
                         <Layer>1,1,1,1,2,1,1,1,1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
                 <Body>
-                    <BodySid>1</BodySid>
                     <RelativeOrientation>0,0.7071068,0,0.7071068</RelativeOrientation>
                     <RelativeOriginPosition>0.01,0.032,0.09</RelativeOriginPosition>
-                    <XVoxels>1</XVoxels>
-                    <YVoxels>1</YVoxels>
-                    <ZVoxels>3</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>1</X_Voxels>
+                    <Y_Voxels>1</Y_Voxels>
+                    <Z_Voxels>3</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
                 <Body>
-                    <BodySid>2</BodySid>
                     <RelativeOrientation>0,0.7071068,0,0.7071068</RelativeOrientation>
                     <RelativeOriginPosition>0.04,0.032,0.09</RelativeOriginPosition>
-                    <XVoxels>1</XVoxels>
-                    <YVoxels>1</YVoxels>
-                    <ZVoxels>3</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>1</X_Voxels>
+                    <Y_Voxels>1</Y_Voxels>
+                    <Z_Voxels>3</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
             </Bodies>
             <Constraints>
                 <Constraint>
-                    <Type>HingeJoint</Type>
+                    <Type>RSE_STRUCTURE_VOXEL_HINGE_JOINT</Type>
                     <RelativeAnchor>0.015,0.032,0.085</RelativeAnchor>
-                    <ABodySid>0</ABodySid>
-                    <ASegmentBid>2</ASegmentBid>
-                    <BBodySid>1</BBodySid>
-                    <BSegmentBid>1</BSegmentBid>
-                    <HingeMaxTorque>5</HingeMaxTorque>
-                    <HingeRelativeAxis>0,1,0</HingeRelativeAxis>
-                    <HingeMin>-1</HingeMin>
-                    <HingeMax>1</HingeMax>
-                    <HingeSignalSid>0</HingeSignalSid>
+                    <RigidBodyA>
+                        <BodySID>0</BodySID>
+                        <SegmentBID>2</SegmentBID>
+                    </RigidBodyA>
+                    <RigidBodyB>
+                        <BodySID>1</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyB>
+                    <Hinge>
+                        <ControlMode>RSE_STRUCTURE_VOXEL_HINGE_CONTROL_BASIC_POSITION</ControlMode>
+                        <RelativeAxis>0,1,0</RelativeAxis>
+                        <Min>-1</Min>
+                        <Max>1</Max>
+                        <MaxTorque>5</MaxTorque>
+                        <SignalSID>0</SignalSID>
+                    </Hinge>
                 </Constraint>
                 <Constraint>
-                    <Type>BallAndSocketJoint</Type>
+                    <Type>RSE_STRUCTURE_VOXEL_BALL_AND_SOCKET_JOINT</Type>
                     <RelativeAnchor>0.04,0.037,0.085</RelativeAnchor>
-                    <ABodySid>1</ABodySid>
-                    <ASegmentBid>1</ASegmentBid>
-                    <BBodySid>2</BBodySid>
-                    <BSegmentBid>1</BSegmentBid>
+                    <RigidBodyA>
+                        <BodySID>1</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyA>
+                    <RigidBodyB>
+                        <BodySID>2</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyB>
                 </Constraint>
             </Constraints>
-        </Structure>
-        <Structure>
+            <Signal>
+                <SourceControllerName>default_controller</SourceControllerName>
+                <ExpansionSignalNum>0</ExpansionSignalNum>
+                <HingeSignalNum>1</HingeSignalNum>
+            </Signal>
+            <Record>
+                <TargetRecorderReference>robot_recorder</TargetRecorderReference>
+                <VoxelRecordRange>RSE_STRUCTURE_VOXEL_RECORD_VOXEL_RANGE_ALL</VoxelRecordRange>
+                <LinkRecordRange>RSE_STRUCTURE_VOXEL_RECORD_LINK_RANGE_ALL</LinkRecordRange>
+                <RigidBodyRecordRange>RSE_STRUCTURE_VOXEL_RECORD_RIGID_BODY_RANGE_ALL</RigidBodyRecordRange>
+                <JointRecordRange>RSE_STRUCTURE_VOXEL_RECORD_JOINT_RANGE_ALL</JointRecordRange>
+            </Record>
+        </StructureVoxel>
+        <StructureVoxel>
             <Name>structure_1</Name>
             <IsFixed>0</IsFixed>
-            <VoxelSize>0.01</VoxelSize>
-            <ExpansionSignalNum>0</ExpansionSignalNum>
-            <HingeSignalNum>1</HingeSignalNum>
             <OriginPosition>0,0.2,0.1</OriginPosition>
             <Orientation>0,0,0,1</Orientation>
             <MaterialReferences>material_0, material_1, material_2</MaterialReferences>
             <Bodies>
                 <Body>
-                    <BodySid>0</BodySid>
                     <RelativeOrientation>0,0,0,1</RelativeOrientation>
                     <RelativeOriginPosition>0,0,0</RelativeOriginPosition>
-                    <XVoxels>4</XVoxels>
-                    <YVoxels>4</YVoxels>
-                    <ZVoxels>8</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>4</X_Voxels>
+                    <Y_Voxels>4</Y_Voxels>
+                    <Z_Voxels>8</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2</Layer>
@@ -127,8 +144,8 @@
                         <Layer>2,2,2,2,1,1,1,2,1,1,1,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,1,1,1,2,1,1,1,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,1,1,1,2,1,1,1,2,2,2,2,2</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</Layer>
@@ -137,88 +154,107 @@
                         <Layer>1,1,1,1,2,2,2,1,2,2,2,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,2,2,2,1,2,2,2,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,2,2,2,1,2,2,2,1,1,1,1,1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
                 <Body>
-                    <BodySid>1</BodySid>
                     <RelativeOrientation>0,0.7071068,0,0.7071068</RelativeOrientation>
                     <RelativeOriginPosition>0.01,0.042,0.08</RelativeOriginPosition>
-                    <XVoxels>1</XVoxels>
-                    <YVoxels>1</YVoxels>
-                    <ZVoxels>3</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>1</X_Voxels>
+                    <Y_Voxels>1</Y_Voxels>
+                    <Z_Voxels>3</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
                 <Body>
-                    <BodySid>2</BodySid>
                     <RelativeOrientation>0,0.7071068,0,0.7071068</RelativeOrientation>
                     <RelativeOriginPosition>0.04,0.042,0.08</RelativeOriginPosition>
-                    <XVoxels>1</XVoxels>
-                    <YVoxels>1</YVoxels>
-                    <ZVoxels>3</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>1</X_Voxels>
+                    <Y_Voxels>1</Y_Voxels>
+                    <Z_Voxels>3</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
             </Bodies>
             <Constraints>
                 <Constraint>
-                    <Type>HingeJoint</Type>
+                    <Type>RSE_STRUCTURE_VOXEL_HINGE_JOINT</Type>
                     <RelativeAnchor>0.015,0.042,0.075</RelativeAnchor>
-                    <ABodySid>0</ABodySid>
-                    <ASegmentBid>2</ASegmentBid>
-                    <BBodySid>1</BBodySid>
-                    <BSegmentBid>1</BSegmentBid>
-                    <HingeMaxTorque>5</HingeMaxTorque>
-                    <HingeRelativeAxis>0,1,0</HingeRelativeAxis>
-                    <HingeMin>-1</HingeMin>
-                    <HingeMax>1</HingeMax>
-                    <HingeSignalSid>0</HingeSignalSid>
+                    <RigidBodyA>
+                        <BodySID>0</BodySID>
+                        <SegmentBID>2</SegmentBID>
+                    </RigidBodyA>
+                    <RigidBodyB>
+                        <BodySID>1</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyB>
+                    <Hinge>
+                        <ControlMode>RSE_STRUCTURE_VOXEL_HINGE_CONTROL_BASIC_POSITION</ControlMode>
+                        <RelativeAxis>0,1,0</RelativeAxis>
+                        <Min>-1</Min>
+                        <Max>1</Max>
+                        <MaxTorque>5</MaxTorque>
+                        <SignalSID>0</SignalSID>
+                    </Hinge>
                 </Constraint>
                 <Constraint>
-                    <Type>BallAndSocketJoint</Type>
+                    <Type>RSE_STRUCTURE_VOXEL_BALL_AND_SOCKET_JOINT</Type>
                     <RelativeAnchor>0.04,0.047,0.075</RelativeAnchor>
-                    <ABodySid>1</ABodySid>
-                    <ASegmentBid>1</ASegmentBid>
-                    <BBodySid>2</BBodySid>
-                    <BSegmentBid>1</BSegmentBid>
+                    <RigidBodyA>
+                        <BodySID>1</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyA>
+                    <RigidBodyB>
+                        <BodySID>2</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyB>
                 </Constraint>
             </Constraints>
-        </Structure>
-        <Structure>
+            <Signal>
+                <SourceControllerName>default_controller</SourceControllerName>
+                <ExpansionSignalNum>0</ExpansionSignalNum>
+                <HingeSignalNum>1</HingeSignalNum>
+            </Signal>
+            <Record>
+                <TargetRecorderReference>robot_recorder</TargetRecorderReference>
+                <VoxelRecordRange>RSE_STRUCTURE_VOXEL_RECORD_VOXEL_RANGE_ALL</VoxelRecordRange>
+                <LinkRecordRange>RSE_STRUCTURE_VOXEL_RECORD_LINK_RANGE_ALL</LinkRecordRange>
+                <RigidBodyRecordRange>RSE_STRUCTURE_VOXEL_RECORD_RIGID_BODY_RANGE_ALL</RigidBodyRecordRange>
+                <JointRecordRange>RSE_STRUCTURE_VOXEL_RECORD_JOINT_RANGE_ALL</JointRecordRange>
+            </Record>
+        </StructureVoxel>
+        <StructureVoxel>
             <Name>structure_2</Name>
             <IsFixed>0</IsFixed>
-            <VoxelSize>0.01</VoxelSize>
-            <ExpansionSignalNum>0</ExpansionSignalNum>
-            <HingeSignalNum>1</HingeSignalNum>
-            <PrismaticSignalNum>1</PrismaticSignalNum>
             <OriginPosition>0,0.4,0.1</OriginPosition>
             <Orientation>0,0,0,1</Orientation>
             <MaterialReferences>material_0, material_1, material_2</MaterialReferences>
             <Bodies>
                 <Body>
-                    <BodySid>0</BodySid>
                     <RelativeOrientation>0,0,0,1</RelativeOrientation>
                     <RelativeOriginPosition>0,0,0</RelativeOriginPosition>
-                    <XVoxels>4</XVoxels>
-                    <YVoxels>4</YVoxels>
-                    <ZVoxels>8</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>4</X_Voxels>
+                    <Y_Voxels>4</Y_Voxels>
+                    <Z_Voxels>8</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2</Layer>
@@ -227,8 +263,8 @@
                         <Layer>2,2,2,2,1,1,1,2,1,1,1,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,1,1,1,2,1,1,1,2,2,2,2,2</Layer>
                         <Layer>2,2,2,2,1,1,1,2,1,1,1,2,2,2,2,2</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1</Layer>
@@ -237,79 +273,103 @@
                         <Layer>1,1,1,1,2,2,2,1,2,2,2,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,2,2,2,1,2,2,2,1,1,1,1,1</Layer>
                         <Layer>1,1,1,1,2,2,2,1,2,2,2,1,1,1,1,1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
                 <Body>
-                    <BodySid>1</BodySid>
                     <RelativeOrientation>0,0.7071068,0,0.7071068</RelativeOrientation>
                     <RelativeOriginPosition>0.01,0.042,0.08</RelativeOriginPosition>
-                    <XVoxels>1</XVoxels>
-                    <YVoxels>1</YVoxels>
-                    <ZVoxels>3</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>1</X_Voxels>
+                    <Y_Voxels>1</Y_Voxels>
+                    <Z_Voxels>3</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
                 <Body>
-                    <BodySid>2</BodySid>
                     <RelativeOrientation>0,0.7071068,0,0.7071068</RelativeOrientation>
                     <RelativeOriginPosition>0.01,0.055,0.08</RelativeOriginPosition>
-                    <XVoxels>1</XVoxels>
-                    <YVoxels>1</YVoxels>
-                    <ZVoxels>3</ZVoxels>
-                    <MaterialReferenceSid>
+                    <X_Voxels>1</X_Voxels>
+                    <Y_Voxels>1</Y_Voxels>
+                    <Z_Voxels>3</Z_Voxels>
+                    <VoxelSize>0.01</VoxelSize>
+                    <MaterialReferenceSID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </MaterialReferenceSid>
-                    <SegmentBid>
+                    </MaterialReferenceSID>
+                    <SegmentBID>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
                         <Layer>1</Layer>
-                    </SegmentBid>
+                    </SegmentBID>
                 </Body>
             </Bodies>
             <Constraints>
                 <Constraint>
-                    <Type>HingeJoint</Type>
+                    <Type>RSE_STRUCTURE_VOXEL_HINGE_JOINT</Type>
                     <RelativeAnchor>0.015,0.042,0.075</RelativeAnchor>
-                    <ABodySid>0</ABodySid>
-                    <ASegmentBid>2</ASegmentBid>
-                    <BBodySid>1</BBodySid>
-                    <BSegmentBid>1</BSegmentBid>
-                    <HingeMaxTorque>5</HingeMaxTorque>
-                    <HingeRelativeAxis>0,1,0</HingeRelativeAxis>
-                    <HingeMin>-1</HingeMin>
-                    <HingeMax>1</HingeMax>
-                    <HingeSignalSid>0</HingeSignalSid>
+                    <RigidBodyA>
+                        <BodySID>0</BodySID>
+                        <SegmentBID>2</SegmentBID>
+                    </RigidBodyA>
+                    <RigidBodyB>
+                        <BodySID>1</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyB>
+                    <Hinge>
+                        <ControlMode>RSE_STRUCTURE_VOXEL_HINGE_CONTROL_BASIC_POSITION</ControlMode>
+                        <RelativeAxis>0,1,0</RelativeAxis>
+                        <Min>-1</Min>
+                        <Max>1</Max>
+                        <MaxTorque>5</MaxTorque>
+                        <SignalSID>0</SignalSID>
+                    </Hinge>
                 </Constraint>
                 <Constraint>
-                    <Type>PrismaticJoint</Type>
+                    <Type>RSE_STRUCTURE_VOXEL_PRISMATIC_JOINT</Type>
                     <RelativeAnchor>0.01,0.055,0.075</RelativeAnchor>
-                    <ABodySid>1</ABodySid>
-                    <ASegmentBid>1</ASegmentBid>
-                    <BBodySid>2</BBodySid>
-                    <BSegmentBid>1</BSegmentBid>
-                    <PrismaticRelativeAxis>1,0,0</PrismaticRelativeAxis>
-                    <PrismaticMin>-0.03</PrismaticMin>
-                    <PrismaticMax>0.03</PrismaticMax>
-                    <PrismaticMaxForce>5</PrismaticMaxForce>
-                    <PrismaticMaxSpeed>1</PrismaticMaxSpeed>
-                    <PrismaticSignalSid>0</PrismaticSignalSid>
+                    <RigidBodyA>
+                        <BodySID>1</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyA>
+                    <RigidBodyB>
+                        <BodySID>2</BodySID>
+                        <SegmentBID>1</SegmentBID>
+                    </RigidBodyB>
+                    <Prismatic>
+                        <ControlMode>RSE_STRUCTURE_VOXEL_PRISMATIC_CONTROL_BASIC_POSITION</ControlMode>
+                        <RelativeAxis>1,0,0</RelativeAxis>
+                        <Min>-0.03</Min>
+                        <Max>0.03</Max>
+                        <MaxForce>5</MaxForce>
+                        <MaxSpeed>1</MaxSpeed>
+                        <SignalSID>0</SignalSID>
+                    </Prismatic>
                 </Constraint>
             </Constraints>
-        </Structure>
-    </Structures>
-    <Cameras>
-        <Camera>
-            <Type>FreePerspective</Type>
+            <Signal>
+                <SourceControllerName>default_controller</SourceControllerName>
+                <ExpansionSignalNum>0</ExpansionSignalNum>
+                <HingeSignalNum>1</HingeSignalNum>
+                <PrismaticSignalNum>1</PrismaticSignalNum>
+            </Signal>
+            <Record>
+                <TargetRecorderReference>robot_recorder</TargetRecorderReference>
+                <VoxelRecordRange>RSE_STRUCTURE_VOXEL_RECORD_VOXEL_RANGE_ALL</VoxelRecordRange>
+                <LinkRecordRange>RSE_STRUCTURE_VOXEL_RECORD_LINK_RANGE_ALL</LinkRecordRange>
+                <RigidBodyRecordRange>RSE_STRUCTURE_VOXEL_RECORD_RIGID_BODY_RANGE_ALL</RigidBodyRecordRange>
+                <JointRecordRange>RSE_STRUCTURE_VOXEL_RECORD_JOINT_RANGE_ALL</JointRecordRange>
+            </Record>
+        </StructureVoxel>
+        <CameraPerspectiveFree>
             <Name>camera_0</Name>
             <Orientation>0,0,0,1</Orientation>
             <OriginPosition>-1,0,0.2</OriginPosition>
@@ -320,41 +380,17 @@
             <FieldOfView>45</FieldOfView>
             <DefocusAngle>0</DefocusAngle>
             <FocusDistance>0.5</FocusDistance>
-        </Camera>
-    </Cameras>
-    <Records>
-        <Record>
-            <Type>Structure</Type>
-            <Name>structure_0_record</Name>
-            <StructureName>structure_0</StructureName>
-            <VoxelRecordRange>1</VoxelRecordRange>
-            <LinkRecordRange>1</LinkRecordRange>
-            <RigidBodyRecordRange>1</RigidBodyRecordRange>
-            <JointRecordRange>1</JointRecordRange>
-        </Record>
-        <Record>
-            <Type>Structure</Type>
-            <Name>structure_1_record</Name>
-            <StructureName>structure_1</StructureName>
-            <VoxelRecordRange>1</VoxelRecordRange>
-            <LinkRecordRange>1</LinkRecordRange>
-            <RigidBodyRecordRange>1</RigidBodyRecordRange>
-            <JointRecordRange>1</JointRecordRange>
-        </Record>
-        <Record>
-            <Type>Structure</Type>
-            <Name>structure_2_record</Name>
-            <StructureName>structure_2</StructureName>
-            <VoxelRecordRange>1</VoxelRecordRange>
-            <LinkRecordRange>1</LinkRecordRange>
-            <RigidBodyRecordRange>1</RigidBodyRecordRange>
-            <JointRecordRange>1</JointRecordRange>
-        </Record>
-    </Records>
+        </CameraPerspectiveFree>
+    </Entities>
     <Recorders>
-        <Recorder>
-            <Type>HDF5</Type>
+        <RecorderHDF5>
+            <Name>robot_recorder</Name>
             <Path>robot.h5_history</Path>
-        </Recorder>
+        </RecorderHDF5>
     </Recorders>
+    <Controllers>
+        <ControllerCallback>
+            <Name>default_controller</Name>
+        </ControllerCallback>
+    </Controllers>
 </RSC>

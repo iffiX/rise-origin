@@ -1,96 +1,189 @@
 <RSC Version="0.1">
+    <Name>robot_world</Name>
     <Simulation>
-        <IntegrationDtFrac>0.8</IntegrationDtFrac>
-        <SoftbodyInternalDampingZ>1</SoftbodyInternalDampingZ>
-        <SoftbodyContactDampingZ>0.8</SoftbodyContactDampingZ>
-        <SoftbodyGlobalDampingZ>0.01</SoftbodyGlobalDampingZ>
-        <RigidbodyConstraintIterations>10</RigidbodyConstraintIterations>
-        <RigidbodyConstraintPositionCorrectionRatio>0.01</RigidbodyConstraintPositionCorrectionRatio>
-        <RigidbodyLinearDampingZ>0.01</RigidbodyLinearDampingZ>
-        <RigidbodyAngularDampingZ>0.01</RigidbodyAngularDampingZ>
-        <RecordFrequency>20</RecordFrequency>
-        <ControlFrequency>20</ControlFrequency>
-        <StopCondition>
-            t >= 10
-        </StopCondition>
+        <StopCondition>t >= 10</StopCondition>
+        <Environment>
+            <GravityAcceleration>-9.81</GravityAcceleration>
+        </Environment>
+        <Time>
+            <DtRatio>0.8</DtRatio>
+        </Time>
+        <SoftBody>
+            <InternalDampingZ>1</InternalDampingZ>
+            <ContactDampingZ>0.8</ContactDampingZ>
+            <GlobalDampingZ>0.01</GlobalDampingZ>
+        </SoftBody>
+        <RigidBody>
+            <ConstraintIterations>10</ConstraintIterations>
+            <ConstraintPositionCorrectionRatio>0.01</ConstraintPositionCorrectionRatio>
+            <LinearDampingZ>0.01</LinearDampingZ>
+            <AngularDampingZ>0.01</AngularDampingZ>
+        </RigidBody>
+        <Control>
+            <Frequency>20</Frequency>
+        </Control>
+        <Record>
+            <Frequency>20</Frequency>
+        </Record>
     </Simulation>
-    <World>
-        <GravAcc>-9.81</GravAcc>
-        <Render>
-            <Type>ConstantColor</Type>
-            <Color>200, 200, 200</Color>
-        </Render>
-    </World>
-    <Floor>
-        <Data>
-            <Type>Flat</Type>
-        </Data>
-        <Render>
-            <Type>Opaque</Type>
-            <Color>100, 150, 200</Color>
-        </Render>
-    </Floor>
-    <!--    <Floor>-->
-    <!--        <Data>-->
-    <!--            <Type>Array</Type>-->
-    <!--            <XSize>0.3</XSize>-->
-    <!--            <YSize>0.3</YSize>-->
-    <!--            <XValues>2</XValues>-->
-    <!--            <YValues>2</YValues>-->
-    <!--            <Height>-->
-    <!--                0, 0.05, 0, 0.05-->
-    <!--            </Height>-->
-    <!--        </Data>-->
-    <!--    </Floor>-->
-    <Materials>
+    <Resources>
+        <TextureConstant>
+            <Name>sky#albedo</Name>
+            <Value>0.784, 0.784, 0.784</Value>
+        </TextureConstant>
+        <TextureConstant>
+            <Name>floor#albedo</Name>
+            <Value>0.392, 0.588, 0.784</Value>
+        </TextureConstant>
+        <TextureConstant>
+            <Name>material_0#albedo</Name>
+            <Value>0, 0, 0.784</Value>
+        </TextureConstant>
+        <TextureConstant>
+            <Name>material_1#albedo</Name>
+            <Value>0, 0.784, 0</Value>
+        </TextureConstant>
+        <TextureConstant>
+            <Name>material_2#albedo</Name>
+            <Value>0.784, 0, 0</Value>
+        </TextureConstant>
+    </Resources>
+    <Essences>
+        <Material>
+            <Name>floor</Name>
+        </Material>
+        <MaterialPhysicalPropertyFixed>
+            <Name>floor#phys</Name>
+            <MaterialReference>floor</MaterialReference>
+        </MaterialPhysicalPropertyFixed>
+        <MaterialOpticalPropertySimpleMicrofacet>
+            <Name>floor#optic</Name>
+            <MaterialReference>floor</MaterialReference>
+            <AlbedoTextureReference>floor#albedo</AlbedoTextureReference>
+        </MaterialOpticalPropertySimpleMicrofacet>
+
         <Material>
             <Name>material_0</Name>
-            <Render>
-                <Type>Opaque</Type>
-                <Color>0, 0, 200</Color>
-            </Render>
-            <Mechanical>
-                <ElasticModulus>1e5</ElasticModulus>
-                <Density>1500</Density>
-                <PoissonsRatio>0.35</PoissonsRatio>
-                <UStatic>1</UStatic>
-                <UDynamic>0.5</UDynamic>
-                <MaxExpansion>0.5</MaxExpansion>
-                <MinExpansion>-0.5</MinExpansion>
-            </Mechanical>
         </Material>
+        <MaterialPhysicalPropertySoft>
+            <Name>material_0#phys</Name>
+            <MaterialReference>material_0</MaterialReference>
+            <ElasticModulus>1e5</ElasticModulus>
+            <Density>1500</Density>
+            <PoissonsRatio>0.35</PoissonsRatio>
+            <MinExpansion>-0.5</MinExpansion>
+            <MaxExpansion>0.5</MaxExpansion>
+        </MaterialPhysicalPropertySoft>
+        <MaterialOpticalPropertySimpleMicrofacet>
+            <Name>material_0#optic</Name>
+            <MaterialReference>material_0</MaterialReference>
+            <AlbedoTextureReference>material_0#albedo</AlbedoTextureReference>
+        </MaterialOpticalPropertySimpleMicrofacet>
+
         <Material>
             <Name>material_1</Name>
-            <Render>
-                <Type>Opaque</Type>
-                <Color>0, 200, 0</Color>
-            </Render>
-            <Mechanical>
-                <IsRigid>1</IsRigid>
-                <ElasticModulus>1e5</ElasticModulus>
-                <Density>1500</Density>
-                <PoissonsRatio>0.35</PoissonsRatio>
-                <UStatic>1</UStatic>
-                <UDynamic>0.5</UDynamic>
-                <MaxExpansion>0.5</MaxExpansion>
-                <MinExpansion>-0.5</MinExpansion>
-            </Mechanical>
         </Material>
+        <MaterialPhysicalPropertyRigid>
+            <Name>material_1#phys</Name>
+            <MaterialReference>material_1</MaterialReference>
+            <Density>1500</Density>
+        </MaterialPhysicalPropertyRigid>
+        <MaterialOpticalPropertySimpleMicrofacet>
+            <Name>material_1#optic</Name>
+            <MaterialReference>material_1</MaterialReference>
+            <AlbedoTextureReference>material_1#albedo</AlbedoTextureReference>
+        </MaterialOpticalPropertySimpleMicrofacet>
+
         <Material>
             <Name>material_2</Name>
-            <Render>
-                <Type>Opaque</Type>
-                <Color>200, 0, 0</Color>
-            </Render>
-            <Mechanical>
-                <ElasticModulus>1e5</ElasticModulus>
-                <Density>1500</Density>
-                <PoissonsRatio>0.35</PoissonsRatio>
-                <UStatic>1</UStatic>
-                <UDynamic>0.5</UDynamic>
-                <MaxExpansion>0.5</MaxExpansion>
-                <MinExpansion>-0.5</MinExpansion>
-            </Mechanical>
         </Material>
-    </Materials>
+        <MaterialPhysicalPropertySoft>
+            <Name>material_2#phys</Name>
+            <MaterialReference>material_2</MaterialReference>
+            <ElasticModulus>1e5</ElasticModulus>
+            <Density>1500</Density>
+            <PoissonsRatio>0.35</PoissonsRatio>
+            <MinExpansion>-0.5</MinExpansion>
+            <MaxExpansion>0.5</MaxExpansion>
+        </MaterialPhysicalPropertySoft>
+        <MaterialOpticalPropertySimpleMicrofacet>
+            <Name>material_2#optic</Name>
+            <MaterialReference>material_2</MaterialReference>
+            <AlbedoTextureReference>material_2#albedo</AlbedoTextureReference>
+        </MaterialOpticalPropertySimpleMicrofacet>
+
+        <MaterialPairPropertyCoulombFriction>
+            <Name>floor_material_0#friction</Name>
+            <FirstMaterialReference>floor</FirstMaterialReference>
+            <SecondMaterialReference>material_0</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>floor_material_1#friction</Name>
+            <FirstMaterialReference>floor</FirstMaterialReference>
+            <SecondMaterialReference>material_1</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>floor_material_2#friction</Name>
+            <FirstMaterialReference>floor</FirstMaterialReference>
+            <SecondMaterialReference>material_2</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>material_0_material_0#friction</Name>
+            <FirstMaterialReference>material_0</FirstMaterialReference>
+            <SecondMaterialReference>material_0</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>material_0_material_1#friction</Name>
+            <FirstMaterialReference>material_0</FirstMaterialReference>
+            <SecondMaterialReference>material_1</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>material_0_material_2#friction</Name>
+            <FirstMaterialReference>material_0</FirstMaterialReference>
+            <SecondMaterialReference>material_2</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>material_1_material_1#friction</Name>
+            <FirstMaterialReference>material_1</FirstMaterialReference>
+            <SecondMaterialReference>material_1</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>material_1_material_2#friction</Name>
+            <FirstMaterialReference>material_1</FirstMaterialReference>
+            <SecondMaterialReference>material_2</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+        <MaterialPairPropertyCoulombFriction>
+            <Name>material_2_material_2#friction</Name>
+            <FirstMaterialReference>material_2</FirstMaterialReference>
+            <SecondMaterialReference>material_2</SecondMaterialReference>
+            <FrictionStatic>1</FrictionStatic>
+            <FrictionDynamic>0.5</FrictionDynamic>
+        </MaterialPairPropertyCoulombFriction>
+    </Essences>
+    <Entities>
+        <CosmicBackgroundUniform>
+            <Name>sky</Name>
+            <TextureReference>sky#albedo</TextureReference>
+        </CosmicBackgroundUniform>
+        <FloorFlat>
+            <Name>floor</Name>
+            <MaterialReference>floor</MaterialReference>
+        </FloorFlat>
+    </Entities>
 </RSC>

@@ -18,7 +18,7 @@ using namespace fmt;
 using namespace rise;
 
 #define APP_DESCRIPTION                     \
-    "RiseOrigin Simulator\n\n"             \
+    "RiseOrigin Simulator\n\n"              \
     "Typical Usage:\n"                      \
     "  rise_origin_main -i <data_path>\n\n" \
     "Allowed options"
@@ -39,20 +39,13 @@ int main(int argc, char **argv) {
     // Advanced solver-tuning knobs.
     po::options_description tuning("Solver tuning options (advanced)");
     tuning.add_options()  //
-            ("dt_update_interval", po::value<unsigned int>()->default_value(10),
-             "Time-step update interval")
-            ("rigidbody_update_interval", po::value<unsigned int>()->default_value(10),
-             "Rigid body update interval")
-            ("contact_update_interval", po::value<unsigned int>()->default_value(4),
-             "Contact detection update interval")
-            ("mechanical_signal_update_interval", po::value<unsigned int>()->default_value(10),
-             "Mechanical signal update interval")
-            ("divergence_check_interval", po::value<unsigned int>()->default_value(100),
-             "Divergence check interval")
-            ("compute_accuracy", po::value<string>()->default_value("float32"),
-             "Simulation compute accuracy (float32 | float64)")
-            ("memory_accuracy", po::value<string>()->default_value("float32"),
-             "Simulation memory accuracy (float32 | float64)");
+        ("compute_accuracy",
+         po::value<string>()->default_value("float32"),
+         "Simulation compute accuracy (float32 | float64)")(
+            "memory_accuracy",
+            po::value<string>()->default_value("float32"),
+            "Simulation memory accuracy (float32 | float64)"
+        );
 
     po::options_description desc(APP_DESCRIPTION);
     desc.add(general).add(tuning);
@@ -110,38 +103,30 @@ int main(int argc, char **argv) {
     }
 
     // Load config from files
-    std::cout << "Loading config...";
+    std::cout << "Loading world...";
     RS_Timer timer;
-    RS_Config config;
-    config.open({env_config, robot_config}, true);
+    rsc::RSC_World world;
+    world.open({env_config, robot_config}, true);
     std::cout << "loaded in: " << timer.elapsedTimeString() << std::endl;
 
-    // CLI flags override the config's runtime_* execution settings.
-    auto &sim = config.simulation_config;
-    sim.runtime_dt_update_interval = vm["dt_update_interval"].as<unsigned int>();
-    sim.runtime_rigidbody_update_interval = vm["rigidbody_update_interval"].as<unsigned int>();
-    sim.runtime_contact_update_interval = vm["contact_update_interval"].as<unsigned int>();
-    sim.runtime_mechanical_signal_update_interval =
-        vm["mechanical_signal_update_interval"].as<unsigned int>();
-    sim.runtime_divergence_check_interval = vm["divergence_check_interval"].as<unsigned int>();
-    sim.runtime_record_buffer_size = vm["record_size"].as<int>();
-    sim.runtime_max_time = vm["max_time"].as<double>();
-    sim.runtime_save_record = static_cast<bool>(vm["save_record"].as<int>());
-    sim.runtime_simulation_compute_accuracy =
-        vm["compute_accuracy"].as<string>() == "float64" ? RSE_FLOAT_64 : RSE_FLOAT_32;
-    sim.runtime_simulation_memory_accuracy =
-        vm["memory_accuracy"].as<string>() == "float64" ? RSE_FLOAT_64 : RSE_FLOAT_32;
-    sim.runtime_log_level = vm["log_level"].as<string>();
+    // CLI flags override the world's simulation settings.
+    auto &runtime = world.simulation.runtime;
+    runtime.record_buffer_size = vm["record_size"].as<int>();
+    runtime.max_time = vm["max_time"].as<double>();
+    runtime.is_save_record = static_cast<bool>(vm["save_record"].as<int>());
+    runtime.compute_accuracy = vm["compute_accuracy"].as<string>() == "float64" ? RSE_FLOAT_64
+                                                                                : RSE_FLOAT_32;
+    runtime.memory_accuracy = vm["memory_accuracy"].as<string>() == "float64" ? RSE_FLOAT_64
+                                                                              : RSE_FLOAT_32;
+    runtime.log_level = vm["log_level"].as<string>();
 
-    // Run simulation
-    auto handle = rise.runSim(
-        config,
-        0,  // kernel id (single-device, always 0)
-        {}  // callback (not exposable via CLI)
+    // Start the world
+    auto handle = rise.hello(
+        world, {}  // callback (not exposable via CLI)
     );
 
     handle->waitForEnd();
     auto status = handle->getStatus();
-    cout << "Simulation completed with status: " << enumToString(status) << "\n";
-    return status == RSE_SIMULATION_END_SUCCESS ? 0 : 1;
+    cout << "World ended with status: " << enumToString(status) << "\n";
+    return status == RSE_WORLD_END_SUCCESS ? 0 : 1;
 }
