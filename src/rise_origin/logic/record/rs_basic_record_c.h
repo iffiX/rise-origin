@@ -4,7 +4,7 @@
 #ifndef RS_BASIC_RECORD_C_H
 #define RS_BASIC_RECORD_C_H
 
-#include "rise_origin/core/rs_simulation_record.h"
+#include "rise_origin/core/rs_world_record.h"
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/logic/soft/rs_link_c.h"
 #include "rise_origin/logic/soft/rs_link_m.h"
@@ -35,7 +35,7 @@ class RSCF_StoreStructureVoxelRecord
 
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_SimulationStructureRecord &record, RHandle voxel, RIndex record_index) {
+    run(const Kernel *k, RS_WorldStructureVoxelRecord &record, RHandle voxel, RIndex record_index) {
         if (k != nullptr && voxel != RS_NULL_HANDLE && record.is_valid) {
             auto &ctx = k->ctx;
             auto &r = record.voxels;
@@ -85,7 +85,7 @@ class RSCF_StoreStructureLinkRecord
 
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_SimulationStructureRecord &record, RHandle link, RIndex record_index) {
+    run(const Kernel *k, RS_WorldStructureVoxelRecord &record, RHandle link, RIndex record_index) {
         if (k != nullptr && link != RS_NULL_HANDLE && record.is_valid) {
             auto &ctx = k->ctx;
             auto &r = record.links;
@@ -93,7 +93,6 @@ class RSCF_StoreStructureLinkRecord
             RS_LinkStateUnion link_state_union{L_G(state)};
             r.voxel_neg_sid[record_index] = L_G(voxel_neg_sid);
             r.voxel_pos_sid[record_index] = L_G(voxel_pos_sid);
-            r.is_tendon[record_index] = link_state_union.link_state.is_tendon;
             r.is_failed[record_index] = link_state_union.link_state.is_failed;
 
             r.strain[record_index] = L_G(strain);
@@ -108,7 +107,7 @@ class RSCF_StoreStructureRigidBodyRecord
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void run(
         const Kernel *k,
-        RS_SimulationStructureRecord &record,
+        RS_WorldStructureVoxelRecord &record,
         RHandle rigid_body,
         RIndex record_index
     ) {
@@ -139,7 +138,7 @@ class RSCF_StoreStructureJointRecord
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void run(
         const Kernel *k,
-        RS_SimulationStructureRecord &record,
+        RS_WorldStructureVoxelRecord &record,
         RHandle constraint_joint,
         RIndex record_index
     ) {
@@ -147,26 +146,27 @@ class RSCF_StoreStructureJointRecord
             auto &ctx = k->ctx;
             auto &r = record.joints;
 
-            RSE_ConstraintJointType type = CJ_G(type);
+            RS_ConstraintJointStateUnion state_union{CJ_G(state)};
+            RSE_ConstraintJointType type = state_union.constraint_joint_state.type;
             RIndex joint_sid = CJ_G(joint_sid);
 
             if (type == RSE_BALL_AND_SOCKET_JOINT_TRANSLATION) {
                 r.rigid_body_a_sid[joint_sid] = CJ_G(rigid_body_a_sid);
                 r.rigid_body_b_sid[joint_sid] = CJ_G(rigid_body_b_sid);
-                r.type[joint_sid] = RSE_RECORD_BALL_AND_SOCKET_JOINT;
+                r.type[joint_sid] = RS_WorldStructureRecordBase::JointType::BALL_AND_SOCKET;
                 r.position[joint_sid] = CJ_G(position);
                 r.axis[joint_sid] = RVec3rf::zero();
             } else if (type == RSE_FIXED_JOINT_TRANSLATION) {
                 r.rigid_body_a_sid[joint_sid] = CJ_G(rigid_body_a_sid);
                 r.rigid_body_b_sid[joint_sid] = CJ_G(rigid_body_b_sid);
-                r.type[joint_sid] = RSE_RECORD_FIXED_JOINT;
+                r.type[joint_sid] = RS_WorldStructureRecordBase::JointType::FIXED;
                 r.position[joint_sid] = CJ_G(position);
                 r.axis[joint_sid] = RVec3rf::zero();
             } else if (type == RSE_HINGE_JOINT_TRANSLATION) {
                 r.rigid_body_a_sid[joint_sid] = CJ_G(rigid_body_a_sid);
                 r.rigid_body_b_sid[joint_sid] = CJ_G(rigid_body_b_sid);
                 r.hinge_signal_sid[joint_sid] = CJ_G(hinge_signal_sid);
-                r.type[joint_sid] = RSE_RECORD_HINGE_JOINT;
+                r.type[joint_sid] = RS_WorldStructureRecordBase::JointType::HINGE;
                 r.position[joint_sid] = CJ_G(position);
             } else if (type == RSE_HINGE_JOINT_ROTATION) {
                 r.axis[joint_sid] = CJ_G(axis);
@@ -183,7 +183,7 @@ class RSCF_StoreStructureJointRecord
                 r.rigid_body_a_sid[joint_sid] = CJ_G(rigid_body_a_sid);
                 r.rigid_body_b_sid[joint_sid] = CJ_G(rigid_body_b_sid);
                 r.prismatic_signal_sid[joint_sid] = CJ_G(prismatic_signal_sid);
-                r.type[joint_sid] = RSE_RECORD_PRISMATIC_JOINT;
+                r.type[joint_sid] = RS_WorldStructureRecordBase::JointType::PRISMATIC;
                 r.position[joint_sid] = CJ_G(position);
                 // Compute slide axis for recording
                 RQuat3rf a_orientation(RB_G(CJ_G(rigid_body_a), orientation));
@@ -210,7 +210,7 @@ class RSCF_StoreCameraPixelRecord : public device::RS_ComputeFunction<RSCF_Store
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_SimulationCameraRecord &record, RHandle canvas, RHandle pixel) {
+    run(const Kernel *k, RS_WorldCameraPerspectiveRecord &record, RHandle canvas, RHandle pixel) {
         if (k != nullptr && canvas != RS_NULL_HANDLE && pixel != RS_NULL_HANDLE &&
             record.is_valid) {
             auto &ctx = k->ctx;
@@ -226,7 +226,7 @@ class RSCF_StoreCameraStateRecord : public device::RS_ComputeFunction<RSCF_Store
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_SimulationCameraRecord &record, RHandle camera, RIndex record_index) {
+    run(const Kernel *k, RS_WorldCameraPerspectiveRecord &record, RHandle camera, RIndex record_index) {
         if (k != nullptr && camera != RS_NULL_HANDLE && record.is_valid) {
             auto &ctx = k->ctx;
             auto &r = record.camera_state;

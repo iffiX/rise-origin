@@ -15,8 +15,8 @@
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_env_var.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/rs_memory.h"
-#include "rise_origin/utils/rs_timer.h"
+#include "rise_origin/utils/memory/rs_memory.h"
+#include "rise_origin/utils/time/rs_timer.h"
 
 #define COLORCODE_RED "\033[0;31m"
 #define COLORCODE_BOLD_RED "\033[1;31m\n"
@@ -604,7 +604,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
 
         if (size == 0) return {nullptr, 0, 0, device, this};
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
         void *ptr = nullptr;
 
         int current_device;
@@ -642,7 +642,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
 
         if (size == 0) return {nullptr, 0, 0, {RSE_DEVICE_TYPE_CPU, 0}, this};
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
         void *ptr = nullptr;
         RcudaMallocHost(&ptr, size);
         if (!ptr) {
@@ -660,7 +660,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
         if (ptr.provider() != this)
             RS_THROW(RS_HostExecutionException("Cannot free memory allocated by another provider"));
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
         if (ptr.device().type == RSE_DEVICE_TYPE_CPU) {
             RcudaFreeHost(ptr.data);
         } else {
@@ -693,7 +693,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
         if (ptr.provider() != this)
             RS_THROW(RS_HostExecutionException("Cannot set memory allocated by another provider"));
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
         if (device.type == RSE_DEVICE_TYPE_CPU) {
             std::memset((ptr + offset).data, value, size);
         } else {
@@ -744,7 +744,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                 )
             ));
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
 
         int current_device;
         RcudaGetDevice(&current_device);
@@ -891,7 +891,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
     sync(bool sync_main = true, bool sync_copy_to = true, bool sync_copy_from = true) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CUDA provider is not initialized"));
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
 
         if (sync_main && stream_event_count > 0) {
             RcudaStreamSynchronize(stream);
@@ -918,11 +918,11 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
 
         ComputeFunction::validate();
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
 
         config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE
-                                ? (device.type == RSE_DEVICE_TYPE_CUDA ? RS_CUDA_DEFAULT_BLOCK_SIZE
-                                                                       : RS_HOST_DEFAULT_BLOCK_SIZE)
+                                ? (device.type == RSE_DEVICE_TYPE_CUDA ? RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE
+                                                                       : RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE)
                                 : config.block_size;
         config.shared_mem_size = config.shared_mem_size == 0
                                      ? ComputeFunction::sharedMemLayoutSize() * config.block_size
@@ -992,7 +992,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
 
         ComputeFunction::validate();
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
 
         config.shared_mem_size =
             config.shared_mem_size == 0
@@ -1063,7 +1063,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
     void captureImpl(const char *key, Tuple &&all, std::index_sequence<Is...>) {
         if (!mutex) RS_THROW(RS_UninitializedException("CUDA provider is not initialized"));
 
-        std::lock_guard lock(*mutex.get());
+        std::lock_guard<std::recursive_mutex> lock(*mutex.get());
 
         auto deps = std::make_tuple(std::get<Is>(all)...);
         auto &&fn = std::get<sizeof...(Is)>(all);

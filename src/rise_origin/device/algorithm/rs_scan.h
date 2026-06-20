@@ -170,7 +170,7 @@ class RS_Scan {
             return;
         }
 #endif
-        RS_THROW(RS_InvalidConfigurationException(
+        RS_THROW(RS_InvalidCharacterizationException(
             "Device type {} not supported", enumToString(mem_provider->device.type)
         ));
     }
@@ -302,7 +302,7 @@ class RS_Scan {
             return;
         }
 #endif
-        RS_THROW(RS_InvalidConfigurationException(
+        RS_THROW(RS_InvalidCharacterizationException(
             "Device type {} not supported", enumToString(mem_provider->device.type)
         ));
     }
@@ -496,7 +496,7 @@ class RS_Scan {
             return;
         }
 #endif
-        RS_THROW(RS_InvalidConfigurationException(
+        RS_THROW(RS_InvalidCharacterizationException(
             "Device type {} not supported", enumToString(mem_provider->device.type)
         ));
     }
@@ -653,7 +653,7 @@ class RS_Scan {
             return;
         }
 #endif
-        RS_THROW(RS_InvalidConfigurationException(
+        RS_THROW(RS_InvalidCharacterizationException(
             "Device type {} not supported", enumToString(mem_provider->device.type)
         ));
     }

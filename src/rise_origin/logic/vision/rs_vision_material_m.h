@@ -6,9 +6,10 @@
 
 #include <refl.hpp>
 
-#include "rise_origin/utils/rs_color.h"
+#include "rise_origin/logic/vision/rs_vision_texture_m.h"
+#include "rise_origin/utils/math/rs_color.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_float.h"
+#include "rise_origin/utils/math/rs_float.h"
 
 namespace rise {
 
@@ -26,6 +27,9 @@ union RS_VisionMaterialStateUnion {
     RState vision_material_state_packed;
     struct RS_VisionMaterialState {
         RSE_VisionMaterialType render_type : 4;
+        RSE_VisionSampleInputType albedo_input_type : 3;
+        RSE_VisionSampleInputType roughness_metalness_input_type : 3;
+        RSE_VisionSampleInputType emission_input_type : 3;
     } vision_material_state;
 };
 
@@ -34,29 +38,26 @@ class RS_VisionMaterialMem {
    public:
     using FloatM = typename RS_FloatDataType<FloatMemAccuracy>::DataType;
 
-    /// Global ID of the source material.
+    /// Global ID of the source material
     RIndex material_gid = RS_NULL_INDEX;
 
-    /// Packed render type.
+    /// Packed render type + per-channel is_texture discriminators.
     RState state = 0;
 
-    /// Per-type color:
-    /// base color (OPAQUE),
-    /// per-channel attenuation (TRANSPARENT),
-    /// emission color (EMISSIVE).
-    RColor3f color = RColor3f::zero();
+    /// Albedo / base color
+    RS_VisionSampleInputMem<RColor3f> albedo;
 
-    /// Index of refraction; only meaningful for TRANSPARENT.
-    FloatM ior = FloatM(1.0);
+    /// Roughness / metalness
+    RS_VisionSampleInputMem<RColor3f> roughness_metalness;
 
-    /// Emission scalar multiplier; only meaningful for EMISSIVE.
-    FloatM intensity = 0;
+    /// Emission color
+    RS_VisionSampleInputMem<RColor3f> emission_color;
 
-    /// Surface roughness in [0, 1].
-    FloatM roughness = FloatM(1.0);
+    /// Index of refraction (transparent materials).
+    FloatM ior = FloatM(1.5);
 
-    /// Metalness in [0, 1]; > 0 picks the metallic lobe on OPAQUE.
-    FloatM metalness = FloatM(0);
+    /// Emission intensity scalar multiplier.
+    FloatM emission_intensity = 0;
 };
 
 }  // namespace logic
@@ -68,11 +69,11 @@ class RS_VisionMaterialMem {
         type(vision_material_mem_type),                       \
         field(material_gid),                                  \
         field(state),                                         \
-        field(color),                                         \
+        field(albedo),                                        \
+        field(roughness_metalness),                           \
+        field(emission_color),                                \
         field(ior),                                           \
-        field(intensity),                                     \
-        field(roughness),                                     \
-        field(metalness)                                      \
+        field(emission_intensity)                             \
     );
 
 REFLECT_VISION_MATERIAL_MEM(rise::logic::RS_VisionMaterialMem<rise::RSE_FLOAT_32>);

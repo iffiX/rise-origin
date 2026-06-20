@@ -6,27 +6,30 @@
 
 #include <spdlog/spdlog.h>
 
-#include "rise_origin/core/rs_simulation_callback.h"
+#include "rise_origin/core/rs_world_callback.h"
 #include "rise_origin/device/algorithm/rs_reduce.h"
 #include "rise_origin/device/algorithm/rs_scan.h"
 #include "rise_origin/device/algorithm/rs_sort.h"
 #include "rise_origin/device/data/rs_array.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/device/platform/rs_platform.h"
+#include "rise_origin/rsc/rsc_simulation.h"
 #include "rs_kernel.h"
 #include "rs_kernel_manager.h"
 
 namespace rise {
+
+class RS_Simulation;
 
 class RS_SimulationExecutor {
    public:
     RS_SimulationExecutor(
         RS_MemoryProvider *device_provider,
         RS_MemoryProvider *host_provider,
-        RS_SimulationCallback callback
+        RS_WorldCallback callback
     );
 
-    void init(RIndex id, RS_Kernel *kernel, RS_KernelManager *kernel_manager);
+    void init(RS_Simulation *simulation);
     void free();
 
     bool step();
@@ -34,29 +37,44 @@ class RS_SimulationExecutor {
    private:
     RS_MemoryProvider *_device_provider = nullptr;
     RS_MemoryProvider *_host_provider = nullptr;
-    RS_SimulationCallback _callback;
+    RS_WorldCallback _callback;
+
+    // Cached static execution settings, snapshotted at init. Later user edits to the simulation
+    // characterization do not change how this run executes.
+    rsc::RSC_SimulationTime _time;
     RSize _dt_update_interval = RS_MAX_SIZE;
-    RSize _rigidbody_update_interval = RS_MAX_SIZE;
-    RSize _contact_update_interval = RS_MAX_SIZE;
     RSize _contact_bvh_rebuild_sub_interval = RS_MAX_SIZE;
     RSize _contact_bvh_refit_sub_interval = RS_MAX_SIZE;
-    RSize _mechanical_signal_update_interval = RS_MAX_SIZE;
-    RSize _divergence_check_interval = RS_MAX_SIZE;
+    bool _sentinel_enabled = true;
     RSE_FloatType _simulation_compute_accuracy = RSE_FLOAT_32;
+
+    // Dynamic per-subsystem run intervals (base-step counts), recomputed by _runDtUpdate whenever the
+    // global time step is recomputed. interval_i = max(1, floor(needed_i / time_step)).
+    bool _has_computed_dt = false;
+    RSize _softbody_and_rigidbody_update_interval = 1;
+    RSize _rigidbody_contact_and_constraint_update_interval = 1;
+    RSize _contact_update_interval = 1;
+    RSize _mechanical_signal_update_interval = 1;
+    RSize _sentinel_update_interval = 1;
+
     std::shared_ptr<spdlog::logger> _logger;
 
     // Kernel
-    RIndex _id = RS_NULL_INDEX;
+    RS_Simulation *_simulation = nullptr;
     RS_Kernel *_kernel = nullptr;
     RS_KernelManager *_kernel_manager = nullptr;
 
     // Handles
-    std::unordered_map<std::string, device::RS_Array<RIndex, 1>> _handles;
+    std::unordered_map<std::string, device::RS_Vector<RHandle>> _handles;
     std::unordered_map<std::string, uint64_t> _handle_version_ids;
+
+    // Set on every voxel-partition recompute, cleared when the static voxel BVH is rebuilt.
+    bool _is_static_bvh_dirty = true;
 
     // Reduce setup
     RS_MemoryPtr _reduce_input_buffer;
     RS_MemoryPtr _reduce_output_buffer;
+    RS_MemoryPtr _reduce_host_buffer;
     device::RS_Reduce _reduce;
     device::RS_ReduceByGroup _reduce_by_group;
 
@@ -66,37 +84,48 @@ class RS_SimulationExecutor {
     // Sort setup
     device::RS_RadixSortPairs _sort;
 
-    // step() phases. Each pauses the kernel manager and re-syncs the device kernel if the host
-    // marked it modified, then launches its kernels (no shared outer lock). _run* phases route
-    // through _runGuarded; the manager-touching _update* phases take the guard themselves.
-    [[nodiscard]] bool _runDtUpdate();
+    // step() phases. Physics/data phases route through _runWithCriticalDataAccessGuard; the
+    // callback and sentinel route through _runWithCommandExecutionGuard.
+    RFloat _runDtUpdate(bool &is_dt_normal);
+    RSize _runSentinel(bool &is_hard_abort);
+    void _runAdvanceTime();
     void _runSoftbodyUpdate();
     void _runRigidbodyCoupling();
-    void _runRigidbodyUpdate();
-    void _advanceTime();
-    void _runRecordSaving();
+    void _runRigidbodyContactAndConstraintUpdate();
+    void _runRecordUpdate();
+    void _runRecorderRecordSaving();
     void _runControllerRecordSaving();
-    [[nodiscard]] bool _runDivergenceCheck();
     void _runContactUpdate();
     void _runMechanicalSignalUpdate();
     void _performCallback();
 
     // Launch helpers invoked inside a guarded phase (no guard of their own).
     void _updateLightAndVision();
+    void _updateIntersectRegionRecord();
     void _storeRecorderRecords();
     void _storeControllerRecords();
     void _rebuildStaticVoxelBVHIfNeeded();
     void _rebuildDynamicVoxelBVH();
     void _refitDynamicVoxelBVH();
     void _rebuildFloorTriangleBVHIfNeeded();
+    void _buildVoxelBVH(logic::RS_VoxelBVH &bvh, device::RS_Vector<RHandle> &handles);
+    void _refitVoxelBVH(logic::RS_VoxelBVH &bvh);
 
     // Common utilities.
     template <typename Body>
-    void _runGuarded(Body &&body);
-    device::RS_Array<RHandle, 1> _getLaunchHandles(const std::string &name);
+    void _runWithCriticalDataAccessGuard(Body &&body);
+    template <typename Body>
+    void _runWithCommandExecutionGuard(Body &&body);
+    device::RS_Vector<RHandle> _getLaunchHandles(const std::string &name);
+    bool _resolveVoxelMobilityPartitionIfNeeded();
+    void _resolveVoxelBVHDynamicPartition();
     void _resizeReduceBufferIfNeeded(RSize needed_size);
 
-    // void _updateMetrics();
+    /**
+     * @brief Base-step count a subsystem runs on: max(1, floor(needed / time_step)).
+     * @details Clamped to keep the cast finite for unbounded (absent) subsystems.
+     */
+    static RSize _snapInterval(RFloat needed, RFloat time_step);
 };
 
 }  // namespace rise

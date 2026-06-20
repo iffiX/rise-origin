@@ -8,6 +8,10 @@
 #include <cub/cub.cuh>
 #endif
 
+#include <tbb/parallel_sort.h>
+
+#include <numeric>
+
 #include "rise_origin/device/data/rs_array.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/device/platform/rs_platform.h"
@@ -198,8 +202,7 @@ class RS_SortPairs {
             std::vector<RIndex> indices(in_len);
             std::iota(indices.begin(), indices.end(), 0);
 
-            std::sort(
-                std::execution::par_unseq,
+            tbb::parallel_sort(
                 indices.begin(),
                 indices.end(),
                 [&](RIndex lhs, RIndex rhs) {
@@ -220,8 +223,8 @@ class RS_SortPairs {
                 static_cast<void*>(nullptr),
                 temp_size,
                 in_ptr_keys,
-                out_ptr_keys,
                 in_ptr_values,
+                out_ptr_keys,
                 out_ptr_values,
                 static_cast<int>(in_len),
                 compare_op
@@ -236,8 +239,8 @@ class RS_SortPairs {
                         sort_buffer.ptr(),
                         temp_size,
                         in_ptr_keys,
-                        out_ptr_keys,
                         in_ptr_values,
+                        out_ptr_keys,
                         out_ptr_values,
                         static_cast<int>(in_len),
                         compare_op,
@@ -249,7 +252,7 @@ class RS_SortPairs {
         }
 #endif
         else
-            RS_THROW(RS_InvalidConfigurationException(
+            RS_THROW(RS_InvalidCharacterizationException(
                 "Device type {} not supported", enumToString(mem_provider->device.type)
             ));
     }
@@ -458,15 +461,13 @@ class RS_RadixSortPairs {
             std::iota(indices.begin(), indices.end(), 0);
 
             if (is_ascending) {
-                std::sort(
-                    std::execution::par_unseq,
+                tbb::parallel_sort(
                     indices.begin(),
                     indices.end(),
                     [&](RIndex lhs, RIndex rhs) { return in_ptr_keys[lhs] < in_ptr_keys[rhs]; }
                 );
             } else {
-                std::sort(
-                    std::execution::par_unseq,
+                tbb::parallel_sort(
                     indices.begin(),
                     indices.end(),
                     [&](RIndex lhs, RIndex rhs) { return in_ptr_keys[lhs] > in_ptr_keys[rhs]; }
@@ -556,7 +557,7 @@ class RS_RadixSortPairs {
 
 #endif
         else
-            RS_THROW(RS_InvalidConfigurationException(
+            RS_THROW(RS_InvalidCharacterizationException(
                 "Device type {} not supported", enumToString(mem_provider->device.type)
             ));
     }

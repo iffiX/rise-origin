@@ -12,6 +12,7 @@
 #include "rise_origin/logic/mesh/rs_mesh_triangle_c.h"
 #include "rise_origin/logic/metric/rs_basic_metric_c.h"
 #include "rise_origin/logic/record/rs_basic_record_c.h"
+#include "rise_origin/logic/record/rs_intersect_region_c.h"
 #include "rise_origin/logic/rigid/rs_constraint_c.h"
 #include "rise_origin/logic/rigid/rs_contact_c.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_c.h"
@@ -20,12 +21,15 @@
 #include "rise_origin/logic/signal/rs_torque_c.h"
 #include "rise_origin/logic/soft/rs_link_c.h"
 #include "rise_origin/logic/soft/rs_voxel_c.h"
+#include "rise_origin/logic/utils/rs_launch_c.h"
 #include "rise_origin/logic/vision/rs_camera_c.h"
 #include "rise_origin/logic/vision/rs_vision_denoise_c.h"
 #include "rise_origin/logic/vision/rs_vision_ray_c.h"
-#include "rise_origin/utils/rs_constexpr.h"
+#include "rise_origin/utils/rs_conf.h"
+#include "rise_origin/utils/meta/rs_constexpr.h"
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/rs_iterators.h"
+#include "rs_simulation.h"
 #include "rs_simulation_executor.h"
 
 using namespace std;
@@ -45,10 +49,10 @@ class RSCF_UpdateKernelTime : public RS_ComputeFunction<RSCF_UpdateKernelTime> {
     };
 };
 
-class RSCF_UpdateKernelTimeStep : public RS_ComputeFunction<RSCF_UpdateKernelTimeStep> {
+class RSCF_UpdateKernelDt : public RS_ComputeFunction<RSCF_UpdateKernelDt> {
    public:
-    HOST_DEVICE_INLINE_QUALIFIER static void run(RFloat time_step) {
-        RS_ConstantMemory::as<RS_Kernel>()->updateTimeStepOnDevice(time_step);
+    HOST_DEVICE_INLINE_QUALIFIER static void run(RFloat dt) {
+        RS_ConstantMemory::as<RS_Kernel>()->updateDtOnDevice(dt);
     };
 };
 
@@ -57,173 +61,6 @@ class RSCF_UpdateKernelOperationTime : public RS_ComputeFunction<RSCF_UpdateKern
     HOST_DEVICE_INLINE_QUALIFIER static void run(RSE_KernelUpdateOperation operation) {
         RS_ConstantMemory::as<RS_Kernel>()->updateOperationTimeOnDevice(operation);
     };
-};
-
-// In this way, Launch* has all the attributes marked by ComputeFunction
-template <typename ComputeFunction, typename Kernel>
-class RSCF_LaunchDirect : public RS_ComputeFunction<ComputeFunction> {
-   public:
-    using RS_ComputeFunction<ComputeFunction>::index1D;
-
-    template <typename... Args>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(Args... args) {
-        ComputeFunction::run(RS_ConstantMemory::as<Kernel>(), args...);
-    }
-};
-
-template <typename ComputeFunction, typename Kernel>
-class RSCF_LaunchWithHandles : public RS_ComputeFunction<ComputeFunction> {
-   public:
-    using RS_ComputeFunction<ComputeFunction>::index1D;
-
-    template <typename... Args>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(RS_Array<RHandle, 1> handles, Args... args) {
-        ComputeFunction::run(RS_ConstantMemory::as<Kernel>(), handles[index1D()], args...);
-    }
-};
-
-template <typename ComputeFunction, typename Kernel>
-class RSCF_LaunchWithLayout
-    : public RS_ComputeFunction<RSCF_LaunchWithLayout<ComputeFunction, Kernel>> {
-   public:
-    using RS_ComputeFunction<RSCF_LaunchWithLayout>::index1D;
-
-    template <typename... Args>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(RS_DeviceLayout layout, Args... args) {
-        RIndex i = index1D();
-        auto &ctx = RS_ConstantMemory::as<Kernel>()->ctx;
-        auto search_result = layout.searchForBelongedSegment(i);
-        ComputeFunction::run(RS_ConstantMemory::as<Kernel>(), search_result.global_index, args...);
-    }
-};
-
-template <typename ComputeFunction, typename Kernel>
-class RSCF_LaunchWithLayoutPerSegment
-    : public RS_ComputeFunction<RSCF_LaunchWithLayoutPerSegment<ComputeFunction, Kernel>> {
-   public:
-    using RS_ComputeFunction<RSCF_LaunchWithLayoutPerSegment>::index1D;
-
-    template <typename... Args>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(RS_DeviceLayout layout, Args... args) {
-        RIndex i = index1D();
-        auto &ctx = RS_ConstantMemory::as<Kernel>()->ctx;
-        auto search_result = layout.searchForBelongedSegment(i);
-        ComputeFunction::run(
-            RS_ConstantMemory::as<Kernel>(),
-            search_result.segment_index,
-            search_result.in_segment_index,
-            args...
-        );
-    }
-};
-
-template <typename SetOrGetFunction, typename Kernel>
-class RSCF_LaunchSetOrGetWithHandles
-    : public RS_ComputeFunction<RSCF_LaunchSetOrGetWithHandles<SetOrGetFunction, Kernel>> {
-   public:
-    using RS_ComputeFunction<RSCF_LaunchSetOrGetWithHandles>::index1D;
-
-    template <typename... Args>
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    run(RS_Array<RHandle, 1> handles, RS_MemoryPtr buffer, Args... args) {
-        RIndex i = index1D();
-        if (i >= handles.size()) return;
-
-        SetOrGetFunction::run(RS_ConstantMemory::as<Kernel>(), buffer, handles[i], i, args...);
-    }
-};
-
-template <typename SetOrGetFunction, typename Kernel>
-class RSCF_LaunchSetOrGetWithLayout
-    : public RS_ComputeFunction<RSCF_LaunchSetOrGetWithLayout<SetOrGetFunction, Kernel>> {
-   public:
-    using RS_ComputeFunction<RSCF_LaunchSetOrGetWithLayout>::index1D;
-
-    template <typename... Args>
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    run(RS_DeviceLayout layout, RS_MemoryPtr buffer, Args... args) {
-        RIndex i = index1D();
-        if (i >= layout.size()) return;
-
-        auto &ctx = RS_ConstantMemory::as<Kernel>()->ctx;
-        auto search_result = layout.searchForBelongedSegment(i);
-
-        if (search_result.segment_id != RS_NULL_INDEX) {
-            // Get target location from output layout and set the reduced value
-            SetOrGetFunction::run(
-                RS_ConstantMemory::as<Kernel>(),
-                buffer,                      // Buffer
-                search_result.global_index,  // Target handle in the kernel
-                i,                           // Set/Get index in the buffer
-                args...
-            );
-        }
-    }
-};
-
-template <typename StoreRecordFunction, typename Kernel>
-class RSCF_LaunchStoreRecordWithRecordHandles
-    : public RS_ComputeFunction<
-          RSCF_LaunchStoreRecordWithRecordHandles<StoreRecordFunction, Kernel>> {
-   public:
-    using RS_ComputeFunction<RSCF_LaunchStoreRecordWithRecordHandles>::index1D;
-
-    template <typename RootRecord>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(
-        RS_Vector<RootRecord> root_records,
-        RS_Vector<RS_Array<RIndex, 1>> record_handles,
-        RS_DeviceLayout handle_layout
-    ) {
-        RIndex i = index1D();
-        auto &ctx = RS_ConstantMemory::as<Kernel>()->ctx;
-        auto search_result = handle_layout.searchForBelongedSegment(i);
-        StoreRecordFunction::run(
-            RS_ConstantMemory::as<Kernel>(),
-            root_records[search_result.segment_index],
-            record_handles[search_result.segment_index][search_result.in_segment_index],
-            search_result.in_segment_index
-        );
-    }
-};
-
-template <typename StoreRecordFunction, typename Kernel>
-class RSCF_LaunchStoreRecordWithLayout
-    : public RS_ComputeFunction<RSCF_LaunchStoreRecordWithLayout<StoreRecordFunction, Kernel>> {
-   public:
-    using RS_ComputeFunction<RSCF_LaunchStoreRecordWithLayout>::index1D;
-
-    template <typename RootRecord>
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    run(RS_Vector<RootRecord> root_records, RS_DeviceLayout layout) {
-        RIndex i = index1D();
-        auto &ctx = RS_ConstantMemory::as<Kernel>()->ctx;
-        auto search_result = layout.searchForBelongedSegment(i);
-        StoreRecordFunction::run(
-            RS_ConstantMemory::as<Kernel>(),
-            root_records[search_result.segment_index],
-            search_result.segment_index,
-            search_result.in_segment_index
-        );
-    }
-};
-
-template <typename Kernel>
-class RSCF_LaunchUpdateRootRecord : public RS_ComputeFunction<RSCF_LaunchUpdateRootRecord<Kernel>> {
-   public:
-    using RS_ComputeFunction<RSCF_LaunchUpdateRootRecord>::index1D;
-
-    template <typename Buffer, typename RootRecord, typename... Layout>
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    run(RS_Vector<Buffer> buffers, RS_Vector<RootRecord> root_records, Layout... handle_layouts) {
-        RIndex i = index1D();
-        auto &ctx = RS_ConstantMemory::as<Kernel>()->ctx;
-        RSCF_UpdateRootRecord::run(
-            RS_ConstantMemory::as<Kernel>(),
-            buffers[i],
-            root_records[i],
-            handle_layouts.segmentSize(i)...
-        );
-    }
 };
 
 static auto ensure_vector_size = [](auto &vector, RSize size) {
@@ -239,14 +76,14 @@ static auto ensure_vector_size = [](auto &vector, RSize size) {
 RS_SimulationExecutor::RS_SimulationExecutor(
     RS_MemoryProvider *device_provider,
     RS_MemoryProvider *host_provider,
-    RS_SimulationCallback callback
+    RS_WorldCallback callback
 )
     : _device_provider(device_provider),
       _host_provider(host_provider),
       _callback(std::move(callback)) {
     if (spdlog::get("root")) {
         // Only init logger if root logger is created
-        _logger = spdlog::get("root")->clone("sequential executor");
+        _logger = spdlog::get("root")->clone("simulation executor");
     }
 
     castProviderPtrAndCall(device_provider, [&](auto p_ptr) {
@@ -257,30 +94,26 @@ RS_SimulationExecutor::RS_SimulationExecutor(
     });
 }
 
-void RS_SimulationExecutor::init(RIndex id, RS_Kernel *kernel, RS_KernelManager *kernel_manager) {
-    _id = id;
-    _kernel = kernel;
-    _kernel_manager = kernel_manager;
+void RS_SimulationExecutor::init(RS_Simulation *simulation) {
+    _simulation = simulation;
+    _kernel_manager = simulation->kernel_manager.get();
+    _kernel = &_kernel_manager->kernel;
 
-    // Cache the runtime_* execution settings once, at init. Later user edits to the
-    // simulation config do not change how this run executes.
-    auto sim_config = kernel_manager->getSimulationConfig();
-    _dt_update_interval = sim_config.runtime_dt_update_interval;
-    _rigidbody_update_interval = sim_config.runtime_rigidbody_update_interval;
-    _contact_update_interval = sim_config.runtime_contact_update_interval;
-    _contact_bvh_rebuild_sub_interval = sim_config.runtime_contact_bvh_rebuild_sub_interval;
-    _contact_bvh_refit_sub_interval = sim_config.runtime_contact_bvh_refit_sub_interval;
-    _mechanical_signal_update_interval = sim_config.runtime_mechanical_signal_update_interval;
-    _divergence_check_interval = sim_config.runtime_divergence_check_interval;
-    _simulation_compute_accuracy = sim_config.runtime_simulation_compute_accuracy;
-
-    lock_guard lock(kernel->getSyncMutex());
-    RS_ConstantMemory::write(kernel, _device_provider->device, sizeof(RS_Kernel));
-    kernel->clearModified();
+    // Cache the static execution settings once, at init. Later user edits to the simulation 
+    // characterization do not change how this run executes. The per-subsystem run intervals 
+    // are not cached here; they are dynamic, recomputed by _runDtUpdate from the current 
+    // global time step.
+    auto sim_rsc = _kernel_manager->getSimulationRSC();
+    _time = sim_rsc.time;
+    _dt_update_interval = sim_rsc.time.dt_update_interval;
+    _contact_bvh_rebuild_sub_interval = sim_rsc.contact.bvh_rebuild_sub_interval;
+    _contact_bvh_refit_sub_interval = sim_rsc.contact.bvh_refit_sub_interval;
+    _sentinel_enabled = sim_rsc.sentinel.is_enabled;
+    _simulation_compute_accuracy = sim_rsc.runtime.compute_accuracy;
 }
 
 void RS_SimulationExecutor::free() {
-    _id = RS_NULL_INDEX;
+    _simulation = nullptr;
     _kernel = nullptr;
     _kernel_manager = nullptr;
 
@@ -291,6 +124,7 @@ void RS_SimulationExecutor::free() {
 
     _reduce_input_buffer.free();
     _reduce_output_buffer.free();
+    _reduce_host_buffer.free();
     _reduce.free();
     _reduce_by_group.free();
     _scan.free();
@@ -298,108 +132,446 @@ void RS_SimulationExecutor::free() {
 }
 
 bool RS_SimulationExecutor::step() {
-    bool result = true;
-
-    // Auto dt selection. A degenerate recommended dt aborts the simulation phases for this step
-    // but still lets the kernel-manager phases below run, matching the original behaviour.
-    if (_runDtUpdate()) {
-        if (_kernel->getTimeSinceLastExecutionOfEvent("print_time_and_dt") >= 0.1) {
-            _kernel->executeEvent("print_time_and_dt");
-            RS_LOG(
-                _logger, info, "time: {}s, dt: {}s.", _kernel->getHostTime(), _kernel->getHostDt()
+    bool is_dt_normal = true;
+    _runDtUpdate(is_dt_normal);
+    while (!is_dt_normal) {
+        bool is_hard_abort = false;
+        RSize purged = _runSentinel(is_hard_abort);
+        if (is_hard_abort || purged == 0) {
+            _simulation->postMessage(
+                RS_WORLD_MESSAGE_SYSTEM_ID,
+                RSE_WORLD_MESSAGE_ERROR,
+                "world aborted: unrecoverable degenerate time step"
             );
+            _kernel->terminate();
+            return false;
         }
-        _runSoftbodyUpdate();
-        if (_kernel->getHostStep() % _rigidbody_update_interval == 0) _runRigidbodyUpdate();
+        _runDtUpdate(is_dt_normal);
+    }
+
+    if (_kernel->getTimeSinceLastExecutionOfEvent("print_time_and_dt") >= 0.1) {
+        _kernel->executeEvent("print_time_and_dt");
+        RS_LOG(_logger, info, "Time: {}s, dt: {}s.", _kernel->getHostTime(), _kernel->getHostDt());
+    }
+
+    if (_kernel->getHostStep() % _softbody_and_rigidbody_update_interval == 0) _runSoftbodyUpdate();
+    if (_kernel->getHostStep() % _rigidbody_contact_and_constraint_update_interval == 0)
+        _runRigidbodyContactAndConstraintUpdate();
+    if (_kernel->getHostStep() % _softbody_and_rigidbody_update_interval == 0)
         _runRigidbodyCoupling();
 
-        _advanceTime();
+    _runAdvanceTime();
 
-        if (_kernel->getTimeSinceLastExecutionOfEvent("record") >=
-            1.0 / _kernel->record_frequency) {
-            _kernel->executeEvent("record");
-            _runRecordSaving();
+    bool is_record_event_due =
+        _kernel->getTimeSinceLastExecutionOfEvent("record") >= 1.0 / _kernel->record_frequency;
+    bool is_callback_event_due =
+        _kernel->getTimeSinceLastExecutionOfEvent("callback") >= 1.0 / _kernel->control_frequency;
+
+    if (is_record_event_due || is_callback_event_due) {
+        _runRecordUpdate();
+    }
+    if (is_record_event_due) {
+        _kernel->executeEvent("record");
+        _runRecorderRecordSaving();
+    }
+    if (is_callback_event_due) {
+        _kernel->executeEvent("callback");
+        _runControllerRecordSaving();
+    }
+
+    if (_sentinel_enabled && _kernel->getHostStep() % _sentinel_update_interval == 0) {
+        bool is_hard_abort = false;
+        _runSentinel(is_hard_abort);
+        if (is_hard_abort) {
+            _simulation->postMessage(
+                RS_WORLD_MESSAGE_SYSTEM_ID,
+                RSE_WORLD_MESSAGE_ERROR,
+                "world aborted: sentinel purge ceiling exceeded"
+            );
+            _kernel->terminate();
+            return false;
         }
-        if (_kernel->getTimeSinceLastExecutionOfEvent("callback") >=
-            1.0 / _kernel->control_frequency) {
-            _runControllerRecordSaving();
-        }
-        if (_kernel->getHostStep() % _divergence_check_interval == 0 && !_runDivergenceCheck())
-            result = false;
-    } else {
-        result = false;
     }
 
     if (_kernel->getHostStep() % _contact_update_interval == 0) _runContactUpdate();
     if (_kernel->getHostStep() % _mechanical_signal_update_interval == 0)
         _runMechanicalSignalUpdate();
-    if (_kernel->getTimeSinceLastExecutionOfEvent("callback") >= 1.0 / _kernel->control_frequency) {
-        _kernel->executeEvent("callback");
+    if (is_callback_event_due) {
         _performCallback();
     }
 
-    return result;
+    return true;
 }
 
-bool RS_SimulationExecutor::_runDtUpdate() {
-    bool result = true;
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto, bool was_modified) {
-        using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
-        if (!k_ptr->isAutoTimeStep()) return;
-        if (!(was_modified || k_ptr->getHostStep() % _dt_update_interval == 0)) return;
+RFloat RS_SimulationExecutor::_runDtUpdate(bool &is_dt_normal) {
+    RFloat dt = 0;
+    is_dt_normal = true;
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto, bool was_modified) {
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
-        // Largest natural frequency sqrt(k/m) in the simulation sets the stable dt:
-        // dt = 1 / (2*pi * max_frequency), taken over links and voxels.
-        RFloat time_step = RS_NumTraits<RFloat>::highest();
+        bool due = !_has_computed_dt || was_modified ||
+                   (_dt_update_interval > 0 && k_ptr->getHostStep() % _dt_update_interval == 0);
+        if (!due) {
+            dt = RFloat(k_ptr->getHostDt());
+            return;
+        }
+
+        const RFloat dt_ratio = _time.dt_ratio;
+
+        // Each subsystem's needed dt: a specified field is used as-is; an empty (auto) field takes
+        // its default scaled by dt_ratio.
+
+        /****************************************************************
+         * Softbody and rigidbody coupling dt
+         ****************************************************************/
+        // Auto = dt_ratio x the soft stable step, set by the largest natural frequency sqrt(k/m)
+        // over links and voxels: dt = 1 / (integration_frequency_multiplier * max_frequency).
+        RFloat freq_soft_dt = RS_NumTraits<RFloat>::highest();
         auto link_handles = _getLaunchHandles("link");
-        auto voxel_handles = _getLaunchHandles("voxel");
+        auto dynamic_voxel_handles = _getLaunchHandles("dynamic_voxel");
         _resizeReduceBufferIfNeeded(
-            RS_MAX(link_handles.size(), voxel_handles.size()) * sizeof(RFloat)
+            RS_MAX(link_handles.size(), dynamic_voxel_handles.size()) * sizeof(RFloat)
         );
-
         if (link_handles.size() > 0) {
             p_ptr->template run<
                 RSCF_LaunchSetOrGetWithHandles<RSCF_GetLinkFrequencyMetric, KernelType>>(
                 {link_handles.size(), RS_AUTO_BLOCK_SIZE, false}, link_handles, _reduce_input_buffer
             );
-            // Divide 2, sometimes link max freq is too constrictive
             RFloat link_max_freq = _reduce.reduce<RFloat, RS_ReduceMaxOp>(
-                                       _reduce_input_buffer, link_handles.size(), 0
-                                   ) /
-                                   2;
+                _reduce_input_buffer, link_handles.size(), 0
+            );
             if (link_max_freq > 0)
-                time_step = RS_MIN(time_step, 1 / (RS_2PI * sqrt(link_max_freq)));
+                freq_soft_dt = RS_MIN(
+                    freq_soft_dt,
+                    1 / (k_ptr->softbody_integration_frequency_multiplier * sqrt(link_max_freq))
+                );
         }
+        if (dynamic_voxel_handles.size() > 0) {
+            p_ptr->template run<
+                RSCF_LaunchSetOrGetWithHandles<RSCF_GetVoxelFrequencyMetric, KernelType>>(
+                {dynamic_voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+                dynamic_voxel_handles,
+                _reduce_input_buffer
+            );
+            RFloat voxel_max_freq = _reduce.reduce<RFloat, RS_ReduceMaxOp>(
+                _reduce_input_buffer, dynamic_voxel_handles.size(), 0
+            );
+            if (voxel_max_freq > 0)
+                freq_soft_dt = RS_MIN(
+                    freq_soft_dt,
+                    1 / (k_ptr->softbody_integration_frequency_multiplier * sqrt(voxel_max_freq))
+                );
+        }
+        // With no soft bodies (freq still highest) fall back to dt_ratio x 0.005s.
+        RFloat needed_softbody_and_rigidbody =
+            !_time.dt_softbody_and_rigidbody_update.empty()
+                ? RFloat(_time.dt_softbody_and_rigidbody_update.get())
+                : (freq_soft_dt < RS_NumTraits<RFloat>::highest() ? dt_ratio * freq_soft_dt
+                                                                  : dt_ratio * RFloat(0.005));
+
+        /****************************************************************
+         * Rigidbody contact and constraint dt
+         ****************************************************************/
+        RFloat needed_rigidbody_contact_and_constraint =
+            !_time.dt_rigidbody_contact_and_constraint_update.empty()
+                ? RFloat(_time.dt_rigidbody_contact_and_constraint_update.get())
+                : dt_ratio * RFloat(0.005);
+
+        /****************************************************************
+         * Contact broadphase dt
+         ****************************************************************/
+        RFloat needed_contact = !_time.dt_contact_update.empty()
+                                    ? RFloat(_time.dt_contact_update.get())
+                                    : dt_ratio * RFloat(0.005);
+
+        /****************************************************************
+         * Mechanical signal dt
+         ****************************************************************/
+        RFloat needed_mechanical_signal = !_time.dt_mechanical_signal_update.empty()
+                                              ? RFloat(_time.dt_mechanical_signal_update.get())
+                                              : dt_ratio * RFloat(0.005);
+
+        /****************************************************************
+         * Sentinel dt
+         ****************************************************************/
+        RFloat needed_sentinel = !_time.dt_sentinel_update.empty()
+                                     ? RFloat(_time.dt_sentinel_update.get())
+                                     : dt_ratio * RFloat(0.1);
+
+        /****************************************************************
+         * Gather global dt
+         ****************************************************************/
+        if (!_time.dt.empty()) {
+            dt = RFloat(_time.dt.get());
+        } else {
+            dt = std::min({
+                needed_softbody_and_rigidbody,
+                needed_rigidbody_contact_and_constraint,
+                needed_contact,
+                needed_mechanical_signal,
+                needed_sentinel,
+            });
+        }
+
+        // Degenerate dt: report not-normal and let step() drive the sentinel.
+        if (!(dt >= RFloat(1e-7))) {
+            is_dt_normal = false;
+            dt = 0;
+            return;
+        }
+
+        p_ptr->template run<RSCF_UpdateKernelDt>({1, 1, false}, dt);
+        k_ptr->updateDtOnHost(dt);
+
+        /****************************************************************
+         * Snap each subsystem to a base-step interval
+         ****************************************************************/
+        _softbody_and_rigidbody_update_interval = _snapInterval(needed_softbody_and_rigidbody, dt);
+        _rigidbody_contact_and_constraint_update_interval =
+            _snapInterval(needed_rigidbody_contact_and_constraint, dt);
+        _contact_update_interval = _snapInterval(needed_contact, dt);
+        _mechanical_signal_update_interval = _snapInterval(needed_mechanical_signal, dt);
+        _sentinel_update_interval = _snapInterval(needed_sentinel, dt);
+
+        _has_computed_dt = true;
+
+        /****************************************************************
+         * Vailidity check
+         ****************************************************************/
+        // A manual time.dt coarser than a subsystem's stability dt or the control/record period is
+        // honored faithfully but flagged. Throttled to avoid spam.
+        if (k_ptr->getTimeSinceLastExecutionOfEvent("warn_coarse_dt") >= 1.0) {
+            bool warned = false;
+            auto warn_if_coarse = [&](const char *what, RFloat needed) {
+                if (dt > needed) {
+                    RS_LOG(
+                        _logger,
+                        warn,
+                        "dt {}s exceeds task [{}] stability dt {}s.",
+                        dt,
+                        what,
+                        needed
+                    );
+                    warned = true;
+                }
+            };
+            warn_if_coarse("softbody_and_rigidbody", needed_softbody_and_rigidbody);
+            warn_if_coarse(
+                "rigidbody_contact_and_constraint", needed_rigidbody_contact_and_constraint
+            );
+            warn_if_coarse("contact", needed_contact);
+            warn_if_coarse("mechanical_signal", needed_mechanical_signal);
+            warn_if_coarse("sentinel", needed_sentinel);
+            if (k_ptr->control_frequency > 0 && dt > 1.0 / k_ptr->control_frequency) {
+                RS_LOG(
+                    _logger,
+                    warn,
+                    "dt {}s exceeds control period {}s.",
+                    dt,
+                    1.0 / k_ptr->control_frequency
+                );
+                warned = true;
+            }
+            if (k_ptr->record_frequency > 0 && dt > 1.0 / k_ptr->record_frequency) {
+                RS_LOG(
+                    _logger,
+                    warn,
+                    "dt {}s exceeds record period {}s.",
+                    dt,
+                    1.0 / k_ptr->record_frequency
+                );
+                warned = true;
+            }
+            if (warned) k_ptr->executeEvent("warn_coarse_dt");
+        }
+    });
+    return dt;
+}
+
+RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
+    is_hard_abort = false;
+    RSize purged = 0;
+
+    // Structures flagged for purge, maps (structure gid -> reason string).
+    std::unordered_map<RIndex, std::string> offenders;
+
+    // The purge mutates manager maps, so take command execution rather than just data access.
+    _runWithCommandExecutionGuard([&](auto *k_ptr, auto *p_ptr, auto, bool) {
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+        auto &ctx = k_ptr->ctx;
+
+        // Note: for reduction should use full voxel handles to correspond to layout group sizes
+        auto voxel_handles = _getLaunchHandles("voxel");
+        auto link_handles = _getLaunchHandles("link");
+
+        // Inactive or empty structures contribute no launch handles, so the grouped reductions
+        // below must run over the active, non-empty segments only.
+        std::vector<RSize> voxel_active_sizes;
+        std::vector<RIndex> voxel_active_ids;
+        std::vector<RSize> link_active_sizes;
+        std::vector<RIndex> link_active_ids;
+        for (auto [size, gid, is_active] :
+             zip(ctx.host_data->structure_voxel_layout.getSegmentSizes(),
+                 ctx.host_data->structure_voxel_layout.getSegmentIds(),
+                 ctx.host_data->structure_voxel_layout.getSegmentIsActive())) {
+            if (is_active && size > 0) {
+                voxel_active_sizes.push_back(size);
+                voxel_active_ids.push_back(gid);
+            }
+        }
+        for (auto [size, gid, is_active] :
+             zip(ctx.host_data->structure_link_layout.getSegmentSizes(),
+                 ctx.host_data->structure_link_layout.getSegmentIds(),
+                 ctx.host_data->structure_link_layout.getSegmentIsActive())) {
+            if (is_active && size > 0) {
+                link_active_sizes.push_back(size);
+                link_active_ids.push_back(gid);
+            }
+        }
+
+        /****************************************************************
+         * Voxel NaN check
+         ****************************************************************/
         if (voxel_handles.size() > 0) {
+            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f));
+            p_ptr->template run<
+                RSCF_LaunchSetOrGetWithHandles<RSCF_GetIsVoxelNanMetric, KernelType>>(
+                {voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+                voxel_handles,
+                _reduce_input_buffer
+            );
+            auto result = _reduce_by_group.reduce<bool, RS_ReduceOrOp>(
+                _reduce_input_buffer, voxel_active_sizes, false
+            );
+            for (RSize seg = 0; seg < result.size(); ++seg) {
+                if (voxel_active_sizes[seg] > 0 && result[seg])
+                    offenders.emplace(voxel_active_ids[seg], "nan voxel");
+            }
+        }
+
+        /****************************************************************
+         * Voxel frequency check
+         ****************************************************************/
+        if (voxel_handles.size() > 0) {
+            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f));
             p_ptr->template run<
                 RSCF_LaunchSetOrGetWithHandles<RSCF_GetVoxelFrequencyMetric, KernelType>>(
                 {voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
                 voxel_handles,
                 _reduce_input_buffer
             );
-            RFloat voxel_max_freq = _reduce.reduce<RFloat, RS_ReduceMaxOp>(
-                _reduce_input_buffer, voxel_handles.size(), 0
+            auto result = _reduce_by_group.reduce<RFloat, RS_ReduceMaxOp>(
+                _reduce_input_buffer, voxel_active_sizes, RFloat(0)
             );
-            if (voxel_max_freq > 0)
-                time_step = RS_MIN(time_step, 1 / (RS_2PI * sqrt(voxel_max_freq)));
+            for (RSize seg = 0; seg < result.size(); ++seg) {
+                RFloat f = result[seg];
+                RFloat dt = 1 / (k_ptr->softbody_integration_frequency_multiplier * sqrt(f));
+                if (voxel_active_sizes[seg] > 0 && (!std::isfinite(f) || dt < RFloat(1e-7)))
+                    offenders.emplace(
+                        voxel_active_ids[seg],
+                        format("degenerate voxel frequency {} (dt {}s)", f, dt)
+                    );
+            }
         }
-        // Default time step with empty simulation
-        if (time_step == RS_NumTraits<RFloat>::highest()) time_step = 1e-3;
 
-        if (time_step < 1e-9) {
-            result = false;
-            return;
+        /****************************************************************
+         * Link frequency check
+         ****************************************************************/
+        if (link_handles.size() > 0) {
+            _resizeReduceBufferIfNeeded(link_handles.size() * sizeof(RFloat));
+            p_ptr->template run<
+                RSCF_LaunchSetOrGetWithHandles<RSCF_GetLinkFrequencyMetric, KernelType>>(
+                {link_handles.size(), RS_AUTO_BLOCK_SIZE, false}, link_handles, _reduce_input_buffer
+            );
+            auto result = _reduce_by_group.reduce<RFloat, RS_ReduceMaxOp>(
+                _reduce_input_buffer, link_active_sizes, RFloat(0)
+            );
+            for (RSize seg = 0; seg < result.size(); ++seg) {
+                RFloat f = result[seg];
+                RFloat dt = 1 / (k_ptr->softbody_integration_frequency_multiplier * sqrt(f));
+                if (link_active_sizes[seg] > 0 && (!std::isfinite(f) || dt < RFloat(1e-7)))
+                    offenders.emplace(
+                        link_active_ids[seg],
+                        format("degenerate link frequency {} (dt {}s)", f, dt)
+                    );
+            }
         }
-        p_ptr->template run<RSCF_UpdateKernelTimeStep>({1, 1, false}, time_step);
-        k_ptr->updateTimeStepOnHost(time_step);
+
+        /****************************************************************
+         * Voxel bound check
+         ****************************************************************/
+        if (voxel_handles.size() > 0) {
+            const RFloat range = RFloat(RS_WORLD_MAX_RANGE);
+            RBound3f world_box(-range, -range, -range, range, range, range);
+            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f));
+            p_ptr->template run<
+                RSCF_LaunchSetOrGetWithHandles<RSCF_GetVoxelBoundMetric, KernelType>>(
+                {voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+                voxel_handles,
+                _reduce_input_buffer
+            );
+            auto result = _reduce_by_group.reduce<RBound3f, RS_ReduceBoundUnionOp>(
+                _reduce_input_buffer, voxel_active_sizes, RBound3f::lowest()
+            );
+            for (RSize seg = 0; seg < result.size(); ++seg) {
+                RBound3f bound = result[seg];
+                if (voxel_active_sizes[seg] > 0 && bound.isValid() &&
+                    !world_box.isContaining(bound))
+                    offenders.emplace(
+                        voxel_active_ids[seg],
+                        format(
+                            "out of world bounds min ({}, {}, {}) max ({}, {}, {})",
+                            bound.min_x,
+                            bound.min_y,
+                            bound.min_z,
+                            bound.max_x,
+                            bound.max_y,
+                            bound.max_z
+                        )
+                    );
+            }
+        }
+
+        /****************************************************************
+         * Purge
+         ****************************************************************/
+        for (auto &[gid, reason] : offenders) {
+            RS_LOG(
+                _logger,
+                warn,
+                "Sentinel found invalid structure with gid: {}, reason: {}",
+                gid,
+                reason
+            );
+            std::string name = _kernel_manager->purgeStructure(gid);
+            _simulation->postMessage(
+                RS_WORLD_MESSAGE_SYSTEM_ID,
+                RSE_WORLD_MESSAGE_WARNING,
+                format("structure {} purged: {}", name, reason)
+            );
+            if (++purged > 100) {
+                is_hard_abort = true;
+                break;
+            }
+        }
+
+        _rebuildStaticVoxelBVHIfNeeded();
+        _rebuildDynamicVoxelBVH();
     });
-    return result;
+    return purged;
+}
+
+void RS_SimulationExecutor::_runAdvanceTime() {
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto, bool) {
+        p_ptr->template run<RSCF_UpdateKernelTime>({1, 1, false});
+        k_ptr->updateTimeOnHost();
+    });
 }
 
 void RS_SimulationExecutor::_runSoftbodyUpdate() {
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
         static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-        using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
         // Stamp the soft-body operation time so soft kernels read the true soft_dt
         // (>= the base dt when the user runs soft body every N>1 base steps).
@@ -413,20 +585,24 @@ void RS_SimulationExecutor::_runSoftbodyUpdate() {
             typename RS_LinkCompute<ComputeAccuracy>::RSCF_UpdateBernoulliLink,
             KernelType>>({link_handles.size(), RS_AUTO_BLOCK_SIZE, false}, link_handles);
 
-        auto voxel_handles = _getLaunchHandles("voxel");
+        auto dynamic_voxel_handles = _getLaunchHandles("dynamic_voxel");
         p_ptr->template run<RSCF_LaunchWithHandles<
             typename RS_VoxelCompute<ComputeAccuracy>::RSCF_UpdateVoxelContact,
-            KernelType>>({voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, voxel_handles);
+            KernelType>>(
+            {dynamic_voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, dynamic_voxel_handles
+        );
         p_ptr->template run<RSCF_LaunchWithHandles<
             typename RS_VoxelCompute<ComputeAccuracy>::RSCF_UpdateVoxel,
-            KernelType>>({voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, voxel_handles);
+            KernelType>>(
+            {dynamic_voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, dynamic_voxel_handles
+        );
     });
 }
 
 void RS_SimulationExecutor::_runRigidbodyCoupling() {
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
         static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-        using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
         auto &ctx = k_ptr->ctx;
 
         // Stamp the rigid-body operation time so the rigid kernels read the true rigid_dt.
@@ -482,10 +658,10 @@ void RS_SimulationExecutor::_runRigidbodyCoupling() {
     });
 }
 
-void RS_SimulationExecutor::_runRigidbodyUpdate() {
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
+void RS_SimulationExecutor::_runRigidbodyContactAndConstraintUpdate() {
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
         static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-        using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
         auto &ctx = k_ptr->ctx;
 
         // Stamp the rigid-body slow constraint and contact solve time.
@@ -534,7 +710,7 @@ void RS_SimulationExecutor::_runRigidbodyUpdate() {
                 k_ptr->host_data->constraint_joint_max_colors
             );
 
-            // Zero the per-body coupling-work accumulator just consumed by compliance adaptation.
+            // Zero the per-body coupling-work accumulator just consumed by stiffness adaptation.
             p_ptr->template run<RSCF_LaunchWithHandles<
                 typename RS_RigidBodyCompute<ComputeAccuracy>::RSCF_ResetRigidBodyCouplingWork,
                 KernelType>>(
@@ -822,36 +998,19 @@ void RS_SimulationExecutor::_runRigidbodyUpdate() {
     });
 }
 
-void RS_SimulationExecutor::_advanceTime() {
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto, bool) {
-        p_ptr->template run<RSCF_UpdateKernelTime>({1, 1, false});
-        k_ptr->updateTimeOnHost();
+void RS_SimulationExecutor::_runRecordUpdate() {
+    _runWithCriticalDataAccessGuard([&](auto *, auto *, auto, bool) {
+        _updateLightAndVision();
+        _updateIntersectRegionRecord();
     });
 }
 
-void RS_SimulationExecutor::_runRecordSaving() {
-    _runGuarded([&](auto *, auto *, auto, bool) {
-        _updateLightAndVision();
-        _storeRecorderRecords();
-    });
+void RS_SimulationExecutor::_runRecorderRecordSaving() {
+    _runWithCriticalDataAccessGuard([&](auto *, auto *, auto, bool) { _storeRecorderRecords(); });
 }
 
 void RS_SimulationExecutor::_runControllerRecordSaving() {
-    _runGuarded([&](auto *, auto *, auto, bool) { _storeControllerRecords(); });
-}
-
-bool RS_SimulationExecutor::_runDivergenceCheck() {
-    bool ok = true;
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto, bool) {
-        using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
-        auto voxel_handles = _getLaunchHandles("voxel");
-        p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<RSCF_GetIsVoxelNanMetric, KernelType>>(
-            {voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, voxel_handles, _reduce_input_buffer
-        );
-        if (_reduce.reduce<bool, RS_ReduceOrOp>(_reduce_input_buffer, voxel_handles.size(), false))
-            ok = false;
-    });
-    return ok;
+    _runWithCriticalDataAccessGuard([&](auto *, auto *, auto, bool) { _storeControllerRecords(); });
 }
 
 void RS_SimulationExecutor::_runContactUpdate() {
@@ -860,9 +1019,9 @@ void RS_SimulationExecutor::_runContactUpdate() {
     bool is_refit_needed = !is_rebuild_needed && (sub_step % _contact_bvh_refit_sub_interval == 0);
     bool is_discovery_needed = is_rebuild_needed || is_refit_needed;
 
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
         static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-        using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
         _rebuildStaticVoxelBVHIfNeeded();
         _rebuildFloorTriangleBVHIfNeeded();
@@ -887,9 +1046,9 @@ void RS_SimulationExecutor::_runContactUpdate() {
 }
 
 void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
-    _runGuarded([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
         static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-        using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
         auto &ctx = k_ptr->ctx;
 
         // Force signals: rigid and soft.
@@ -906,10 +1065,12 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
                 KernelType>>({ctx.force_rigid.size(), RS_AUTO_BLOCK_SIZE, false});
         }
         if (ctx.force_soft.size() > 0) {
-            auto voxel_handles = _getLaunchHandles("voxel");
+            auto dynamic_voxel_handles = _getLaunchHandles("dynamic_voxel");
             p_ptr->template run<RSCF_LaunchWithHandles<
                 typename RS_ForceCompute<ComputeAccuracy>::RSCF_ApplySoftForceSignal,
-                KernelType>>({voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, voxel_handles);
+                KernelType>>(
+                {dynamic_voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, dynamic_voxel_handles
+            );
 
             p_ptr->template run<RSCF_LaunchDirect<
                 typename RS_ForceCompute<ComputeAccuracy>::RSCF_UpdateSoftForceTime,
@@ -933,29 +1094,27 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
 }
 
 void RS_SimulationExecutor::_performCallback() {
-    if (_callback) {
-        RS_KernelManagerGuard guard(_kernel_manager);
-
+    if (!_callback) return;
+    _runWithCommandExecutionGuard([&](auto *k_ptr, auto *, auto, bool) {
         _kernel_manager->syncControllerRecords();
 
-        vector<pair<RSE_SimulationControllerType, RS_Any>> controllers;
-        for (auto &structure_controller : _kernel_manager->getStructureControllers()) {
-            controllers.emplace_back(RSE_SIMULATION_STRUCTURE_CONTROLLER, structure_controller);
-        }
-        for (auto &camera_controller : _kernel_manager->getCameraControllers()) {
-            controllers.emplace_back(RSE_SIMULATION_CAMERA_CONTROLLER, camera_controller);
-        }
-        for (auto &force_controller : _kernel_manager->getForceControllers()) {
-            controllers.emplace_back(RSE_SIMULATION_FORCE_CONTROLLER, force_controller);
-        }
-        for (auto &torque_controller : _kernel_manager->getTorqueControllers()) {
-            controllers.emplace_back(RSE_SIMULATION_TORQUE_CONTROLLER, torque_controller);
+        auto names = _simulation->getControllerNames();
+        auto by_name = _kernel_manager->getControllerSignalsAndRecords(names);
+
+        vector<RS_WorldController> controllers;
+        controllers.reserve(by_name.size());
+        for (auto &[name, bundle] : by_name) {
+            RS_WorldController controller;
+            controller.name = name;
+            controller.records = std::move(bundle.records);
+            controller.signals = std::move(bundle.signals);
+            controllers.emplace_back(std::move(controller));
         }
 
-        _callback(_id, controllers);
+        _callback(_simulation->name, k_ptr->getHostTime(), controllers);
 
         _kernel_manager->syncControllerSignals();
-    }
+    });
 }
 
 void RS_SimulationExecutor::_updateLightAndVision() {
@@ -966,7 +1125,7 @@ void RS_SimulationExecutor::_updateLightAndVision() {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
             auto &ctx = k_ptr->ctx;
-            using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+            using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
             p_ptr->template run<
                 RSCF_LaunchWithLayout<RS_CameraCompute<>::RSCF_UpdateCamera, KernelType>>(
@@ -984,21 +1143,24 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             RSize emissive_num = ctx.structure_emissive_voxel_handles.size();
             ensure_vector_size(ctx.light_weight, emissive_num + 1);
             ensure_vector_size(ctx.light_cdf, emissive_num + 1);
-            float sun_weight =
-                float(k_ptr->world_sun_color.luminance()) * float(k_ptr->world_sky_intensity);
+
+            // Light buffers may have reallocated, needs to update kernel.
+            _kernel_manager->markKernelModified();
+
+            float sun_weight = float(ctx.cosmic_background_vision_mem.sun_color.luminance()) *
+                               float(ctx.cosmic_background_vision_mem.intensity);
             ctx.light_weight.data.copyFrom(
                 RS_ConstMemoryPtr(&sun_weight, sizeof(float)), sizeof(float)
             );
+
+            _kernel_manager->syncKernelIfNeeded();
             if (emissive_num > 0) {
-                p_ptr->template run<RS_VisionRayCompute<>::RSCF_WriteEmissiveLightWeights>(
-                    {emissive_num, RS_AUTO_BLOCK_SIZE, false}, *k_ptr
+                p_ptr->template run<RSCF_LaunchDirect<
+                    RS_VisionRayCompute<>::RSCF_WriteEmissiveLightWeights, KernelType>>(
+                    {emissive_num, RS_AUTO_BLOCK_SIZE, false}
                 );
             }
             _scan.template inclusiveSum<float, float>(ctx.light_weight, ctx.light_cdf);
-
-            // Synchronize context for vector resize.
-            p_ptr->sync();
-            RS_ConstantMemory::write(k_ptr, _device_provider->device, sizeof(RS_Kernel));
 
             if (k_ptr->vision_is_restir_enabled) {
                 p_ptr->template run<RSCF_LaunchWithLayoutPerSegment<
@@ -1041,6 +1203,10 @@ void RS_SimulationExecutor::_updateLightAndVision() {
                     ctx.camera_info_ray_layout
                 );
 
+                // The resample above rebuilt the reservoirs against the current light set, so
+                // reuse is safe again next frame.
+                _kernel_manager->clearVisionRestirReservoirStale();
+
                 // Restir RGB is depth-0 only (chain throughput + reservoirs
                 // already encode direct + 1-bounce indirect); launched per pixel.
                 p_ptr->template run<RSCF_LaunchWithLayoutPerSegment<
@@ -1068,10 +1234,10 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             // Denoise.
             const auto denoise_type = k_ptr->vision_denoise_type;
             const RSize denoise_iterations = k_ptr->vision_denoise_atrous_iterations;
-            const bool denoise_active =
-                (denoise_type == RSE_VISION_DENOISE_ATROUS ||
-                 denoise_type == RSE_VISION_DENOISE_SVGF) &&
-                denoise_iterations > 0 && ctx.camera_info_ray_layout.size() > 0;
+            const bool denoise_active = (denoise_type == RSE_VISION_DENOISE_ATROUS ||
+                                         denoise_type == RSE_VISION_DENOISE_SVGF) &&
+                                        denoise_iterations > 0 &&
+                                        ctx.camera_info_ray_layout.size() > 0;
             if (denoise_active) {
                 if (denoise_type == RSE_VISION_DENOISE_SVGF) {
                     // Temporal accumulate + variance estimate, then ping-pong
@@ -1089,16 +1255,13 @@ void RS_SimulationExecutor::_updateLightAndVision() {
                         ctx.camera_info_ray_layout
                     );
                     exchange(
-                        ctx.camera_denoiser_color_history,
-                        ctx.camera_prev_denoiser_color_history
+                        ctx.camera_denoiser_color_history, ctx.camera_prev_denoiser_color_history
                     );
                     exchange(
-                        ctx.camera_denoiser_moment_history,
-                        ctx.camera_prev_denoiser_moment_history
+                        ctx.camera_denoiser_moment_history, ctx.camera_prev_denoiser_moment_history
                     );
                     exchange(
-                        ctx.camera_denoiser_history_length,
-                        ctx.camera_prev_denoiser_history_length
+                        ctx.camera_denoiser_history_length, ctx.camera_prev_denoiser_history_length
                     );
                 }
                 for (RSize pass = 0; pass < denoise_iterations; ++pass) {
@@ -1140,11 +1303,133 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             if (k_ptr->vision_is_restir_enabled) {
                 exchange(ctx.camera_prev_reservoir_di, ctx.camera_current_reservoir_di);
                 exchange(ctx.camera_prev_reservoir_gi, ctx.camera_current_reservoir_gi);
-                p_ptr->sync();
-                RS_ConstantMemory::write(
-                    k_ptr, _device_provider->device, sizeof(RS_Kernel)
-                );
+                _kernel_manager->markKernelModified();
+                _kernel_manager->syncKernelIfNeeded();
             }
+        });
+    });
+}
+
+void RS_SimulationExecutor::_updateIntersectRegionRecord() {
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
+                using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+                using IRC = RS_IntersectRegionCompute<ComputeAccuracy>;
+                auto &ctx = k_ptr->ctx;
+
+                RSize region_num = ctx.intersect_regions.size();
+                if (region_num == 0) return;
+
+                // Materialize the region BVH leaves from the live source mem and rebuild it.
+                ctx.intersect_region_bvh.resize(region_num);
+                p_ptr->template run<
+                    RSCF_LaunchDirect<typename IRC::RSCF_UpdateIntersectRegion, KernelType>>(
+                    {region_num, RS_AUTO_BLOCK_SIZE, false},
+                    ctx.intersect_region_bvh.object_identifiers,
+                    ctx.intersect_region_bvh.leaf_bounds
+                );
+                ctx.intersect_region_bvh.rebuild();
+                _kernel_manager->markKernelModified();
+                _kernel_manager->syncKernelIfNeeded();
+
+                auto voxel_handles = _getLaunchHandles("voxel");
+                RSize voxel_num = voxel_handles.size();
+                if (voxel_num == 0) {
+                    _kernel_manager->setIntersectRegionRecords({});
+                    return;
+                }
+
+                // Pass 1: count region memberships per voxel, then exclusive-scan to offsets.
+                ensure_vector_size(ctx.intersect_region_counts, voxel_num);
+                ensure_vector_size(ctx.intersect_region_offsets, voxel_num);
+                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                    typename IRC::RSCF_CountIntersectRegionMembership,
+                    KernelType>>(
+                    {voxel_num, RS_AUTO_BLOCK_SIZE, false},
+                    voxel_handles,
+                    ctx.intersect_region_counts.data
+                );
+                _scan.template exclusiveSum<RSize, RSize>(
+                    ctx.intersect_region_counts, ctx.intersect_region_offsets
+                );
+
+                RSize last_offset = 0;
+                RSize last_count = 0;
+                ctx.intersect_region_offsets.readSlice(&last_offset, 1, voxel_num - 1, false);
+                ctx.intersect_region_counts.readSlice(&last_count, 1, voxel_num - 1, true);
+                RSize total = last_offset + last_count;
+                if (total == 0) {
+                    _kernel_manager->setIntersectRegionRecords({});
+                    return;
+                }
+
+                // Pass 2: emit one (record_gid, structure_gid) pair per membership.
+                ensure_vector_size(ctx.intersect_region_pairs, total);
+                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                    typename IRC::RSCF_WriteIntersectRegionMembership,
+                    KernelType>>(
+                    {voxel_num, RS_AUTO_BLOCK_SIZE, false},
+                    voxel_handles,
+                    ctx.intersect_region_offsets.data,
+                    ctx.intersect_region_pairs
+                );
+
+                // Condense: sort record-gid-major, flag run starts, scan, compact to unique set.
+                ensure_vector_size(ctx.intersect_region_keys, total);
+                ensure_vector_size(ctx.intersect_region_sorted_keys, total);
+                ensure_vector_size(ctx.intersect_region_indices, total);
+                ensure_vector_size(ctx.intersect_region_sorted_indices, total);
+                ensure_vector_size(ctx.intersect_region_flags, total);
+                ensure_vector_size(ctx.intersect_region_prefix_sums, total);
+
+                p_ptr->template run<
+                    RSCF_LaunchDirect<logic::RSCF_GetIntersectRegionPairKeys, KernelType>>(
+                    {total, RS_AUTO_BLOCK_SIZE, false},
+                    ctx.intersect_region_pairs,
+                    ctx.intersect_region_keys,
+                    ctx.intersect_region_indices
+                );
+                _sort.template sort<RBigIndex, RIndex>(
+                    ctx.intersect_region_keys,
+                    ctx.intersect_region_indices,
+                    ctx.intersect_region_sorted_keys,
+                    ctx.intersect_region_sorted_indices
+                );
+                p_ptr->template run<
+                    RSCF_LaunchDirect<logic::RSCF_FlagIntersectRegionPairRunStart, KernelType>>(
+                    {total, RS_AUTO_BLOCK_SIZE, false},
+                    ctx.intersect_region_sorted_keys,
+                    ctx.intersect_region_flags,
+                    RIndex(total)
+                );
+                _scan.template inclusiveSum<RIndex, RIndex>(
+                    ctx.intersect_region_flags, ctx.intersect_region_prefix_sums
+                );
+                RIndex unique_num = 0;
+                ctx.intersect_region_prefix_sums.readSlice(&unique_num, 1, total - 1, true);
+                if (unique_num == 0) {
+                    _kernel_manager->setIntersectRegionRecords({});
+                    return;
+                }
+
+                ensure_vector_size(ctx.intersect_region_unique_pairs, unique_num);
+                p_ptr->template run<
+                    RSCF_LaunchDirect<logic::RSCF_CompactIntersectRegionPairs, KernelType>>(
+                    {total, RS_AUTO_BLOCK_SIZE, false},
+                    ctx.intersect_region_pairs,
+                    ctx.intersect_region_sorted_indices,
+                    ctx.intersect_region_flags,
+                    ctx.intersect_region_prefix_sums,
+                    ctx.intersect_region_unique_pairs
+                );
+
+                // Deliver the record-gid-major unique set to the owning managers.
+                std::vector<logic::RS_IntersectRegionPair> host_pairs(unique_num);
+                ctx.intersect_region_unique_pairs.readSlice(host_pairs.data(), unique_num, 0, true);
+                _kernel_manager->setIntersectRegionRecords(host_pairs);
+            });
         });
     });
 }
@@ -1153,7 +1438,7 @@ void RS_SimulationExecutor::_storeRecorderRecords() {
     if (_kernel_manager->getKernelRecordBufferFrameNum() == 0) return;
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+            using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
             auto &ctx = k_ptr->ctx;
 
             /****************************************************************
@@ -1250,7 +1535,7 @@ void RS_SimulationExecutor::_storeRecorderRecords() {
 void RS_SimulationExecutor::_storeControllerRecords() {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+            using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
             auto &ctx = k_ptr->ctx;
 
             /****************************************************************
@@ -1345,188 +1630,41 @@ void RS_SimulationExecutor::_storeControllerRecords() {
 }
 
 void RS_SimulationExecutor::_rebuildStaticVoxelBVHIfNeeded() {
-    auto &spatial_manager = _kernel_manager->getKernelSpatialManager();
-    if (!spatial_manager.isStaticVoxelModified()) return;
-
+    // Static geometry is immobile, so it only rebuilds when the partition membership changed.
+    _resolveVoxelMobilityPartitionIfNeeded();
+    if (!_is_static_bvh_dirty) return;
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
-        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
-                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-                using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
-                auto &ctx = k_ptr->ctx;
-
-                RSize num_voxels = ctx.structure_voxels.size();
-                if (num_voxels == 0) {
-                    ctx.static_voxel_bvh.resize(0);
-                    spatial_manager.clearStaticVoxelModified();
-                    return;
-                }
-
-                ensure_vector_size(ctx.structure_voxel_bvh_flags, num_voxels);
-                ensure_vector_size(ctx.structure_voxel_bvh_prefix_sums, num_voxels);
-
-                p_ptr->template run<RSCF_LaunchDirect<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_GetStaticVoxelFlag,
-                    KernelType>>(
-                    {num_voxels, RS_AUTO_BLOCK_SIZE, false},
-                    ctx.structure_voxel_bvh_flags.data,
-                    num_voxels
-                );
-
-                _scan.template inclusiveSum<RIndex, RIndex>(
-                    ctx.structure_voxel_bvh_flags, ctx.structure_voxel_bvh_prefix_sums
-                );
-
-                RIndex num_active = 0;
-                ctx.structure_voxel_bvh_prefix_sums.readSlice(&num_active, 1, num_voxels - 1, true);
-
-                if (num_active == 0) {
-                    ctx.static_voxel_bvh.resize(0);
-                    spatial_manager.clearStaticVoxelModified();
-                    return;
-                }
-
-                ensure_vector_size(ctx.structure_voxel_bvh_active_handles, num_active);
-
-                p_ptr->template run<RSCF_LaunchDirect<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_CompactStaticVoxels,
-                    KernelType>>(
-                    {num_voxels, RS_AUTO_BLOCK_SIZE, false},
-                    ctx.structure_voxel_bvh_flags.data,
-                    num_voxels,
-                    ctx.structure_voxel_bvh_prefix_sums.data,
-                    ctx.structure_voxel_bvh_active_handles.data
-                );
-
-                ctx.static_voxel_bvh.resize(num_active);
-
-                p_ptr->template run<RSCF_LaunchDirect<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_FillVoxelBVHLeafData,
-                    KernelType>>(
-                    {num_active, RS_AUTO_BLOCK_SIZE, false},
-                    ctx.structure_voxel_bvh_active_handles,
-                    ctx.static_voxel_bvh.object_identifiers,
-                    ctx.static_voxel_bvh.leaf_bounds
-                );
-
-                ctx.static_voxel_bvh.rebuild();
-
-                RS_ConstantMemory::write(k_ptr, _device_provider->device, sizeof(RS_Kernel));
-
-                spatial_manager.clearStaticVoxelModified();
-            });
-        });
+        _buildVoxelBVH(k_ptr->ctx.static_voxel_bvh, _handles.at("static_voxel"));
     });
+    _is_static_bvh_dirty = false;
 }
 
 void RS_SimulationExecutor::_rebuildDynamicVoxelBVH() {
+    _resolveVoxelMobilityPartitionIfNeeded();
+    _resolveVoxelBVHDynamicPartition();
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
-        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
-                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-                using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
-                auto &ctx = k_ptr->ctx;
-
-                if (ctx.host_data->structure_voxel_layout.size() == 0) {
-                    ctx.dynamic_voxel_bvh.resize(0);
-                    return;
-                }
-
-                auto voxel_handles = _getLaunchHandles("voxel");
-                RSize num_voxels = voxel_handles.size();
-
-                ensure_vector_size(ctx.structure_voxel_bvh_flags, num_voxels);
-                ensure_vector_size(ctx.structure_voxel_bvh_prefix_sums, num_voxels);
-
-                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_GetDynamicVoxelFlag,
-                    KernelType>>(
-                    {num_voxels, RS_AUTO_BLOCK_SIZE, false},
-                    voxel_handles,
-                    ctx.structure_voxel_bvh_flags.data
-                );
-
-                _scan.template inclusiveSum<RIndex, RIndex>(
-                    ctx.structure_voxel_bvh_flags, ctx.structure_voxel_bvh_prefix_sums
-                );
-
-                RIndex num_active = 0;
-                ctx.structure_voxel_bvh_prefix_sums.readSlice(&num_active, 1, num_voxels - 1, true);
-
-                if (num_active == 0) {
-                    ctx.dynamic_voxel_bvh.resize(0);
-                    return;
-                }
-
-                ensure_vector_size(ctx.structure_voxel_bvh_active_handles, num_active);
-
-                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_CompactDynamicVoxels,
-                    KernelType>>(
-                    {num_voxels, RS_AUTO_BLOCK_SIZE, false},
-                    voxel_handles,
-                    ctx.structure_voxel_bvh_flags.data,
-                    ctx.structure_voxel_bvh_prefix_sums.data,
-                    ctx.structure_voxel_bvh_active_handles.data
-                );
-
-                ctx.dynamic_voxel_bvh.resize(num_active);
-
-                p_ptr->template run<RSCF_LaunchDirect<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_FillVoxelBVHLeafData,
-                    KernelType>>(
-                    {num_active, RS_AUTO_BLOCK_SIZE, false},
-                    ctx.structure_voxel_bvh_active_handles,
-                    ctx.dynamic_voxel_bvh.object_identifiers,
-                    ctx.dynamic_voxel_bvh.leaf_bounds
-                );
-
-                ctx.dynamic_voxel_bvh.rebuild();
-
-                RS_ConstantMemory::write(k_ptr, _device_provider->device, sizeof(RS_Kernel));
-            });
-        });
+        _buildVoxelBVH(k_ptr->ctx.dynamic_voxel_bvh, _handles.at("bvh_dynamic_voxel"));
     });
 }
 
 void RS_SimulationExecutor::_refitDynamicVoxelBVH() {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
-        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
-                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
-                using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
-                auto &ctx = k_ptr->ctx;
-
-                RSize leaf_count = ctx.dynamic_voxel_bvh.object_identifiers.size();
-                if (leaf_count == 0) return;
-
-                p_ptr->template run<RSCF_LaunchDirect<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_RefitVoxelBVHLeafData,
-                    KernelType>>(
-                    {leaf_count, RS_AUTO_BLOCK_SIZE, false},
-                    ctx.dynamic_voxel_bvh.object_identifiers,
-                    ctx.dynamic_voxel_bvh.leaf_bounds
-                );
-
-                ctx.dynamic_voxel_bvh.refit();
-            });
-        });
+        _refitVoxelBVH(k_ptr->ctx.dynamic_voxel_bvh);
     });
 }
 
 void RS_SimulationExecutor::_rebuildFloorTriangleBVHIfNeeded() {
-    auto &spatial_manager = _kernel_manager->getKernelSpatialManager();
-    if (!spatial_manager.isFloorTriangleModified()) return;
+    if (!_kernel_manager->isFloorTriangleModified()) return;
 
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
+            using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
             auto &ctx = k_ptr->ctx;
 
             RSize triangle_count = ctx.mesh_triangles.size();
             if (triangle_count == 0) {
                 ctx.floor_triangle_bvh.resize(0);
-                spatial_manager.clearFloorTriangleModified();
+                _kernel_manager->clearFloorTriangleModified();
                 return;
             }
 
@@ -1543,47 +1681,114 @@ void RS_SimulationExecutor::_rebuildFloorTriangleBVHIfNeeded() {
 
             ctx.floor_triangle_bvh.rebuild();
 
-            RS_ConstantMemory::write(k_ptr, _device_provider->device, sizeof(RS_Kernel));
+            _kernel_manager->markKernelModified();
+            _kernel_manager->syncKernelIfNeeded();
 
-            spatial_manager.clearFloorTriangleModified();
+            _kernel_manager->clearFloorTriangleModified();
+        });
+    });
+}
+
+void RS_SimulationExecutor::_buildVoxelBVH(
+    logic::RS_VoxelBVH &bvh, device::RS_Vector<RHandle> &handles
+) {
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
+                using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+
+                RSize num_active = handles.size();
+                bvh.resize(num_active);
+                if (num_active > 0) {
+                    p_ptr->template run<RSCF_LaunchDirect<
+                        typename RS_VoxelCompute<ComputeAccuracy>::RSCF_FillVoxelBVHLeafData,
+                        KernelType>>(
+                        {num_active, RS_AUTO_BLOCK_SIZE, false},
+                        handles,
+                        bvh.object_identifiers,
+                        bvh.leaf_bounds
+                    );
+                    bvh.rebuild();
+                }
+                _kernel_manager->markKernelModified();
+                _kernel_manager->syncKernelIfNeeded();
+            });
+        });
+    });
+}
+
+void RS_SimulationExecutor::_refitVoxelBVH(logic::RS_VoxelBVH &bvh) {
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
+                using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+
+                RSize leaf_count = bvh.object_identifiers.size();
+                if (leaf_count == 0) return;
+
+                p_ptr->template run<RSCF_LaunchDirect<
+                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_RefitVoxelBVHLeafData,
+                    KernelType>>(
+                    {leaf_count, RS_AUTO_BLOCK_SIZE, false},
+                    bvh.object_identifiers,
+                    bvh.leaf_bounds
+                );
+
+                bvh.refit();
+            });
         });
     });
 }
 
 template <typename Body>
-void RS_SimulationExecutor::_runGuarded(Body &&body) {
+void RS_SimulationExecutor::_runWithCriticalDataAccessGuard(Body &&body) {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
             selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
-                // Pause the kernel manager so it cannot mutate kernel data while we launch.
-                RS_KernelManagerGuard guard(_kernel_manager);
-                bool was_modified = k_ptr->isModified();
-                if (was_modified) {
-                    p_ptr->sync();
-                    RS_ConstantMemory::write(k_ptr, _device_provider->device, sizeof(RS_Kernel));
-                    k_ptr->clearModified();
-                }
+                // Take critical data access so no commit can mutate the context while we launch.
+                RS_KernelManagerCriticalDataAccessGuard guard(_kernel_manager);
+                bool was_modified = _kernel_manager->isKernelModified();
+                _kernel_manager->syncKernelIfNeeded();
                 body(k_ptr, p_ptr, acc_const, was_modified);
             });
         });
     });
 }
 
-RS_Array<RIndex, 1> RS_SimulationExecutor::_getLaunchHandles(const std::string &name) {
-    RS_Array<RIndex, 1> indices;
+template <typename Body>
+void RS_SimulationExecutor::_runWithCommandExecutionGuard(Body &&body) {
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+                // Pause command execution so no command runs while we touch manager state.
+                RS_KernelManagerCommandExecutionGuard guard(_kernel_manager);
+                bool was_modified = _kernel_manager->isKernelModified();
+                _kernel_manager->syncKernelIfNeeded();
+                body(k_ptr, p_ptr, acc_const, was_modified);
+            });
+        });
+    });
+}
+
+RS_Vector<RHandle> RS_SimulationExecutor::_getLaunchHandles(const std::string &name) {
+    RS_Vector<RHandle> indices;
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
             auto &ctx = k_ptr->ctx;
             if ((name == "voxel" || name == "link" || name == "rigid_body" ||
                  name == "rigid_body_surface_voxel" || name == "constraint_joint") &&
                 _handles.find(name) == _handles.end()) {
-                _handles.insert({name, {{0}, p_ptr}});
+                _handles.insert({name, RS_Vector<RHandle>(p_ptr)});
                 _handle_version_ids[name] = 0;
             }
             if (name == "voxel") {
                 if (ctx.host_data->structure_voxel_layout.versionID() !=
                     _handle_version_ids.at(name)) {
-                    _handles["voxel"].resize(ctx.host_data->structure_voxel_layout.size(), false);
+                    ensure_vector_size(
+                        _handles["voxel"], ctx.host_data->structure_voxel_layout.size()
+                    );
                     p_ptr->template run<RSCF_ResolveThreadHandleFromLayout>(
                         {ctx.structure_voxel_layout.size()},
                         ctx.structure_voxel_layout,
@@ -1592,10 +1797,21 @@ RS_Array<RIndex, 1> RS_SimulationExecutor::_getLaunchHandles(const std::string &
                     _handle_version_ids[name] = ctx.host_data->structure_voxel_layout.versionID();
                 }
                 indices = _handles["voxel"];
+            } else if (name == "dynamic_voxel" || name == "static_voxel") {
+                // The dynamic and static subsets are derived from the full voxel set.
+                _resolveVoxelMobilityPartitionIfNeeded();
+                indices = _handles.at(name);
+            } else if (name == "bvh_dynamic_voxel") {
+                // The dynamic BVH subset is derived from the current dynamic subset.
+                _resolveVoxelMobilityPartitionIfNeeded();
+                _resolveVoxelBVHDynamicPartition();
+                indices = _handles.at(name);
             } else if (name == "link") {
                 if (ctx.host_data->structure_link_layout.versionID() !=
                     _handle_version_ids.at(name)) {
-                    _handles["link"].resize(ctx.host_data->structure_link_layout.size(), false);
+                    ensure_vector_size(
+                        _handles["link"], ctx.host_data->structure_link_layout.size()
+                    );
                     p_ptr->template run<RSCF_ResolveThreadHandleFromLayout>(
                         {ctx.structure_link_layout.size()},
                         ctx.structure_link_layout,
@@ -1607,8 +1823,8 @@ RS_Array<RIndex, 1> RS_SimulationExecutor::_getLaunchHandles(const std::string &
             } else if (name == "rigid_body") {
                 if (ctx.host_data->structure_rigid_body_layout.versionID() !=
                     _handle_version_ids.at(name)) {
-                    _handles["rigid_body"].resize(
-                        ctx.host_data->structure_rigid_body_layout.size(), false
+                    ensure_vector_size(
+                        _handles["rigid_body"], ctx.host_data->structure_rigid_body_layout.size()
                     );
                     p_ptr->template run<RSCF_ResolveThreadHandleFromLayout>(
                         {ctx.structure_rigid_body_layout.size()},
@@ -1622,8 +1838,9 @@ RS_Array<RIndex, 1> RS_SimulationExecutor::_getLaunchHandles(const std::string &
             } else if (name == "rigid_body_surface_voxel") {
                 if (ctx.host_data->structure_rigid_body_surface_voxel_layout.versionID() !=
                     _handle_version_ids.at(name)) {
-                    _handles["rigid_body_surface_voxel"].resize(
-                        ctx.host_data->structure_rigid_body_surface_voxel_layout.size(), false
+                    ensure_vector_size(
+                        _handles["rigid_body_surface_voxel"],
+                        ctx.host_data->structure_rigid_body_surface_voxel_layout.size()
                     );
                     p_ptr->template run<RSCF_ResolveThreadHandleFromLayout>(
                         {ctx.structure_rigid_body_surface_voxel_layout.size()},
@@ -1637,8 +1854,9 @@ RS_Array<RIndex, 1> RS_SimulationExecutor::_getLaunchHandles(const std::string &
             } else if (name == "constraint_joint") {
                 if (ctx.host_data->structure_constraint_joint_layout.versionID() !=
                     _handle_version_ids.at(name)) {
-                    _handles["constraint_joint"].resize(
-                        ctx.host_data->structure_constraint_joint_layout.size(), false
+                    ensure_vector_size(
+                        _handles["constraint_joint"],
+                        ctx.host_data->structure_constraint_joint_layout.size()
                     );
                     p_ptr->template run<RSCF_ResolveThreadHandleFromLayout>(
                         {ctx.structure_constraint_joint_layout.size()},
@@ -1658,17 +1876,171 @@ RS_Array<RIndex, 1> RS_SimulationExecutor::_getLaunchHandles(const std::string &
     return indices;
 }
 
+bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
+    bool recomputed = false;
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
+                using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+                auto &ctx = k_ptr->ctx;
+
+                // Physics iterates the dynamic subset, the static BVH consumes the static subset;
+                // the dynamic BVH subset is derived from the dynamic subset on every rebuild.
+                if (_handles.find("dynamic_voxel") == _handles.end()) {
+                    _handles.insert({"dynamic_voxel", RS_Vector<RHandle>(p_ptr)});
+                    _handles.insert({"static_voxel", RS_Vector<RHandle>(p_ptr)});
+                    _handle_version_ids["voxel_partition"] = 0;
+                }
+
+                // Recompute when the layout topology changed or any voxel's mobility flipped.
+                uint64_t version = ctx.host_data->structure_voxel_layout.versionID();
+                bool dirty = _kernel_manager->isVoxelPartitionModified() ||
+                             _handle_version_ids.at("voxel_partition") != version;
+                if (!dirty) return;
+
+                auto voxel_handles = _getLaunchHandles("voxel");
+                RSize num_voxels = voxel_handles.size();
+
+                if (num_voxels == 0) {
+                    _handles["dynamic_voxel"].occupy(0);
+                    _handles["static_voxel"].occupy(0);
+                } else {
+                    ensure_vector_size(ctx.structure_voxel_dynamic_flags, num_voxels);
+                    ensure_vector_size(ctx.structure_voxel_dynamic_prefix_sums, num_voxels);
+                    ensure_vector_size(ctx.structure_voxel_static_flags, num_voxels);
+                    ensure_vector_size(ctx.structure_voxel_static_prefix_sums, num_voxels);
+
+                    // One classify pass writes both flag arrays.
+                    p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                        typename RS_VoxelCompute<ComputeAccuracy>::RSCF_GetVoxelMobilityFlags,
+                        KernelType>>(
+                        {num_voxels, RS_AUTO_BLOCK_SIZE, false},
+                        voxel_handles,
+                        ctx.structure_voxel_dynamic_flags,
+                        ctx.structure_voxel_static_flags
+                    );
+
+                    auto compact = [&](auto &flags, auto &prefix_sums, const char *key) {
+                        _scan.template inclusiveSum<RIndex, RIndex>(flags, prefix_sums);
+                        RIndex count = 0;
+                        prefix_sums.readSlice(&count, 1, num_voxels - 1, true);
+                        ensure_vector_size(_handles[key], count);
+                        if (count > 0) {
+                            p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                                typename RS_VoxelCompute<ComputeAccuracy>::RSCF_CompactVoxelHandles,
+                                KernelType>>(
+                                {num_voxels, RS_AUTO_BLOCK_SIZE, false},
+                                voxel_handles,
+                                flags,
+                                prefix_sums,
+                                _handles[key]
+                            );
+                        }
+                    };
+                    compact(
+                        ctx.structure_voxel_dynamic_flags,
+                        ctx.structure_voxel_dynamic_prefix_sums,
+                        "dynamic_voxel"
+                    );
+                    compact(
+                        ctx.structure_voxel_static_flags,
+                        ctx.structure_voxel_static_prefix_sums,
+                        "static_voxel"
+                    );
+                }
+
+                _handle_version_ids["voxel_partition"] = version;
+                _kernel_manager->clearVoxelPartitionModified();
+                _is_static_bvh_dirty = true;
+                recomputed = true;
+            });
+        });
+    });
+    return recomputed;
+}
+
+void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+                static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
+                using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+                auto &ctx = k_ptr->ctx;
+
+                if (_handles.find("bvh_dynamic_voxel") == _handles.end()) {
+                    _handles.insert({"bvh_dynamic_voxel", RS_Vector<RHandle>(p_ptr)});
+                }
+
+                auto &dynamic_handles = _handles.at("dynamic_voxel");
+                RSize count_dynamic = dynamic_handles.size();
+                if (count_dynamic == 0) {
+                    _handles["bvh_dynamic_voxel"].occupy(0);
+                    return;
+                }
+
+                ensure_vector_size(ctx.structure_voxel_bvh_dynamic_flags, count_dynamic);
+                ensure_vector_size(ctx.structure_voxel_bvh_dynamic_prefix_sums, count_dynamic);
+
+                // Re-evaluate exposure over the dynamic subset so a voxel exposed since the last
+                // rebuild joins the dynamic BVH.
+                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_GetVoxelBVHDynamicFlags,
+                    KernelType>>(
+                    {count_dynamic, RS_AUTO_BLOCK_SIZE, false},
+                    dynamic_handles,
+                    ctx.structure_voxel_bvh_dynamic_flags
+                );
+
+                _scan.template inclusiveSum<RIndex, RIndex>(
+                    ctx.structure_voxel_bvh_dynamic_flags,
+                    ctx.structure_voxel_bvh_dynamic_prefix_sums
+                );
+                RIndex count = 0;
+                ctx.structure_voxel_bvh_dynamic_prefix_sums.readSlice(
+                    &count, 1, count_dynamic - 1, true
+                );
+                ensure_vector_size(_handles["bvh_dynamic_voxel"], count);
+                if (count > 0) {
+                    p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                        typename RS_VoxelCompute<ComputeAccuracy>::RSCF_CompactVoxelHandles,
+                        KernelType>>(
+                        {count_dynamic, RS_AUTO_BLOCK_SIZE, false},
+                        dynamic_handles,
+                        ctx.structure_voxel_bvh_dynamic_flags,
+                        ctx.structure_voxel_bvh_dynamic_prefix_sums,
+                        _handles["bvh_dynamic_voxel"]
+                    );
+                }
+            });
+        });
+    });
+}
+
 void RS_SimulationExecutor::_resizeReduceBufferIfNeeded(RSize needed_size) {
     if (_reduce_input_buffer.mem_provider == nullptr || _reduce_input_buffer.size() < needed_size) {
         // Just allocate same amount of memory for both input and output, simpler
         // Output size is always smaller or equal to input size
         _reduce_input_buffer.free();
         _reduce_output_buffer.free();
+        _reduce_host_buffer.free();
 
         // Will allocate even if its 0 (then it's associated with mem provider)
         _reduce_input_buffer = _device_provider->allocate(needed_size, true);
         _reduce_output_buffer = _device_provider->allocate(needed_size, true);
+        // Host-side staging for reading reduced per-segment results back to the host.
+        _reduce_host_buffer = _device_provider->allocateHost(needed_size, true);
     }
+}
+
+RSize RS_SimulationExecutor::_snapInterval(RFloat needed, RFloat time_step) {
+    if (!(time_step > RFloat(0)) || !(needed > RFloat(0))) {
+        return 1;
+    }
+    RFloat steps = std::floor(needed / time_step);
+    // Clamp to keep the cast finite for unbounded (absent) subsystems.
+    steps = RS_MIN(steps, RFloat(1e9));
+    return steps >= RFloat(1) ? static_cast<RSize>(steps) : RSize(1);
 }
 
 }  // namespace rise

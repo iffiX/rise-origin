@@ -5,22 +5,43 @@
 #define RS_LINK_M_H
 
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_quat.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_quat.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 
 namespace logic {
+
+RS_ENUM(
+    RSE_LinkAxis,
+    unsigned int,
+    (RSE_X_AXIS, 0),  //!< X Axis
+    (RSE_Y_AXIS, 1),  //!< Y Axis
+    (RSE_Z_AXIS, 2),  //!< Z Axis
+    (RSE_NO_AXIS, 3)  //!< For tendons
+)
+
+//! Defines the direction of a link relative to a given voxel.
+RS_ENUM(
+    RSE_LinkDirection,
+    unsigned int,
+    (RSE_X_POS, 0),        //!< Positive X direction
+    (RSE_X_NEG, 1),        //!< Negative X direction
+    (RSE_Y_POS, 2),        //!< Positive Y direction
+    (RSE_Y_NEG, 3),        //!< Negative Y direction
+    (RSE_Z_POS, 4),        //!< Positive Z direction
+    (RSE_Z_NEG, 5),        //!< Negative Z direction
+    (RSE_NO_DIRECTION, 6)  //!< For tendons
+)
 
 union RS_LinkStateUnion {
     RState link_state_packed;
     struct LinkState {
         RState axis : 3;
         RState is_enabled : 1;
-        RState is_tendon : 1;
         RState is_failed : 1;
-        RState voxel_neg_rigid : 1;
-        RState voxel_pos_rigid : 1;
+        RState is_voxel_neg_rigid_or_fixed : 1;
+        RState is_voxel_pos_rigid_or_fixed : 1;
     } link_state;
     HOST_DEVICE_QUALIFIER explicit RS_LinkStateUnion(unsigned int link_state_packed)
         : link_state_packed(link_state_packed) {}

@@ -9,8 +9,8 @@
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/logic/mesh/rs_mesh_triangle_m.h"
-#include "rise_origin/utils/rs_bound.h"
-#include "rise_origin/utils/rs_triangle.h"
+#include "rise_origin/utils/math/rs_bound.h"
+#include "rise_origin/utils/math/rs_triangle.h"
 
 namespace rise {
 

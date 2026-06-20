@@ -7,11 +7,12 @@
 #include <cstdint>
 #include <functional>
 
-#include "rise_origin/utils/rs_color.h"
+#include "rise_origin/utils/math/rs_color.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_float.h"
-#include "rise_origin/utils/rs_quat.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_float.h"
+#include "rise_origin/utils/math/rs_quat.h"
+#include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/device/data/rs_bvh.h"
 
 namespace rise {
 
@@ -36,23 +37,47 @@ RS_ENUM(
      3)  //!< Neighbor present, different transparent material; ray refracts across.
 )
 
+RS_ENUM(
+    RSE_VoxelExpansionControlMode,
+    RState,
+    (RSE_VOXEL_EXPANSION_CONTROL_BASIC_POSITION, 0),  //!< Signal is the target expansion ratio.
+    (RSE_VOXEL_EXPANSION_CONTROL_RATE, 1)             //!< Signal is the expansion rate.
+)
+
 union RS_VoxelStateUnion {
     RState voxel_state_packed;
     struct RS_VoxelState {
+        /// Friction regime recorded on the previous step.
         RState previous_friction_state : 2;
+        /// Whether the voxel participates in the world.
         RState is_enabled : 1;
+        /// Whether the voxel lies on its body surface.
         RState is_surface : 1;
+        /// Whether the voxel is currently immobile, from fixed material or freezing.
+        RState is_static : 1;
+        /// Whether the voxel belongs to a rigid body.
         RState is_rigid : 1;
+        /// Whether the voxel is permanently fixed by its material.
         RState is_fixed : 1;
+        /// Whether the voxel has at least one soft link.
         RState has_link : 1;
+        /// Whether the voxel carries an expansion signal.
         RState has_expansion : 1;
+        /// How the expansion signal is interpreted.
         RState expansion_control_mode : 1;
+        /// Whether contact slot 0 holds a voxel contact.
         RState has_contact_voxel_0 : 1;
-        RState is_contact_voxel_0_rigid : 1;
+        /// Whether the slot 0 contact voxel is rigid or static.
+        RState is_contact_voxel_0_rigid_or_static : 1;
+        /// Whether contact slot 1 holds a voxel contact.
         RState has_contact_voxel_1 : 1;
-        RState is_contact_voxel_1_rigid : 1;
+        /// Whether the slot 1 contact voxel is rigid or static.
+        RState is_contact_voxel_1_rigid_or_static : 1;
+        /// Whether the voxel is in contact with the floor.
         RState has_contact_floor : 1;
-        RState link_is_tendon : 6;
+        /// Whether the owning structure has at least one constraint.
+        RState is_structure_constrained : 1;
+        /// Packed per-face role bits driving render and contact activity.
         RState face_role : 12;
     } voxel_state;
 };
@@ -60,29 +85,39 @@ union RS_VoxelStateUnion {
 union RS_VoxelBVHLeafMetadataUnion {
     RState meta_packed;
     struct RS_VoxelBVHLeafMetadata {
+        /// Whether the voxel participates in the world.
         RState is_enabled : 1;
+        /// Whether the voxel lies on its body surface.
         RState is_surface : 1;
+        /// Whether the voxel is currently immobile, from fixed material or freezing.
+        RState is_static : 1;
+        /// Whether the voxel belongs to a rigid body.
         RState is_rigid : 1;
-        RState is_fixed : 1;
+        /// Whether the voxel emits light.
         RState is_emissive : 1;
+        /// Whether the voxel is rendered as transparent.
         RState is_transparent : 1;
+        /// Whether the voxel is included in render traversal.
         RState is_render_active : 1;
+        /// Whether the voxel is included in contact traversal.
         RState is_contact_active : 1;
+        /// Whether the owning structure has at least one constraint.
+        RState is_structure_constrained : 1;
     } meta;
 };
 
 union RS_VoxelContactFilterKeyUnion {
     RBigIndex contact_filter_key_packed;
     struct RS_VoxelContactFilterKey {
-        RBigIndex body_sid : 12;
-        RBigIndex rigid_body_sid : 12;
-        int64_t index_x : 12;
-        int64_t index_y : 12;
-        int64_t index_z : 12;
+        RBigIndex body_sid : 20;
+        RBigIndex constrained_rigid_body_sid : 8;
+        RBigIndex index_x_res : 4;
+        RBigIndex index_y_res : 4;
+        RBigIndex index_z_res : 4;
     } contact_filter_key;
 };
 
-static constexpr RBigIndex RS_VOXEL_CONTACT_FILTER_KEY_NULL_RIGID_BODY_SID = 0xFFF;
+static constexpr RBigIndex RS_VOXEL_CONTACT_FILTER_KEY_NULL_CONSTRAINED_RIGID_BODY_SID = 0xFF;
 
 /// Voxel-BVH leaf: caches the contact broad-phase payload inline.
 struct RS_VoxelBVHObjectIdentifier {
@@ -109,6 +144,11 @@ struct RS_VoxelBVHObjectIdentifierHostHasher {
         return std::hash<RHandle>()(identifier.object_handle);
     }
 };
+
+using RS_VoxelBVH = device::RS_BVHBase<
+    RBigIndex,
+    logic::RS_VoxelBVHObjectIdentifier,
+    logic::RS_VoxelBVHObjectIdentifierHostHasher>;
 
 template <RSE_FloatType FloatMemAccuracy>
 class RS_VoxelMem {
@@ -148,6 +188,9 @@ class RS_VoxelMem {
     /// Expansion signal id.
     RIndex expansion_signal_sid = RS_NULL_INDEX;
 
+    /// Structure signal handle.
+    RHandle structure_signal = RS_NULL_HANDLE;
+
     /// Link ids in the 6 cardinal directions according to RSE_LinkDirection enumeration.
     RIndex link_sid[6] =
         {RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX};
@@ -170,9 +213,6 @@ class RS_VoxelMem {
 
     /// Material of this voxel for vision (Note, it is preset, an exception for the rule)
     RHandle vision_material = RS_NULL_HANDLE;
-
-    /// Expansion signal
-    RHandle expansion_signal = RS_NULL_HANDLE;
 
     /// Links in the 6 cardinal directions according to RSE_LinkDirection enumeration
     RHandle links[6] = {
@@ -294,13 +334,13 @@ class RS_VoxelMem {
         field(contact_filter_key),        \
         field(voxel_material_sid),        \
         field(expansion_signal_sid),      \
+        field(structure_signal),          \
         field(link_sid),                  \
         field(neighbor_voxel_sid),        \
         field(state),                     \
         field(rigid_body),                \
         field(voxel_material),            \
         field(vision_material),           \
-        field(expansion_signal),          \
         field(links),                     \
         field(neighbor_voxels),           \
         field(contact_voxel_0),           \

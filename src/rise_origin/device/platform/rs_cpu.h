@@ -14,10 +14,10 @@
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_env_var.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/rs_host_block.h"
-#include "rise_origin/utils/rs_memory.h"
-#include "rise_origin/utils/rs_thread_pool.h"
-#include "rise_origin/utils/rs_timer.h"
+#include "rise_origin/utils/concurrency/rs_cpu_block.h"
+#include "rise_origin/utils/memory/rs_memory.h"
+#include "rise_origin/utils/concurrency/rs_thread_pool.h"
+#include "rise_origin/utils/time/rs_timer.h"
 
 namespace rise {
 
@@ -29,8 +29,8 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
     std::shared_ptr<RS_ThreadPool> pool = nullptr;
     RS_MemoryPtr shared_mem;
     RS_MemoryPtr stack_mem;
-    std::vector<RS_HostBlock> host_blocks;
-    std::vector<RS_HostGridBlock> host_grid_blocks;
+    std::vector<RS_CPUBlock> cpu_blocks;
+    std::vector<RS_CPUGridBlock> host_grid_blocks;
 
     RS_MemoryCPUProvider() {};
 
@@ -67,7 +67,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
         stack_mem.free();
 
         pool.reset();
-        host_blocks.clear();
+        cpu_blocks.clear();
         host_grid_blocks.clear();
 
         mutex->unlock();
@@ -80,7 +80,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
 
         if (size == 0) return {nullptr, 0, 0, device, this};
 
-        std::lock_guard lock(*mutex);
+        std::lock_guard<std::recursive_mutex> lock(*mutex);
         // Make sure malloc task is executed after all previous tasks
         pool->wait();
         RS_Timer exec_timer;
@@ -102,7 +102,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
 
         if (size == 0) return {nullptr, 0, 0, device, this};
 
-        std::lock_guard lock(*mutex);
+        std::lock_guard<std::recursive_mutex> lock(*mutex);
         // Make sure malloc task is executed after all previous tasks
         pool->wait();
 
@@ -125,7 +125,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
         if (ptr.provider() != this)
             RS_THROW(RS_HostExecutionException("Cannot free memory allocated by another provider"));
 
-        std::lock_guard lock(*mutex);
+        std::lock_guard<std::recursive_mutex> lock(*mutex);
         // Make sure free task is executed after all previous tasks
         pool->wait();
         RS_Timer exec_timer;
@@ -154,7 +154,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
         if (ptr.provider() != this)
             RS_THROW(RS_HostExecutionException("Cannot set memory allocated by another provider"));
 
-        std::lock_guard lock(*mutex);
+        std::lock_guard<std::recursive_mutex> lock(*mutex);
         // Make sure memset task is executed after all previous tasks
         pool->wait();
         RS_Timer exec_timer;
@@ -201,7 +201,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                 src.device().id
             ));
 
-        std::lock_guard lock(*mutex);
+        std::lock_guard<std::recursive_mutex> lock(*mutex);
         // Make sure memcpy task is executed after all previous tasks
         pool->wait();
         RS_Timer exec_timer;
@@ -225,7 +225,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
     sync(bool sync_main = true, bool sync_copy_to = true, bool sync_copy_from = true) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CPU provider is not initialized"));
 
-        std::lock_guard lock(*mutex);
+        std::lock_guard<std::recursive_mutex> lock(*mutex);
         RS_Timer exec_timer;
         pool->wait();
 
@@ -243,7 +243,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
 
         ComputeFunction::validate();
 
-        config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE ? RS_HOST_DEFAULT_BLOCK_SIZE
+        config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE ? RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE
                                                                     : config.block_size;
 
         config.shared_mem_size = config.shared_mem_size == 0
@@ -257,7 +257,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
         } else {
             RSize block_num = RS_CEIL_DIV(config.thread_num, config.block_size);
 
-            std::lock_guard lock(*mutex);
+            std::lock_guard<std::recursive_mutex> lock(*mutex);
             pool->wait();  // make sure all previous tasks are finished
             RSize parallel_block_num = pool->size();
 
@@ -266,16 +266,16 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                 shared_mem = allocate(config.shared_mem_size * parallel_block_num, true);
             }
 
-            if (RS_HOST_FIBER_STACK_SIZE * config.block_size * parallel_block_num >
+            if (RS_DEVICE_CPU_FIBER_STACK_SIZE * config.block_size * parallel_block_num >
                 stack_mem.size()) {
                 stack_mem.free();
                 stack_mem = allocate(
-                    RS_HOST_FIBER_STACK_SIZE * config.block_size * parallel_block_num, true
+                    RS_DEVICE_CPU_FIBER_STACK_SIZE * config.block_size * parallel_block_num, true
                 );
             }
 
-            if (parallel_block_num > host_blocks.size()) {
-                host_blocks.resize(parallel_block_num);
+            if (parallel_block_num > cpu_blocks.size()) {
+                cpu_blocks.resize(parallel_block_num);
             }
 
             RS_Timer exec_timer;
@@ -302,32 +302,32 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                     RIndex worker_thread_index =
                         RS_ThreadPool::RS_SynchronizedThreadPoolWorker::index;
                     if (config.shared_mem_size > 0) {
-                        host_blocks[worker_thread_index].run<ComputeFunction, Args...>(
+                        cpu_blocks[worker_thread_index].run<ComputeFunction, Args...>(
                             b,
                             config.block_size,
                             RS_MIN(config.block_size, config.thread_num - b * config.block_size),
-                            RS_HOST_FIBER_STACK_SIZE,
+                            RS_DEVICE_CPU_FIBER_STACK_SIZE,
                             (stack_mem +
-                             worker_thread_index * config.block_size * RS_HOST_FIBER_STACK_SIZE)
+                             worker_thread_index * config.block_size * RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                 .ptr(),
                             (shared_mem + worker_thread_index * config.shared_mem_size).ptr(),
                             args...
                         );
                     } else {
-                        host_blocks[worker_thread_index].run<ComputeFunction, Args...>(
+                        cpu_blocks[worker_thread_index].run<ComputeFunction, Args...>(
                             b,
                             config.block_size,
                             RS_MIN(config.block_size, config.thread_num - b * config.block_size),
-                            RS_HOST_FIBER_STACK_SIZE,
+                            RS_DEVICE_CPU_FIBER_STACK_SIZE,
                             (stack_mem +
-                             worker_thread_index * config.block_size * RS_HOST_FIBER_STACK_SIZE)
+                             worker_thread_index * config.block_size * RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                 .ptr(),
                             static_cast<void *>(nullptr),
                             args...
                         );
                     }
                 },
-                RS_HOST_THREAD_POOL_TASK_TO_THREAD_RATIO * pool->size()
+                RS_DEVICE_CPU_THREAD_POOL_TASK_TO_THREAD_RATIO * pool->size()
             );
             if (config.sync || RS_EnvironmentVariables::getInstance().isExecForceSync())
                 pool->wait();
@@ -361,7 +361,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                 RS_DeviceExecutionException("Compute function is not supported by the CPU provider")
             );
         } else {
-            std::lock_guard lock(*mutex);
+            std::lock_guard<std::recursive_mutex> lock(*mutex);
             pool->wait();  // make sure all previous tasks are finished
             RSize parallel_block_num = pool->size();
 
@@ -370,11 +370,11 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                 shared_mem = allocate(config.shared_mem_size * parallel_block_num, true);
             }
 
-            if (RS_HOST_FIBER_STACK_SIZE * total_threads_per_block * parallel_block_num >
+            if (RS_DEVICE_CPU_FIBER_STACK_SIZE * total_threads_per_block * parallel_block_num >
                 stack_mem.size()) {
                 stack_mem.free();
                 stack_mem = allocate(
-                    RS_HOST_FIBER_STACK_SIZE * total_threads_per_block * parallel_block_num, true
+                    RS_DEVICE_CPU_FIBER_STACK_SIZE * total_threads_per_block * parallel_block_num, true
                 );
             }
 
@@ -426,9 +426,9 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                             bx,
                             by,
                             bz,
-                            RS_HOST_FIBER_STACK_SIZE,
+                            RS_DEVICE_CPU_FIBER_STACK_SIZE,
                             (stack_mem + worker_thread_index * total_threads_per_block *
-                                             RS_HOST_FIBER_STACK_SIZE)
+                                             RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                 .ptr(),
                             (shared_mem + worker_thread_index * config.shared_mem_size).ptr(),
                             args...
@@ -444,16 +444,16 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                             bx,
                             by,
                             bz,
-                            RS_HOST_FIBER_STACK_SIZE,
+                            RS_DEVICE_CPU_FIBER_STACK_SIZE,
                             (stack_mem + worker_thread_index * total_threads_per_block *
-                                             RS_HOST_FIBER_STACK_SIZE)
+                                             RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                 .ptr(),
                             static_cast<void *>(nullptr),
                             args...
                         );
                     }
                 },
-                RS_HOST_THREAD_POOL_TASK_TO_THREAD_RATIO * pool->size()
+                RS_DEVICE_CPU_THREAD_POOL_TASK_TO_THREAD_RATIO * pool->size()
             );
             if (config.sync || RS_EnvironmentVariables::getInstance().isExecForceSync())
                 pool->wait();

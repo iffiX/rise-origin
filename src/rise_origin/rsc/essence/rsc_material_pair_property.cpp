@@ -1,0 +1,64 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Muhan Li (iffi/iffiX)
+
+#include "rise_origin/rsc/essence/rsc_material_pair_property.h"
+
+namespace rise {
+
+namespace rsc {
+
+bool RSC_MaterialPairPropertyCoulombFriction::operator==(
+    const RSC_MaterialPairPropertyCoulombFriction &other
+) const {
+    return RSC_MaterialPairPropertyBase::operator==(other) && u_static == other.u_static &&
+           u_dynamic == other.u_dynamic;
+}
+
+void RSC_MaterialPairPropertyCoulombFriction::_validate() const {
+    RSC_EssenceBase::_validate();
+    RSC_EXPECT_GE(RSC_MaterialPairPropertyCoulombFriction, u_static, 0);
+    RSC_EXPECT_LE(RSC_MaterialPairPropertyCoulombFriction, u_static, 1);
+    RSC_EXPECT_GE(RSC_MaterialPairPropertyCoulombFriction, u_dynamic, 0);
+    RSC_EXPECT_LE(RSC_MaterialPairPropertyCoulombFriction, u_dynamic, 1);
+    RSC_EXPECT_NOT_EMPTY(RSC_MaterialPairPropertyCoulombFriction, first_material_reference);
+    RSC_EXPECT_NOT_EMPTY(RSC_MaterialPairPropertyCoulombFriction, second_material_reference);
+}
+
+void RSC_MaterialPairPropertyCoulombFriction::_read(
+    const RS_CharacterizationPropertyTree &rsc_tree
+) {
+    RSC_EssenceBase::_read(rsc_tree);
+    first_material_reference = rsc_tree.get("FirstMaterialReference", first_material_reference);
+    second_material_reference =
+        rsc_tree.get("SecondMaterialReference", second_material_reference);
+    u_static = rsc_tree.get("FrictionStatic", u_static);
+    u_dynamic = rsc_tree.get("FrictionDynamic", u_dynamic);
+}
+
+bool RSC_MaterialPairPropertyRestitution::operator==(
+    const RSC_MaterialPairPropertyRestitution &other
+) const {
+    return RSC_MaterialPairPropertyBase::operator==(other) && restitution == other.restitution;
+}
+
+void RSC_MaterialPairPropertyRestitution::_validate() const {
+    RSC_EssenceBase::_validate();
+    RSC_EXPECT_GE(RSC_MaterialPairPropertyRestitution, restitution, 0);
+    RSC_EXPECT_LE(RSC_MaterialPairPropertyRestitution, restitution, 1);
+    RSC_EXPECT_NOT_EMPTY(RSC_MaterialPairPropertyRestitution, first_material_reference);
+    RSC_EXPECT_NOT_EMPTY(RSC_MaterialPairPropertyRestitution, second_material_reference);
+}
+
+void RSC_MaterialPairPropertyRestitution::_read(
+    const RS_CharacterizationPropertyTree &rsc_tree
+) {
+    RSC_EssenceBase::_read(rsc_tree);
+    first_material_reference = rsc_tree.get("FirstMaterialReference", first_material_reference);
+    second_material_reference =
+        rsc_tree.get("SecondMaterialReference", second_material_reference);
+    restitution = rsc_tree.get("Restitution", restitution);
+}
+
+}  // namespace rsc
+
+}  // namespace rise

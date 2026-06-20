@@ -6,7 +6,7 @@
 
 #include "rise_origin/device/platform/rs_platform.h"
 #include "rise_origin/device/rs_compute.h"
-#include "rise_origin/utils/rs_memory.h"
+#include "rise_origin/utils/memory/rs_memory.h"
 #include "rs_data_util.h"
 
 namespace rise {
@@ -47,12 +47,11 @@ class RS_Value {
     RS_Value(const T& value, RS_MemoryProvider* provider) { init(value, provider); }
 
     /**
-     * @brief Initialize the RS_Value object with the default value and the given provider.
+     * @brief Initialize the RS_Value object with the given provider.
      */
     void init(RS_MemoryProvider* provider) {
         RS_DATA_EXPECT_PROVIDER_NOT_NULL(provider);
         data = provider->allocate(sizeof(T), false);
-        fill(T());
     }
 
     /**

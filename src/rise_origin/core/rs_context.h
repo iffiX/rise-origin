@@ -7,7 +7,8 @@
 #include <unordered_map>
 #include <vector>
 
-#include "rise_origin/core/rs_simulation_record.h"
+#include "rise_origin/core/rs_world_record.h"
+#include "rise_origin/core/rs_world_signal.h"
 #include "rise_origin/device/data/rs_array_tree.h"
 #include "rise_origin/device/data/rs_buffer.h"
 #include "rise_origin/device/data/rs_bvh.h"
@@ -16,6 +17,7 @@
 #include "rise_origin/device/data/rs_sparse.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/logic/mesh/rs_mesh_triangle_m.h"
+#include "rise_origin/logic/record/rs_intersect_region_m.h"
 #include "rise_origin/logic/rigid/rs_constraint_m.h"
 #include "rise_origin/logic/rigid/rs_contact_m.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_m.h"
@@ -27,19 +29,23 @@
 #include "rise_origin/logic/soft/rs_voxel_m.h"
 #include "rise_origin/logic/soft/rs_voxel_material_m.h"
 #include "rise_origin/logic/vision/rs_camera_m.h"
+#include "rise_origin/logic/vision/rs_vision_cosmic_background_m.h"
+#include "rise_origin/logic/vision/rs_vision_floor_m.h"
 #include "rise_origin/logic/vision/rs_vision_material_m.h"
-#include "rise_origin/utils/rs_color.h"
+#include "rise_origin/logic/vision/rs_vision_texture_m.h"
+#include "rise_origin/utils/math/rs_color.h"
 #include "rs_layout.h"
 
 namespace rise {
 
-using RS_VoxelBVH = device::RS_BVHBase<
-    RBigIndex,
-    logic::RS_VoxelBVHObjectIdentifier,
-    logic::RS_VoxelBVHObjectIdentifierHostHasher>;
+struct RS_FloorMem {
+    // Material gid for contact pair-table lookups.
+    RIndex material_gid = RS_NULL_INDEX;
 
-struct RS_ArrayFloorContext {
-    // In RSC.Simulation.Floor
+    // Flat floor plane height (z, meters).
+    RFloat height = 0;
+
+    // Array floor data
     RFloat x_size = 0;
     RFloat y_size = 0;
     RSize x_values = 0;  // cell count after upsampling
@@ -50,8 +56,8 @@ struct RS_ArrayFloorContext {
     bool is_y_repeat = false;
     RFloat height_min = 0;  // min z over heights[], for finite-z slab of array-walk repeat
     RFloat height_max = 0;  // max z over heights[], same purpose
-    device::RS_DivMod<RSize> x_divmod;
-    device::RS_DivMod<RSize> y_divmod;
+    device::RS_DivMod<RSize> x_divmod{1};
+    device::RS_DivMod<RSize> y_divmod{1};
     RSize x_wrap_offset = 0;
     RSize y_wrap_offset = 0;
     device::RS_Array<RFloat, 2> heights;  // absolute Z in meters, shape {y_values, x_values}
@@ -59,6 +65,9 @@ struct RS_ArrayFloorContext {
 };
 
 struct RS_ContextHostData {
+    // Texture context data layout
+    RS_PooledLayout texture_grid_layout;
+
     // Structure context data layouts
     RS_PooledLayout structure_link_material_layout;
     RS_PooledLayout structure_voxel_material_layout;
@@ -70,10 +79,8 @@ struct RS_ContextHostData {
 
     RS_CompactLayout structure_constraint_joint_block_range_layout;
 
-    // Structure signal layouts
-    RS_PooledLayout structure_expansion_signal_layout;
-    RS_PooledLayout structure_hinge_signal_layout;
-    RS_PooledLayout structure_prismatic_signal_layout;
+    // Structure signal layout
+    RS_PooledLayout structure_signal_layout;
 
     // Structure record layouts
     RS_CompactLayout structure_record_layout;
@@ -95,10 +102,13 @@ struct RS_ContextHostData {
     RS_CompactLayout camera_pixel_record_layout;
     RS_CompactLayout camera_state_record_layout;
 
-    // Camera signal layout, note that all signals are packed together
-    RS_PooledLayout camera_control_signal_layout;
+    // Camera signal layout
+    RS_PooledLayout camera_signal_layout;
 
     RS_PooledLayout vision_material_layout;
+
+    // Intersect region layout
+    RS_CompactLayout intersect_region_record_layout;
 
     // Force signal layout
     RS_PooledLayout force_signal_layout;
@@ -130,15 +140,33 @@ struct RS_Context {
     using CameraMemType = logic::RS_CameraMem<FloatMemAccuracy_>;
     using VisionMaterialMemType = logic::RS_VisionMaterialMem<FloatMemAccuracy_>;
 
-    RS_ArrayFloorContext floor;
-
-    RS_VoxelBVH static_voxel_bvh;
-    RS_VoxelBVH dynamic_voxel_bvh;
+    // Spatial data.
+    logic::RS_VoxelBVH static_voxel_bvh;
+    logic::RS_VoxelBVH dynamic_voxel_bvh;
     device::RS_BVH floor_triangle_bvh;
+    logic::RS_IntersectRegionBVH intersect_region_bvh;
 
+    // Texture data.
+    device::RS_Array<logic::RS_TextureGridMem, 1> texture_grids;
+    device::RS_DeviceLayout texture_grid_layout;
+
+    // Material data.
+    device::RS_Array<float, 2> material_friction_static_table;
+    device::RS_Array<float, 2> material_friction_dynamic_table;
+    device::RS_Array<float, 2> material_restitution_table;
+
+    // Cosmic background data.
+    logic::RS_VisionCosmicBackgroundMem cosmic_background_vision_mem;
+
+    // Floor data.
+    logic::RS_VisionFloorMem floor_vision_mem;
+    RS_FloorMem floor;
+
+    // Mesh data.
     device::RS_Array<logic::RS_MeshTriangleMem, 1> mesh_triangles;
     device::RS_DeviceLayout mesh_triangle_layout;
 
+    // Structure data.
     device::RS_StructOfArrays<LinkMaterialMemType> structure_link_materials;
     device::RS_StructOfArrays<VoxelMaterialMemType> structure_voxel_materials;
     device::RS_StructOfArrays<LinkMemType> structure_links;
@@ -164,13 +192,14 @@ struct RS_Context {
 
     device::RS_Vector<RHandle> structure_emissive_voxel_handles;
 
-    device::RS_Vector<RIndex> structure_voxel_bvh_flags;
-    device::RS_Vector<RIndex> structure_voxel_bvh_prefix_sums;
-    device::RS_Vector<RHandle> structure_voxel_bvh_active_handles;
+    device::RS_Vector<RIndex> structure_voxel_dynamic_flags;
+    device::RS_Vector<RIndex> structure_voxel_dynamic_prefix_sums;
+    device::RS_Vector<RIndex> structure_voxel_bvh_dynamic_flags;
+    device::RS_Vector<RIndex> structure_voxel_bvh_dynamic_prefix_sums;
+    device::RS_Vector<RIndex> structure_voxel_static_flags;
+    device::RS_Vector<RIndex> structure_voxel_static_prefix_sums;
 
-    device::RS_Array<RFloat, 1> structure_expansion_signals;
-    device::RS_Array<RFloat, 1> structure_hinge_signals;
-    device::RS_Array<RFloat, 1> structure_prismatic_signals;
+    device::RS_Array<RS_WorldStructureVoxelSignal, 1> structure_signals;
 
     device::RS_DeviceLayout structure_link_material_layout;
     device::RS_DeviceLayout structure_voxel_material_layout;
@@ -182,11 +211,9 @@ struct RS_Context {
 
     device::RS_DeviceLayout structure_constraint_joint_block_range_layout;
 
-    device::RS_DeviceLayout structure_expansion_signal_layout;
-    device::RS_DeviceLayout structure_hinge_signal_layout;
-    device::RS_DeviceLayout structure_prismatic_signal_layout;
+    device::RS_DeviceLayout structure_signal_layout;
 
-    device::RS_Vector<RS_SimulationStructureRecord> structure_records;
+    device::RS_Vector<RS_WorldStructureVoxelRecord> structure_records;
     device::RS_Vector<device::RS_DoubleBuffer> structure_recorder_buffers;
     device::RS_Vector<device::RS_DirectBuffer> structure_controller_buffers;
     device::RS_Vector<device::RS_Array<RHandle, 1>> structure_voxel_record_handles;
@@ -204,20 +231,21 @@ struct RS_Context {
     device::RS_DeviceLayout
         structure_rigid_body_surface_voxel_to_rigid_body_reduction_output_layout;
 
+    // Camera data.
     device::RS_Vector<CameraMemType> cameras;
-    device::RS_Vector<RS_SimulationCameraRecord> camera_records;
+    device::RS_Vector<RS_WorldCameraPerspectiveRecord> camera_records;
     device::RS_Vector<device::RS_DoubleBuffer> camera_recorder_buffers;
     device::RS_Vector<device::RS_DirectBuffer> camera_controller_buffers;
     device::RS_Vector<logic::RS_CameraRGBCanvas> camera_current_rgb_canvas;
     device::RS_Vector<logic::RS_CameraRGBCanvas> camera_next_rgb_canvas;
-    // Basic and restir shared primary aux buffers.
+    /// Basic and restir shared primary aux buffers.
     device::RS_Vector<logic::RS_CameraAuxNormal> camera_aux_normal;
     device::RS_Vector<logic::RS_CameraAuxDepthZ> camera_aux_depth_z;
     device::RS_Vector<logic::RS_CameraAuxHitPosition> camera_aux_hit_position;
     device::RS_Vector<logic::RS_CameraAuxObjectKey> camera_aux_object_key;
     device::RS_Vector<logic::RS_CameraAuxRoughness> camera_aux_roughness;
     device::RS_Vector<logic::RS_CameraAuxScreenMotion> camera_aux_screen_motion;
-    // Restir only aux buffers.
+    /// Restir only aux buffers.
     device::RS_Vector<logic::RS_CameraAuxHitPosition> camera_aux_endpoint_hit_position;
     device::RS_Vector<logic::RS_CameraAuxNormal> camera_aux_endpoint_normal;
     device::RS_Vector<logic::RS_CameraAuxObjectKey> camera_aux_endpoint_object_key;
@@ -228,18 +256,18 @@ struct RS_Context {
     device::RS_Vector<logic::RS_CameraAuxMaterialType> camera_aux_endpoint_material_type;
     device::RS_Vector<logic::RS_CameraAuxScreenMotion> camera_aux_endpoint_screen_motion;
     device::RS_Vector<logic::RS_CameraAuxChainThroughput> camera_aux_chain_throughput;
-    device::RS_Vector<logic::RS_CameraAuxChainTerminalKind> camera_aux_chain_terminal_kind;
+    device::RS_Vector<logic::RS_CameraAuxChainTerminalType> camera_aux_chain_terminal_type;
     device::RS_Vector<logic::RS_CameraReservoirDI> camera_prev_reservoir_di;
     device::RS_Vector<logic::RS_CameraReservoirDI> camera_current_reservoir_di;
     device::RS_Vector<logic::RS_CameraReservoirGI> camera_prev_reservoir_gi;
     device::RS_Vector<logic::RS_CameraReservoirGI> camera_current_reservoir_gi;
     device::RS_Vector<logic::RS_CameraReservoirDI> camera_spatial_reservoir_di;
     device::RS_Vector<logic::RS_CameraReservoirGI> camera_spatial_reservoir_gi;
-    // SVGF prev-frame aux snapshots.
+    /// SVGF prev-frame aux snapshots.
     device::RS_Vector<logic::RS_CameraPrevAuxNormal> camera_prev_aux_normal;
     device::RS_Vector<logic::RS_CameraPrevAuxDepthZ> camera_prev_aux_depth_z;
     device::RS_Vector<logic::RS_CameraPrevAuxObjectKey> camera_prev_aux_object_key;
-    // SVGF temporal history (current and ping-pong prev).
+    /// SVGF temporal history (current and ping-pong prev).
     device::RS_Vector<logic::RS_CameraDenoiserColorHistory> camera_denoiser_color_history;
     device::RS_Vector<logic::RS_CameraDenoiserMomentHistory> camera_denoiser_moment_history;
     device::RS_Vector<logic::RS_CameraDenoiserHistoryLength> camera_denoiser_history_length;
@@ -248,7 +276,7 @@ struct RS_Context {
     device::RS_Vector<logic::RS_CameraDenoiserMomentHistory> camera_prev_denoiser_moment_history;
     device::RS_Vector<logic::RS_CameraDenoiserHistoryLength> camera_prev_denoiser_history_length;
 
-    device::RS_Vector<RFloat> camera_control_signals;
+    device::RS_Array<RS_WorldCameraPerspectiveSignal, 1> camera_signals;
 
     device::RS_DeviceLayout camera_layout;
     device::RS_DeviceLayout camera_info_ray_layout;
@@ -256,8 +284,9 @@ struct RS_Context {
     device::RS_DeviceLayout camera_record_layout;
     device::RS_DeviceLayout camera_pixel_record_layout;
     device::RS_DeviceLayout camera_state_record_layout;
-    device::RS_DeviceLayout camera_control_signal_layout;
+    device::RS_DeviceLayout camera_signal_layout;
 
+    // Vision data.
     device::RS_StructOfArrays<VisionMaterialMemType> vision_materials;
     device::RS_DeviceLayout vision_material_layout;
 
@@ -267,12 +296,27 @@ struct RS_Context {
     device::RS_Vector<float> light_weight;
     device::RS_Vector<float> light_cdf;
 
-    device::RS_Array<RFloat, 1> force_signals;
+    // Intersect region data.
+    device::RS_StructOfVectors<logic::RS_IntersectRegionMem> intersect_regions;
+    device::RS_Vector<RSize> intersect_region_counts;
+    device::RS_Vector<RSize> intersect_region_offsets;
+    device::RS_Vector<logic::RS_IntersectRegionPair> intersect_region_pairs;
+    device::RS_Vector<logic::RS_IntersectRegionPair> intersect_region_unique_pairs;
+    device::RS_Vector<RBigIndex> intersect_region_keys;
+    device::RS_Vector<RBigIndex> intersect_region_sorted_keys;
+    device::RS_Vector<RIndex> intersect_region_indices;
+    device::RS_Vector<RIndex> intersect_region_sorted_indices;
+    device::RS_Vector<RIndex> intersect_region_flags;
+    device::RS_Vector<RIndex> intersect_region_prefix_sums;
+
+    // Force data.
+    device::RS_Array<RS_WorldForceSignal, 1> force_signals;
     device::RS_DeviceLayout force_signal_layout;
     device::RS_Vector<logic::RS_RigidForceMem> force_rigid;
     device::RS_Vector<logic::RS_SoftForceMem> force_soft;
 
-    device::RS_Array<RFloat, 1> torque_signals;
+    // Torque data.
+    device::RS_Array<RS_WorldTorqueSignal, 1> torque_signals;
     device::RS_DeviceLayout torque_signal_layout;
     device::RS_Vector<logic::RS_RigidTorqueMem> torque_rigid;
 
@@ -634,6 +678,44 @@ struct RS_AnyContext {
         VSM_S_2(__VA_ARGS__), \
         VSM_S_1(__VA_ARGS__), \
         VSM_S_0(__VA_ARGS__)  \
+    )
+
+#define IR_G_0()
+#define IR_G_1(property)                                                                  \
+    (ctx.intersect_regions                                                                \
+         .template get<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
+             intersect_region DEBUG_ARGS(intersect_region_get)                            \
+         ))
+#define IR_G_2(intersect_region_idx, property)                                            \
+    (ctx.intersect_regions                                                                \
+         .template get<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
+             intersect_region_idx DEBUG_ARGS(intersect_region_get)                        \
+         ))
+#define IR_G_X(x, A, B, FUNC, ...) FUNC
+#define IR_G(...) \
+    IR_G_X(, ##__VA_ARGS__, IR_G_2(__VA_ARGS__), IR_G_1(__VA_ARGS__), IR_G_0(__VA_ARGS__))
+
+#define IR_S_0()
+#define IR_S_1()
+#define IR_S_2(property, value)                                                          \
+    ctx.intersect_regions                                                                \
+        .template set<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
+            intersect_region, value DEBUG_ARGS(intersect_region_set)                     \
+        )
+#define IR_S_3(intersect_region_idx, property, value)                                    \
+    ctx.intersect_regions                                                                \
+        .template set<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
+            intersect_region_idx, value DEBUG_ARGS(intersect_region_set)                 \
+        )
+#define IR_S_X(x, A, B, C, FUNC, ...) FUNC
+#define IR_S(...)            \
+    IR_S_X(                  \
+        ,                    \
+        ##__VA_ARGS__,       \
+        IR_S_3(__VA_ARGS__), \
+        IR_S_2(__VA_ARGS__), \
+        IR_S_1(__VA_ARGS__), \
+        IR_S_0(__VA_ARGS__)  \
     )
 
 #endif  // RS_CONTEXT_H

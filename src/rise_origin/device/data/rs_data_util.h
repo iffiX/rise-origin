@@ -3,7 +3,7 @@
 
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/rs_format.h"
+#include "rise_origin/utils/string/rs_format.h"
 /**
  * Usage example:
  * RS_DATA_EXPECT_INIT(data.provider != nullptr);

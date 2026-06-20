@@ -16,14 +16,14 @@ endif ()
 ################################################################
 # Sources
 ################################################################
-rise_find_sources(RS_RISE_ORIGIN_CORE_SRC      RECURSIVE DIRS core      EXTENSIONS cu)
-rise_find_sources(RS_RISE_ORIGIN_DEVICE_SRC    RECURSIVE DIRS device    EXTENSIONS cu)
-rise_find_sources(RS_RISE_ORIGIN_RSC_SRC       RECURSIVE DIRS rsc       EXTENSIONS cpp)
+rise_find_sources(RS_RISE_ORIGIN_CORE_SRC RECURSIVE DIRS core EXTENSIONS cu)
+rise_find_sources(RS_RISE_ORIGIN_DEVICE_SRC RECURSIVE DIRS device EXTENSIONS cu)
+rise_find_sources(RS_RISE_ORIGIN_RSC_SRC RECURSIVE DIRS rsc EXTENSIONS cpp)
 rise_find_sources(RS_RISE_ORIGIN_INTERFACE_SRC RECURSIVE DIRS interface EXTENSIONS cpp)
-rise_find_sources(RS_RISE_ORIGIN_PYTHON_SRC              DIRS python    EXTENSIONS cpp)
+rise_find_sources(RS_RISE_ORIGIN_PYTHON_SRC DIRS python EXTENSIONS cpp)
 
 # cpu backend compiles .cu as C++; cuda leaves them to nvcc.
-rise_adapt_sources(RS_RISE_ORIGIN_CORE_SRC   BACKEND ${RISE_ORIGIN_BACKEND})
+rise_adapt_sources(RS_RISE_ORIGIN_CORE_SRC BACKEND ${RISE_ORIGIN_BACKEND})
 rise_adapt_sources(RS_RISE_ORIGIN_DEVICE_SRC BACKEND ${RISE_ORIGIN_BACKEND})
 
 ################################################################
@@ -36,7 +36,10 @@ add_library(rise_origin_core
         rise_origin.cpp)
 target_link_libraries(rise_origin_core PUBLIC
         ${HDF5_LIBRARIES}
-        ${Boost_LIBRARIES}
+        Boost::filesystem
+        Boost::program_options
+        Boost::fiber
+        Boost::context
         TBB::tbb
         fmt::fmt
         spdlog::spdlog
@@ -51,7 +54,22 @@ target_include_directories(rise_origin_core PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/..
         ${HDF5_INCLUDE_DIRS})
 target_compile_options(rise_origin_core PUBLIC ${RISE_DEVICE_OPTIONS}
-        $<$<COMPILE_LANGUAGE:CXX>:-O3 -march=${RISE_ORIGIN_CPU_ARCH} -ffast-math>)
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CXX_COMPILER_ID:MSVC>>:/O2 /fp:fast ${RISE_CPU_ARCH_FLAG}>
+        $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-O3 -ffast-math ${RISE_CPU_ARCH_FLAG}>)
+
+################################################################
+# MSVC + nvcc conformance flags
+################################################################
+# MSVC needs explicit math constants, no Windows.h min/max macros, the
+# standard-conformant preprocessor/lambda processors, and a larger object
+# section limit for the templated CUDA TUs.
+if (MSVC)
+    target_compile_definitions(rise_origin_core PUBLIC
+            NOMINMAX _USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS)
+    target_compile_options(rise_origin_core PUBLIC
+            $<$<COMPILE_LANGUAGE:CXX>:/bigobj /utf-8 /EHsc /Zc:preprocessor /Zc:lambda>
+            $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/bigobj -Xcompiler=/utf-8 -Xcompiler=/Zc:preprocessor -Xcompiler=/Zc:lambda>)
+endif ()
 
 ################################################################
 # Avoiding fatBinData import error caused by lto optimization in pybind11
@@ -59,10 +77,10 @@ target_compile_options(rise_origin_core PUBLIC ${RISE_DEVICE_OPTIONS}
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 
 ################################################################
-# rise_origin_main executable
+# rise_origin_instance executable
 ################################################################
-add_executable(rise_origin_main executables/main.cpp)
-target_link_libraries(rise_origin_main PUBLIC rise_origin_core)
+add_executable(rise_origin_instance applications/instance/main.cpp)
+target_link_libraries(rise_origin_instance PUBLIC rise_origin_core)
 
 ################################################################
 # rise_origin_python_core Python module
@@ -80,10 +98,10 @@ target_include_directories(rise_origin_python_core PUBLIC
 ################################################################
 # backward-cpp for debug builds
 ################################################################
-if (uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
-    target_sources(rise_origin_main PRIVATE ${BACKWARD_ENABLE})
-    target_compile_definitions(rise_origin_main PRIVATE ${BACKWARD_DEFINITIONS})
-    target_link_libraries(rise_origin_main PRIVATE ${BACKWARD_LIBRARIES})
+if (uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" AND NOT WIN32)
+    target_sources(rise_origin_instance PRIVATE ${BACKWARD_ENABLE})
+    target_compile_definitions(rise_origin_instance PRIVATE ${BACKWARD_DEFINITIONS})
+    target_link_libraries(rise_origin_instance PRIVATE ${BACKWARD_LIBRARIES})
 
     target_sources(rise_origin_python_core PRIVATE ${BACKWARD_ENABLE})
     target_compile_definitions(rise_origin_python_core PRIVATE ${BACKWARD_DEFINITIONS})

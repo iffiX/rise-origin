@@ -32,8 +32,6 @@ class RS_VoxelMaterialMem : public RS_MaterialMem<FloatMemAccuracy> {
     using BaseType::fail_stress;
     using BaseType::nu;
     using BaseType::rho;
-    using BaseType::u_dynamic;
-    using BaseType::u_static;
     using BaseType::zeta_contact;
     using BaseType::zeta_global;
     using BaseType::zeta_internal;
@@ -85,8 +83,6 @@ class RS_VoxelMaterialMem : public RS_MaterialMem<FloatMemAccuracy> {
         field(nu),                                          \
         field(rho),                                         \
         field(fail_stress),                                 \
-        field(u_static),                                    \
-        field(u_dynamic),                                   \
         field(zeta_internal),                               \
         field(zeta_contact),                                \
         field(zeta_global),                                 \

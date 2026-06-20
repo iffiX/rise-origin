@@ -4,10 +4,9 @@
 #ifndef RS_CONSTRAINT_M_H
 #define RS_CONSTRAINT_M_H
 
-#include "rise_origin/rsc/rs_structure_config.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_mat.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_mat.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 
@@ -29,6 +28,33 @@ RS_ENUM(
     (RSE_PRISMATIC_JOINT_LIMIT, 0b1000000000),
     (RSE_PRISMATIC_JOINT_MOTOR, 0b10000000000)
 )
+
+RS_ENUM(
+    RSE_ConstraintJointHingeControlMode,
+    unsigned int,
+    (RSE_CONSTRAINT_JOINT_HINGE_CONTROL_BASIC_POSITION, 0),
+    (RSE_CONSTRAINT_JOINT_HINGE_CONTROL_PD_POSITION, 1),
+    (RSE_CONSTRAINT_JOINT_HINGE_CONTROL_TORQUE, 2),
+    (RSE_CONSTRAINT_JOINT_HINGE_CONTROL_VELOCITY, 3)
+)
+
+RS_ENUM(
+    RSE_ConstraintJointPrismaticControlMode,
+    unsigned int,
+    (RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_BASIC_POSITION, 0),
+    (RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_PD_POSITION, 1),
+    (RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_FORCE, 2),
+    (RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_VELOCITY, 3)
+)
+
+union RS_ConstraintJointStateUnion {
+    RState constraint_joint_state_packed;
+    struct RS_ConstraintJointState {
+        RSE_ConstraintJointType type : 11;
+        RSE_ConstraintJointHingeControlMode hinge_control_mode : 3;
+        RSE_ConstraintJointPrismaticControlMode prismatic_control_mode : 3;
+    } constraint_joint_state;
+};
 
 struct RS_ConstraintJointBlockRange {
     /// Absolute offset of this structure's constraint joints in the pooled buffer
@@ -55,8 +81,11 @@ class RS_ConstraintJointMem {
     /**
      * Pre-set attributes
      */
-    /// Constraint type
-    RSE_ConstraintJointType type = RSE_NULL_JOINT_CONSTRAINT;
+    /// Constraint state
+    RState state = 0;
+
+    /// Objectified structure signal handle (index into ctx.structure_signals).
+    RHandle structure_signal = RS_NULL_HANDLE;
 
     /// Structure gid of this constraint joint
     RIndex structure_gid = RS_NULL_INDEX;
@@ -83,9 +112,6 @@ class RS_ConstraintJointMem {
     /// Rigid body scope anchor position of anchor B, relative to the origin of rigid body B
     Vec3M rigid_body_b_anchor_rb_position = Vec3M::zero();
 
-    /// Control mode of the hinge joint.
-    int hinge_control_mode = RSE_STRUCTURE_HINGE_JOINT_CONTROL_MODE_BASIC_POSITION;
-
     /// Rigid body scope axis of the hinge joint, relative to the rigid body A
     Vec3M hinge_a_rb_axis = Vec3M::zero();
 
@@ -109,9 +135,6 @@ class RS_ConstraintJointMem {
     FloatM hinge_desired_torque = 0;
 
     RIndex hinge_signal_sid = RS_NULL_INDEX;
-
-    /// Control mode of the prismatic joint.
-    int prismatic_control_mode = RSE_STRUCTURE_PRISMATIC_JOINT_CONTROL_MODE_BASIC_POSITION;
 
     /// Rigid body scope slide axis of the prismatic joint, relative to the rigid body A
     Vec3M prismatic_a_rb_axis = Vec3M::zero();
@@ -163,8 +186,6 @@ class RS_ConstraintJointMem {
 
     FloatM hinge_motor_impulse = 0;
 
-    RHandle hinge_signal = RS_NULL_HANDLE;
-
     /// Distance along slide axis, only valid for prismatic axis limit
     FloatM prismatic_distance = 0;
 
@@ -174,8 +195,6 @@ class RS_ConstraintJointMem {
     FloatM prismatic_motor_target_impulse = 0;
 
     FloatM prismatic_motor_impulse = 0;
-
-    RHandle prismatic_signal = RS_NULL_HANDLE;
 
     /**
      * Depending on the constraint type, constraint may use 1 ~ 3
@@ -212,7 +231,7 @@ class RS_ConstraintJointMem {
     Vec3M accumulated_lambda = Vec3M::zero();
 
     /// PGS velocity-correction scale; 1 = hard, 0 = compliant; auto-adapts
-    FloatM compliance = 1;
+    FloatM stiffness = 1;
 };
 
 }  // namespace logic
@@ -222,7 +241,8 @@ class RS_ConstraintJointMem {
 #define REFLECT_CONSTRAINT_JOINT_MEM(constraint_joint_mem_type) \
     REFL_AUTO(                                                  \
         type(constraint_joint_mem_type),                        \
-        field(type),                                            \
+        field(state),                                           \
+        field(structure_signal),                                \
         field(structure_gid),                                   \
         field(sid),                                             \
         field(joint_sid),                                       \
@@ -231,7 +251,6 @@ class RS_ConstraintJointMem {
         field(rigid_body_b_sid),                                \
         field(rigid_body_a_anchor_rb_position),                 \
         field(rigid_body_b_anchor_rb_position),                 \
-        field(hinge_control_mode),                              \
         field(hinge_a_rb_axis),                                 \
         field(hinge_b_rb_orthogonal_axis_1),                    \
         field(hinge_b_rb_orthogonal_axis_2),                    \
@@ -243,7 +262,6 @@ class RS_ConstraintJointMem {
         field(hinge_max_torque),                                \
         field(hinge_desired_torque),                            \
         field(hinge_signal_sid),                                \
-        field(prismatic_control_mode),                          \
         field(prismatic_a_rb_axis),                             \
         field(prismatic_b_rb_orthogonal_axis_1),                \
         field(prismatic_b_rb_orthogonal_axis_2),                \
@@ -264,12 +282,10 @@ class RS_ConstraintJointMem {
         field(hinge_motor_max_impulse),                         \
         field(hinge_motor_target_impulse),                      \
         field(hinge_motor_impulse),                             \
-        field(hinge_signal),                                    \
         field(prismatic_distance),                              \
         field(prismatic_motor_max_impulse),                     \
         field(prismatic_motor_target_impulse),                  \
         field(prismatic_motor_impulse),                         \
-        field(prismatic_signal),                                \
         field(rigid_body_a_linear_J_0),                         \
         field(rigid_body_a_angular_J_0),                        \
         field(rigid_body_a_linear_J_1),                         \
@@ -285,7 +301,7 @@ class RS_ConstraintJointMem {
         field(effective_mass_inverse),                          \
         field(constraint_value),                                \
         field(accumulated_lambda),                              \
-        field(compliance)                                       \
+        field(stiffness)                                        \
     )
 
 REFLECT_CONSTRAINT_JOINT_MEM(rise::logic::RS_ConstraintJointMem<rise::RSE_FLOAT_32>)

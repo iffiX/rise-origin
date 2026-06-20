@@ -7,9 +7,11 @@
 // R is a short form for RS
 #include <cstdint>
 #include <limits>
+#include <stdexcept>
+#include <string>
 #include <unordered_map>
 
-#include "rs_conf.h"
+#include "rise_origin/utils/rs_conf.h"
 
 #define RS_STRINGIFY(x) #x
 #define RS_TOSTRING(x) RS_STRINGIFY(x)
@@ -152,23 +154,35 @@
 #define RS_ENUM_CHECK_ENTRY(name, value) \
     case name:                           \
         return true;
+#define RS_ENUM_FROM_STRING_CASE_ENTRY(name, value) \
+    if (str == #name) {                             \
+        out_value = name;                           \
+        return;                                     \
+    }
 
-#define RS_ENUM(name, type, ...)                                       \
-    enum name : type { RS_MACRO_FOREACH(RS_ENUM_ENTRY, __VA_ARGS__) }; \
-                                                                       \
-    inline const char *enumToString(name value) {                      \
-        switch (value) {                                               \
-            RS_MACRO_FOREACH(RS_ENUM_CASE_ENTRY, __VA_ARGS__)          \
-            default:                                                   \
-                return "Unknown";                                      \
-        }                                                              \
-    }                                                                  \
-    inline bool isValidEnum(name value) {                              \
-        switch (value) {                                               \
-            RS_MACRO_FOREACH(RS_ENUM_CASE_ENTRY, __VA_ARGS__)          \
-            default:                                                   \
-                return false;                                          \
-        }                                                              \
+#define RS_ENUM(name, type, ...)                                                  \
+    enum name : type { RS_MACRO_FOREACH(RS_ENUM_ENTRY, __VA_ARGS__) };            \
+                                                                                  \
+    inline const char *enumToString(name value) {                                 \
+        switch (value) {                                                          \
+            RS_MACRO_FOREACH(RS_ENUM_CASE_ENTRY, __VA_ARGS__)                      \
+            default:                                                              \
+                return "Unknown";                                                 \
+        }                                                                         \
+    }                                                                             \
+    inline bool isValidEnum(name value) {                                         \
+        switch (value) {                                                          \
+            RS_MACRO_FOREACH(RS_ENUM_CASE_ENTRY, __VA_ARGS__)                      \
+            default:                                                              \
+                return false;                                                     \
+        }                                                                         \
+    }                                                                             \
+    template <typename String>                                                    \
+    inline void stringToEnum(const String &str, name &out_value) {                \
+        RS_MACRO_FOREACH(RS_ENUM_FROM_STRING_CASE_ENTRY, __VA_ARGS__)             \
+        throw std::invalid_argument(                                              \
+            std::string("Invalid " #name " enum string: ") + std::string(str)     \
+        );                                                                        \
     }
 
 #define RFLOAT(x) static_cast<RFloat>(x)

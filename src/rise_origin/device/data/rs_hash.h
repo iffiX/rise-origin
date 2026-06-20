@@ -4,7 +4,7 @@
 #ifndef RS_HASH_H
 #define RS_HASH_H
 
-#include "rise_origin/utils/rs_num_traits.h"
+#include "rise_origin/utils/meta/rs_num_traits.h"
 
 namespace rise {
 

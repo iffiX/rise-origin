@@ -17,7 +17,7 @@ namespace device {
 class RSCF_ListRebuild : public RS_ComputeFunction<RSCF_ListRebuild> {
    public:
     template <typename List>
-    HOST_DEVICE_INLINE_QUALIFIER void run(List list) {
+    HOST_DEVICE_INLINE_QUALIFIER static void run(List list) {
         list.header.get().rebuild(&list.mem_pool);
     }
 };
@@ -450,8 +450,10 @@ class RS_List {
     void init(RS_MemoryProvider* provider) {
         RS_DATA_EXPECT_PROVIDER_NOT_NULL(provider);
 
-        header.init(provider);
+        header.init(ListHeaderType(), provider);
         lock.init(provider);
+        unsigned int lock_init = 0;
+        lock.write(reinterpret_cast<RS_SpinLock*>(&lock_init), true);
         mem_pool.init(provider);
     }
 
@@ -464,8 +466,10 @@ class RS_List {
     void init(RSize chunks, RS_MemoryProvider* provider) {
         RS_DATA_EXPECT_PROVIDER_NOT_NULL(provider);
 
-        header.init(provider);
+        header.init(ListHeaderType(), provider);
         lock.init(provider);
+        unsigned int lock_init = 0;
+        lock.write(reinterpret_cast<RS_SpinLock*>(&lock_init), true);
         mem_pool.init(chunks, provider);
     }
 
@@ -528,7 +532,7 @@ class RS_List {
         header.copy(list.header);
         mem_pool.copy(list.mem_pool);
         castProviderPtrAndCall(provider(), [&](auto p_ptr) {
-            p_ptr->template run<RSCF_ListRebuild>(*this);
+            p_ptr->template run<RSCF_ListRebuild>({1}, *this);
         });
     }
 
@@ -545,7 +549,7 @@ class RS_List {
         new_list.header = header.move(provider);
         new_list.mem_pool = mem_pool.move(provider);
         castProviderPtrAndCall(provider, [&](auto p_ptr) {
-            p_ptr->template run<RSCF_ListRebuild>(new_list);
+            p_ptr->template run<RSCF_ListRebuild>({1}, new_list);
         });
         return new_list;
     }
@@ -633,7 +637,7 @@ class RS_List {
      */
     template <bool Lock = true>
     HOST_DEVICE_INLINE_QUALIFIER void set(RIndex index, const T& value) {
-        header.get().set(&mem_pool, index, value);
+        header.get().set(index, value);
     }
 
     /**
@@ -684,7 +688,7 @@ class RS_List {
         if constexpr (Lock) {
             lock.get().lock();
         }
-        bool result = header.append(&mem_pool, value, initial_seed);
+        bool result = header.get().append(&mem_pool, value, initial_seed);
         if constexpr (Lock) {
             lock.get().unlock();
         }
@@ -701,7 +705,7 @@ class RS_List {
         if constexpr (Lock) {
             lock.get().lock();
         }
-        header.pop(&mem_pool);
+        header.get().pop(&mem_pool);
         if constexpr (Lock) {
             lock.get().unlock();
         }

@@ -4,7 +4,7 @@
 #ifndef RS_RIGID_BODY_C_H
 #define RS_RIGID_BODY_C_H
 
-#include "rise_origin/utils/rs_float.h"
+#include "rise_origin/utils/math/rs_float.h"
 #include "rs_coupling_m.h"
 #include "rs_rigid_body_m.h"
 
@@ -32,7 +32,7 @@ class RSCF_UpdateRigidBodyProperties
 
     template <typename Kernel, typename FloatMemArray, typename VecMemArray, typename MatMemArray>
     HOST_DEVICE_INLINE_QUALIFIER static void run(
-        Kernel k,
+        Kernel *k,
         RSize rigid_body_segment_offset,
         FloatMemArray mass,
         FloatMemArray mass_inverse,
@@ -41,7 +41,7 @@ class RSCF_UpdateRigidBodyProperties
     ) {
         RIndex idx = index1D();
         RHandle rigid_body = idx + rigid_body_segment_offset;
-        auto &ctx = k.ctx;
+        auto &ctx = k->ctx;
 
         RFloat new_mass = mass[idx];
         RB_S(mass, new_mass);
@@ -63,6 +63,31 @@ class RSCF_UpdateRigidBodyProperties
         RB_S(local_moment_inertia_inverse, new_local_moment_inertia_inverse);
         RB_S(moment_inertia_inverse, new_moment_inertia_inverse);
     };
+};
+
+/**
+ * @brief Set or clear the effective immobility of every rigid body in a structure's segment.
+ * @details Freezing forces is_static true so the body stops integrating; unfreezing restores
+ * is_static to the body's permanent is_fixed, so a body fixed by its material stays immobile.
+ *
+ * @param k                         simulation kernel.
+ * @param rigid_body_segment_offset handle offset added to the 1D index to reach this segment's
+ *                                  bodies.
+ * @param freeze                    true to freeze the bodies, false to restore them.
+ */
+class RSCF_SetRigidBodyStaticOverSegment
+    : public device::RS_ComputeFunction<RSCF_SetRigidBodyStaticOverSegment> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    run(Kernel *k, RSize rigid_body_segment_offset, bool freeze) {
+        auto &ctx = k->ctx;
+        RHandle rigid_body = index1D() + rigid_body_segment_offset;
+        RS_RigidBodyStateUnion state_union{RB_G(state)};
+        state_union.rigid_body_state.is_static =
+            freeze ? true : state_union.rigid_body_state.is_fixed;
+        RB_S(state, state_union.rigid_body_state_packed);
+    }
 };
 
 template <RSE_FloatType FloatComputeAccuracy>
@@ -87,7 +112,7 @@ class RS_RigidBodyCompute {
         HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel *k, RHandle rigid_body) {
             if (k != nullptr && rigid_body != RS_NULL_HANDLE) {
                 auto &ctx = k->ctx;
-                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_fixed) return;
+                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_static) return;
 
                 FloatC passed_time = k->getDeviceTimeSinceLastOperation(
                     RSE_KERNEL_UPDATE_OPERATION_RIGID_BODY_CONSTRAINT_AND_CONTACT
@@ -115,7 +140,7 @@ class RS_RigidBodyCompute {
         HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel *k, RHandle rigid_body) {
             if (k != nullptr && rigid_body != RS_NULL_HANDLE) {
                 auto &ctx = k->ctx;
-                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_fixed) return;
+                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_static) return;
 
                 FloatC passed_time = k->getDeviceTimeSinceLastOperation(
                     RSE_KERNEL_UPDATE_OPERATION_RIGID_BODY_CONSTRAINT_AND_CONTACT
@@ -148,7 +173,7 @@ class RS_RigidBodyCompute {
         HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel *k, RHandle rigid_body) {
             if (k != nullptr && rigid_body != RS_NULL_HANDLE) {
                 auto &ctx = k->ctx;
-                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_fixed) return;
+                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_static) return;
                 RB_S(cumulative_coupling_work, FloatC(0));
             }
         };
@@ -174,14 +199,14 @@ class RS_RigidBodyCompute {
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void run(
             Kernel *k,
-            RS_MemoryPtr rigid_body_couplings,
             RHandle rigid_body,
-            RIndex rigid_body_coupling_index
+            RIndex rigid_body_coupling_index,
+            RS_MemoryPtr rigid_body_couplings
         ) {
             using namespace device;
             if (k != nullptr && rigid_body != RS_NULL_HANDLE) {
                 auto &ctx = k->ctx;
-                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_fixed) return;
+                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_static) return;
 
                 FloatC passed_time = k->getDeviceTimeSinceLastOperation(
                     RSE_KERNEL_UPDATE_OPERATION_RIGID_BODY_INTEGRATE

@@ -46,14 +46,33 @@ class RSCF_CopyFromSoAToSoA : public RS_ComputeFunction<RSCF_CopyFromSoAToSoA> {
     }
 };
 
-class RSCF_CopyFromArray1DLikeToFromArray1DLike
-    : public RS_ComputeFunction<RSCF_CopyFromArray1DLikeToFromArray1DLike> {
+class RSCF_CopyFromArray1DLikeToArray1DLike
+    : public RS_ComputeFunction<RSCF_CopyFromArray1DLikeToArray1DLike> {
    public:
     template <typename Array1DLike>
     HOST_DEVICE_INLINE_QUALIFIER static void
     run(Array1DLike dst_array, Array1DLike src_array, RSize dst_offset = 0, RSize src_offset = 0) {
         RIndex index = index1D();
         dst_array[index + dst_offset] = src_array[index + src_offset];
+    }
+};
+
+/**
+ * @brief Copy a 2D array into a larger 2D array (for table resize with data preservation).
+ *
+ * @details Launched with src_dim * src_dim threads. Each thread copies one element
+ *          from the source array to the corresponding position in the destination array.
+ *          The destination array must be at least as large as the source in both dimensions.
+ */
+class RSCF_CopyFromArray2DToArray2D : public RS_ComputeFunction<RSCF_CopyFromArray2DToArray2D> {
+   public:
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    run(RS_Array<T, 2> dst, RS_Array<T, 2> src, RSize src_dim) {
+        RIndex index = index1D();
+        RSize row = index / src_dim;
+        RSize col = index % src_dim;
+        dst[{row, col}] = src[{row, col}];
     }
 };
 
@@ -132,7 +151,7 @@ void copy(
             copy_src_array = src_array.move(mem_provider);
             sync = true;
         }
-        p_ptr->template run<RSCF_CopyFromArray1DLikeToFromArray1DLike>(
+        p_ptr->template run<RSCF_CopyFromArray1DLikeToArray1DLike>(
             {copy_num, block_size, sync}, dst_array, copy_src_array, dst_offset, src_offset
         );
         if (src_array.device() != dst_array.device()) {
@@ -164,6 +183,30 @@ void copy(
         if (src_soa.device() != dst_soa.device()) {
             copy_src_soa.free();
         }
+    });
+}
+
+/**
+ * @brief Copy a 2D array into a (potentially larger) 2D array, preserving data.
+ *
+ * @param dst Destination 2D array (must be sized >= src in both dimensions)
+ * @param src Source 2D array
+ * @param src_dim Dimension of the source (square) array
+ */
+template <typename T>
+void copy2D(
+    RS_Array<T, 2> dst,
+    RS_Array<T, 2> src,
+    RSize src_dim,
+    RSize block_size = RS_AUTO_BLOCK_SIZE,
+    bool sync = true
+) {
+    if (src_dim == 0) return;
+    auto mem_provider = dst.provider();
+    castProviderPtrAndCall(mem_provider, [&](auto p_ptr) {
+        p_ptr->template run<RSCF_CopyFromArray2DToArray2D>(
+            {src_dim * src_dim, block_size, sync}, dst, src, src_dim
+        );
     });
 }
 

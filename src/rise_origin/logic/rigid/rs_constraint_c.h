@@ -15,33 +15,15 @@ class RSCF_ResolveConstraintJointDependency
     : public device::RS_ComputeFunction<RSCF_ResolveConstraintJointDependency> {
    public:
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(
-        Kernel k,
-        RSize constraint_joint_segment_offset,
-        RSize rigid_body_segment_offset,
-        RSize structure_hinge_signal_segment_offset,
-        RSize structure_prismatic_signal_segment_offset
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    run(Kernel *k, RSize constraint_joint_segment_offset, RSize rigid_body_segment_offset) {
         RHandle constraint_joint = index1D() + constraint_joint_segment_offset;
-        auto &ctx = k.ctx;
+        auto &ctx = k->ctx;
         RHandle rigid_body_a = CJ_G(rigid_body_a_sid) + rigid_body_segment_offset;
         RHandle rigid_body_b = CJ_G(rigid_body_b_sid) + rigid_body_segment_offset;
 
-        RIndex hinge_signal_sid = CJ_G(hinge_signal_sid);
-        RHandle hinge_signal = hinge_signal_sid == RS_NULL_INDEX
-                                   ? RS_NULL_HANDLE
-                                   : hinge_signal_sid + structure_hinge_signal_segment_offset;
-
-        RIndex prismatic_signal_sid = CJ_G(prismatic_signal_sid);
-        RHandle prismatic_signal =
-            prismatic_signal_sid == RS_NULL_INDEX
-                ? RS_NULL_HANDLE
-                : prismatic_signal_sid + structure_prismatic_signal_segment_offset;
-
         CJ_S(rigid_body_a, rigid_body_a);
         CJ_S(rigid_body_b, rigid_body_b);
-        CJ_S(hinge_signal, hinge_signal);
-        CJ_S(prismatic_signal, prismatic_signal);
     }
 };
 
@@ -100,7 +82,8 @@ class RS_ConstraintCompute {
             if (k != nullptr && constraint_joint != RS_NULL_HANDLE) {
                 auto &ctx = k->ctx;
 
-                RSE_ConstraintJointType type = CJ_G(type);
+                RS_ConstraintJointStateUnion state_union{CJ_G(state)};
+                RSE_ConstraintJointType type = state_union.constraint_joint_state.type;
                 RHandle rigid_body_a = CJ_G(rigid_body_a);
                 RHandle rigid_body_b = CJ_G(rigid_body_b);
 
@@ -108,7 +91,7 @@ class RS_ConstraintCompute {
                     RSE_KERNEL_UPDATE_OPERATION_RIGID_BODY_CONSTRAINT_AND_CONTACT
                 );
 
-                _updateCompliance(
+                _updateStiffness(
                     k, constraint_joint, type, rigid_body_a, rigid_body_b, passed_time
                 );
 
@@ -128,7 +111,9 @@ class RS_ConstraintCompute {
                         rigid_body_a,
                         rigid_body_b,
                         passed_time,
-                        ctx.structure_hinge_signals[CJ_G(hinge_signal)]
+                        ctx.structure_signals[CJ_G(structure_signal)]
+                            .hinge_signals.hinge[CJ_G(hinge_signal_sid)],
+                        state_union
                     );
                 } else if (type & RSE_PRISMATIC_JOINT_PERPENDICULAR_TRANSLATION) {
                     _updatePrismaticTranslationConstraint(
@@ -147,7 +132,9 @@ class RS_ConstraintCompute {
                         rigid_body_a,
                         rigid_body_b,
                         passed_time,
-                        ctx.structure_prismatic_signals[CJ_G(prismatic_signal)]
+                        ctx.structure_signals[CJ_G(structure_signal)]
+                            .prismatic_signals.prismatic[CJ_G(prismatic_signal_sid)],
+                        state_union
                     );
                 }
             }
@@ -155,15 +142,15 @@ class RS_ConstraintCompute {
 
        private:
         /**
-         * @brief Adapt the joint's PGS velocity-correction scale (compliance) from the
+         * @brief Adapt the joint's PGS velocity-correction scale (stiffness) from the
          * cumulative coupling-work the soft delivered to the two adjacent bodies over the
          * slow rigid interval. Power = work / slow_dt is compared against the watt
-         * threshold; compliance is scaled by (1 - step) when above, (1 + step) when below,
+         * threshold; stiffness is scaled by (1 - step) when above, (1 + step) when below,
          * and clamped to [min_threshold, max_threshold]. Motors and null-body joints are
          * skipped.
          */
         template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void _updateCompliance(
+        HOST_DEVICE_INLINE_QUALIFIER static void _updateStiffness(
             Kernel *k,
             RHandle constraint_joint,
             RSE_ConstraintJointType type,
@@ -181,18 +168,18 @@ class RS_ConstraintCompute {
             FloatC slow_dt = FloatC(passed_time);
             FloatC p_joint = (slow_dt > FloatC(0)) ? (e_joint / slow_dt) : FloatC(0);
 
-            FloatC compliance = FloatC(CJ_G(compliance));
-            FloatC step = k->rigidbody_constraint_compliance_auto_adjust_step;
-            if (p_joint > k->rigidbody_constraint_compliance_auto_adjust_watt_threshold) {
-                compliance *= (FloatC(1) - step);
+            FloatC stiffness = FloatC(CJ_G(stiffness));
+            FloatC step = k->rigidbody_constraint_stiffness_auto_adjust_step;
+            if (p_joint > k->rigidbody_constraint_stiffness_auto_adjust_watt_threshold) {
+                stiffness *= (FloatC(1) - step);
             } else {
-                compliance *= (FloatC(1) + step);
+                stiffness *= (FloatC(1) + step);
             }
-            FloatC lo = k->rigidbody_constraint_compliance_min_threshold;
-            FloatC hi = k->rigidbody_constraint_compliance_max_threshold;
-            if (compliance < lo) compliance = lo;
-            if (compliance > hi) compliance = hi;
-            CJ_S(compliance, compliance);
+            FloatC lo = k->rigidbody_constraint_stiffness_min_threshold;
+            FloatC hi = k->rigidbody_constraint_stiffness_max_threshold;
+            if (stiffness < lo) stiffness = lo;
+            if (stiffness > hi) stiffness = hi;
+            CJ_S(stiffness, stiffness);
         }
 
         /**
@@ -499,7 +486,8 @@ class RS_ConstraintCompute {
             RHandle rigid_body_a,
             RHandle rigid_body_b,
             RBigFloat passed_time,
-            FloatC hinge_signal
+            FloatC hinge_signal,
+            RS_ConstraintJointStateUnion state_union
         ) {
             auto &ctx = k->ctx;
 
@@ -561,14 +549,14 @@ class RS_ConstraintCompute {
             FloatC em_inv = FloatC(1) / em;
 
             // Get control mode.
-            int control_mode = CJ_G(hinge_control_mode);
+            int control_mode = state_union.constraint_joint_state.hinge_control_mode;
             FloatC hinge_min = CJ_G(hinge_min);
             FloatC hinge_max = CJ_G(hinge_max);
             Vec3C constraint_value = Vec3C::zero();
             FloatC desired_torque = 0;
 
             // Mode-specific computation.
-            if (control_mode == RSE_STRUCTURE_HINGE_JOINT_CONTROL_MODE_BASIC_POSITION) {
+            if (control_mode == RSE_CONSTRAINT_JOINT_HINGE_CONTROL_BASIC_POSITION) {
                 // Basic position control: drive a target speed that closes the angle error. Safe
                 // torque-and-speed envelope.
                 FloatC signal = RS_BOUND(hinge_signal, hinge_min, hinge_max);
@@ -581,7 +569,7 @@ class RS_ConstraintCompute {
                 CJ_S(rigid_body_a_angular_J_1, Vec3C::zero());
                 CJ_S(rigid_body_b_angular_J_1, Vec3C::zero());
                 constraint_value.x = -target_speed;
-            } else if (control_mode == RSE_STRUCTURE_HINGE_JOINT_CONTROL_MODE_PD_POSITION) {
+            } else if (control_mode == RSE_CONSTRAINT_JOINT_HINGE_CONTROL_PD_POSITION) {
                 // Stable PD: T = kp*(signal - angle) - kd*speed, deposited as a push with the
                 // damping made implicit through the (1 + kd*dt*em) divisor so high gains stay
                 // stable. The solver drives accumulated lambda toward this target.
@@ -606,7 +594,7 @@ class RS_ConstraintCompute {
                     hinge_motor_target_impulse,
                     passed_time * desired_torque / (FloatC(1) + kd * passed_time * em)
                 );
-            } else if (control_mode == RSE_STRUCTURE_HINGE_JOINT_CONTROL_MODE_TORQUE) {
+            } else if (control_mode == RSE_CONSTRAINT_JOINT_HINGE_CONTROL_TORQUE) {
                 // Torque command: drive toward max speed in the torque's direction, with the push
                 // capped at the commanded torque. Safe torque-and-speed envelope.
                 desired_torque =
@@ -827,7 +815,8 @@ class RS_ConstraintCompute {
             RHandle rigid_body_a,
             RHandle rigid_body_b,
             RBigFloat passed_time,
-            FloatC prismatic_signal
+            FloatC prismatic_signal,
+            RS_ConstraintJointStateUnion state_union
         ) {
             auto &ctx = k->ctx;
 
@@ -875,7 +864,7 @@ class RS_ConstraintCompute {
             FloatC em_inv = FloatC(1) / em;
 
             // Get control mode.
-            int control_mode = CJ_G(prismatic_control_mode);
+            int control_mode = state_union.constraint_joint_state.prismatic_control_mode;
             FloatC prismatic_min = CJ_G(prismatic_min);
             FloatC prismatic_max = CJ_G(prismatic_max);
             Vec3C constraint_value = Vec3C::zero();
@@ -886,7 +875,7 @@ class RS_ConstraintCompute {
                 prismatic_min + prismatic_signal * (prismatic_max - prismatic_min);
 
             // Mode-specific computation.
-            if (control_mode == RSE_STRUCTURE_PRISMATIC_JOINT_CONTROL_MODE_BASIC_POSITION) {
+            if (control_mode == RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_BASIC_POSITION) {
                 // Basic position control: drive a target speed that closes the distance error.
                 // Safe force-and-speed envelope.
                 FloatC max_speed = CJ_G(prismatic_max_speed);
@@ -896,7 +885,7 @@ class RS_ConstraintCompute {
                 CJ_S(rigid_body_a_linear_J_0, -slide_g);
                 CJ_S(rigid_body_b_linear_J_0, slide_g);
                 constraint_value.x = -target_speed;
-            } else if (control_mode == RSE_STRUCTURE_PRISMATIC_JOINT_CONTROL_MODE_PD_POSITION) {
+            } else if (control_mode == RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_PD_POSITION) {
                 // Stable PD: F = kp*(target - dist) - kd*speed, deposited as a push with the
                 // damping made implicit through the (1 + kd*dt*em) divisor. The solver drives
                 // accumulated lambda toward this target.
@@ -916,7 +905,7 @@ class RS_ConstraintCompute {
                     prismatic_motor_target_impulse,
                     passed_time * desired_force / (FloatC(1) + kd * passed_time * em)
                 );
-            } else if (control_mode == RSE_STRUCTURE_PRISMATIC_JOINT_CONTROL_MODE_FORCE) {
+            } else if (control_mode == RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_FORCE) {
                 // Force command: drive toward max speed in the force's direction, with the push
                 // capped at the commanded force. Safe force-and-speed envelope.
                 desired_force = RS_BOUND(
@@ -1036,13 +1025,15 @@ class RS_ConstraintCompute {
             FloatC motor_max_impulse = 0;
             FloatC motor_target_impulse = 0;
             bool is_target_impulse_motor = false;
-            FloatC compliance = 1;
+            FloatC stiffness = 1;
             RSE_ConstraintJointType my_type = RSE_NULL_JOINT_CONSTRAINT;
             RIndex my_color = RS_NULL_INDEX;
             RIndex rb_a_idx = 0, rb_b_idx = 0;
 
+            RS_ConstraintJointStateUnion cj_state_union{0};
             if (is_active) {
-                my_type = CJ_G(cj, type);
+                cj_state_union = RS_ConstraintJointStateUnion{CJ_G(cj, state)};
+                my_type = cj_state_union.constraint_joint_state.type;
                 my_color = CJ_G(cj, color);
                 rb_a_idx = CJ_G(cj, rigid_body_a) - rb_offset;
                 rb_b_idx = CJ_G(cj, rigid_body_b) - rb_offset;
@@ -1062,7 +1053,7 @@ class RS_ConstraintCompute {
                 K_inv = CJ_G(cj, effective_mass_inverse);
                 constraint_value = CJ_G(cj, constraint_value);
                 accumulated_lambda = CJ_G(cj, accumulated_lambda);
-                compliance = FloatC(CJ_G(cj, compliance));
+                stiffness = FloatC(CJ_G(cj, stiffness));
                 // Warm-start damping: scale previous frame's lambda to prevent buildup
                 // damping_z=0 means no damping (full carry-over), damping_z=1 means reset to zero.
                 accumulated_lambda *= (FloatC(1) - k->rigidbody_constraint_warm_start_damping_z);
@@ -1074,15 +1065,16 @@ class RS_ConstraintCompute {
                 if (my_type & RSE_HINGE_JOINT_MOTOR) {
                     motor_max_impulse = FloatC(CJ_G(cj, hinge_motor_max_impulse));
                     motor_target_impulse = FloatC(CJ_G(cj, hinge_motor_target_impulse));
-                    is_target_impulse_motor = CJ_G(cj, hinge_control_mode) ==
-                                              RSE_STRUCTURE_HINGE_JOINT_CONTROL_MODE_PD_POSITION;
+                    is_target_impulse_motor =
+                        cj_state_union.constraint_joint_state.hinge_control_mode ==
+                        RSE_CONSTRAINT_JOINT_HINGE_CONTROL_PD_POSITION;
                     accumulated_lambda = Vec3C::zero();
                 } else if (my_type & RSE_PRISMATIC_JOINT_MOTOR) {
                     motor_max_impulse = FloatC(CJ_G(cj, prismatic_motor_max_impulse));
                     motor_target_impulse = FloatC(CJ_G(cj, prismatic_motor_target_impulse));
                     is_target_impulse_motor =
-                        CJ_G(cj, prismatic_control_mode) ==
-                        RSE_STRUCTURE_PRISMATIC_JOINT_CONTROL_MODE_PD_POSITION;
+                        cj_state_union.constraint_joint_state.prismatic_control_mode ==
+                        RSE_CONSTRAINT_JOINT_PRISMATIC_CONTROL_PD_POSITION;
                     accumulated_lambda = Vec3C::zero();
                 }
             }
@@ -1132,7 +1124,7 @@ class RS_ConstraintCompute {
                                 is_velocity_target
                                     ? constraint_value
                                     : baumgarte_ratio * constraint_value / passed_time;
-                            delta_lambda = -(K_inv * (rel_vel + correction)) * compliance;
+                            delta_lambda = -(K_inv * (rel_vel + correction)) * stiffness;
 
                             // Accumulate.
                             Vec3C old_lambda = accumulated_lambda;
@@ -1195,7 +1187,7 @@ class RS_ConstraintCompute {
             }
             for (RIndex rb = tid; rb < rb_count; rb += blockDimX()) {
                 RHandle h = rb_offset + rb;
-                if (RS_RigidBodyStateUnion{RB_G(h, state)}.rigid_body_state.is_fixed) continue;
+                if (RS_RigidBodyStateUnion{RB_G(h, state)}.rigid_body_state.is_static) continue;
                 RB_S(h, linear_momentum, shared_rb[rb].lin_mom);
                 RB_S(h, angular_momentum, shared_rb[rb].ang_mom);
             }

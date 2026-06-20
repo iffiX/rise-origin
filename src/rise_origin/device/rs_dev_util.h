@@ -7,10 +7,10 @@
 #include <cassert>
 #include <type_traits>
 
-#include "rise_origin/utils/rs_constexpr.h"
+#include "rise_origin/utils/meta/rs_constexpr.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_num_traits.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/meta/rs_num_traits.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 
@@ -77,7 +77,7 @@ class RS_DivMod<uint32_t> {
     }
 
     HOST_DEVICE_INLINE_QUALIFIER uint32_t div(uint32_t n) const {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
         uint64_t t = __umulhi(M_, n);
         return (t + n) >> l_;
 #else
@@ -121,7 +121,7 @@ class RS_StaticDivMod {
         if (IsPowerOfTwo_) {
             return n >> ShiftAmount_;
         } else if constexpr (std::is_same_v<T, uint32_t> && IsFastMethodUsable_) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
             uint64_t t = __umulhi(M_, n);
             return (t + n) >> l_;
 #else
@@ -131,7 +131,7 @@ class RS_StaticDivMod {
 #endif
         } else if (n <= static_cast<uint64_t>(RS_NumTraits<uint32_t>::highest()) &&
                    IsFastMethodUsable_) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
             uint64_t t = __umulhi(M_, n);
             return (t + n) >> l_;
 #else
@@ -408,13 +408,13 @@ HOST_DEVICE_INLINE_QUALIFIER T deviceAtomicCAS(T* address, T compare, T val) {
 /// @warning Assumes that at least one bit is set in the word, i.e. @a v != uint32_t(0)!
 /// @note Adapted from NanoVDB https://developer.nvidia.com/nanovdb
 HOST_DEVICE_INLINE_QUALIFIER uint32_t findLowestOnFor32(uint32_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __ffs(v) - 1;  // one based indexing
-#elif defined(_MSC_VER) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     unsigned long index;
     _BitScanForward(&index, v);
     return static_cast<uint32_t>(index);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return static_cast<uint32_t>(__builtin_ctzl(v));
 #else
     // NANO_WARNING("Using software implementation for findLowestOn(uint32_t v)")
@@ -439,13 +439,13 @@ HOST_DEVICE_INLINE_QUALIFIER uint32_t findLowestOnFor32(uint32_t v) {
 /// @warning Assumes that at least one bit is set in the word, i.e. @a v != uint64_t(0)!
 /// @note Adapted from NanoVDB https://developer.nvidia.com/nanovdb
 HOST_DEVICE_INLINE_QUALIFIER uint32_t findLowestOnFor64(uint64_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __ffsll(static_cast<unsigned long long int>(v)) - 1;  // one based indexing
-#elif defined(_MSC_VER) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     unsigned long index;
     _BitScanForward64(&index, v);
     return static_cast<uint32_t>(index);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return static_cast<uint32_t>(__builtin_ctzll(v));
 #else
     // NANO_WARNING("Using software implementation for util::findLowestOn(uint64_t)")
@@ -480,14 +480,14 @@ HOST_DEVICE_INLINE_QUALIFIER T findLowestOn(T v) {
 /// @warning Assumes that at least one bit is set in the word, i.e. @a v != uint32_t(0)!
 /// @note Adapted from NanoVDB https://developer.nvidia.com/nanovdb
 HOST_DEVICE_INLINE_QUALIFIER uint32_t findHighestOnFor32(uint32_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return sizeof(uint32_t) * 8 - 1 -
            __clz(v);  // Return the number of consecutive high-order zero bits in a 32-bit integer.
-#elif defined(_MSC_VER) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     unsigned long index;
     _BitScanReverse(&index, v);
     return static_cast<uint32_t>(index);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return sizeof(unsigned long) * 8 - 1 - __builtin_clzl(v);
 #else
     // NANO_WARNING("Using software implementation for util::findHighestOn(uint32_t)")
@@ -508,13 +508,13 @@ HOST_DEVICE_INLINE_QUALIFIER uint32_t findHighestOnFor32(uint32_t v) {
 /// @warning Assumes that at least one bit is set in the word, i.e. @a v != uint64_t(0)!
 /// @note Adapted from NanoVDB https://developer.nvidia.com/nanovdb
 HOST_DEVICE_INLINE_QUALIFIER uint32_t findHighestOnFor64(uint64_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return sizeof(unsigned long) * 8 - 1 - __clzll(static_cast<unsigned long long int>(v));
-#elif defined(_MSC_VER) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     unsigned long index;
     _BitScanReverse64(&index, v);
     return static_cast<uint32_t>(index);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return sizeof(uint64_t) * 8 - 1 - __builtin_clzll(v);
 #else
     const uint32_t* p = reinterpret_cast<const uint32_t*>(&v);
@@ -534,13 +534,13 @@ HOST_DEVICE_INLINE_QUALIFIER T findHighestOn(T v) {
 /// @warning Assumes that at least one bit is set in the word, i.e. @a v != uint32_t(0)!
 /// @note Adapted from NanoVDB https://developer.nvidia.com/nanovdb
 HOST_DEVICE_INLINE_QUALIFIER uint32_t countLeadingZerosFor32(uint32_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __clz(v);  // Return the number of consecutive high-order zero bits in a 32-bit integer.
-#elif defined(_MSC_VER) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     unsigned long index;
-    sizeof(uint32_t) * 8 - 1 - _BitScanReverse(&index, v);
-    return v == 0 ? 32u : static_cast<uint32_t>(index);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+    _BitScanReverse(&index, v);
+    return v == 0 ? 32u : static_cast<uint32_t>(sizeof(uint32_t) * 8 - 1 - index);
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return v == 0 ? 32u : __builtin_clzl(v);
 #else
     // NANO_WARNING("Using software implementation for util::countLeadingZeros(uint32_t)")
@@ -560,13 +560,13 @@ HOST_DEVICE_INLINE_QUALIFIER uint32_t countLeadingZerosFor32(uint32_t v) {
 /// @warning Assumes that at least one bit is set in the word, i.e. @a v != uint64_t(0)!
 /// @note Adapted from NanoVDB https://developer.nvidia.com/nanovdb
 HOST_DEVICE_INLINE_QUALIFIER uint32_t countLeadingZerosFor64(uint64_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __clzll(static_cast<unsigned long long int>(v));
-#elif defined(_MSC_VER) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     unsigned long index;
-    sizeof(uint64_t) * 8 - 1 - _BitScanReverse64(&index, v);
-    return v == 0` ? 64u : static_cast<uint32_t>(index);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+    _BitScanReverse64(&index, v);
+    return v == 0 ? 64u : static_cast<uint32_t>(sizeof(uint64_t) * 8 - 1 - index);
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return v == 0 ? 64u : __builtin_clzll(v);
 #else
     const uint32_t* p = reinterpret_cast<const uint32_t*>(&v);
@@ -584,11 +584,11 @@ HOST_DEVICE_INLINE_QUALIFIER T countLeadingZeros(T v) {
 
 /// @return Number of bits that are on in the specified 32-bit word
 HOST_DEVICE_INLINE_QUALIFIER uint32_t countOnBitsFor32(uint32_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __popc(v);
-#elif defined(_MSC_VER) && defined(_M_X64) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(_M_X64) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __popcnt(v);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __builtin_popcount(v);
 #else  // use software implementation
     v = v - ((v >> 1) & uint32_t(0x55555555));
@@ -602,12 +602,12 @@ HOST_DEVICE_INLINE_QUALIFIER uint32_t countOnBitsFor32(uint32_t v) {
 /// @return Number of bits that are on in the specified 64-bit word
 /// @note Adapted from NanoVDB https://developer.nvidia.com/nanovdb
 HOST_DEVICE_INLINE_QUALIFIER uint32_t countOnBitsFor64(uint64_t v) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __popcll(v);
     // __popcnt64 intrinsic support was added in VS 2019 16.8
-#elif defined(_MSC_VER) && defined(_M_X64) && (_MSC_VER >= 1928) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(_M_X64) && (_MSC_VER >= 1928) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return uint32_t(__popcnt64(v));
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
     return __builtin_popcountll(v);
 #else  // use software implementation
     v = v - ((v >> 1) & uint64_t(0x5555555555555555));

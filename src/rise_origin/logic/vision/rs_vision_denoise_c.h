@@ -6,9 +6,9 @@
 
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/logic/vision/rs_camera_m.h"
-#include "rise_origin/rsc/rs_simulation_config.h"
-#include "rise_origin/utils/rs_color.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/logic/vision/rs_vision_denoise_m.h"
+#include "rise_origin/utils/math/rs_color.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 

@@ -82,7 +82,7 @@ class RS_ContactCompute {
 
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void
-        run(Kernel *k, RS_MemoryPtr flags, RHandle rigid_body_surface_voxel, RIndex dense_index) {
+        run(Kernel *k, RHandle rigid_body_surface_voxel, RIndex dense_index, RS_MemoryPtr flags) {
             if (k == nullptr) return;
             auto &ctx = k->ctx;
             RIndex base = dense_index * RIndex(3);
@@ -96,10 +96,10 @@ class RS_ContactCompute {
 
             RS_VoxelStateUnion su{V_G(voxel, state)};
             bool slot_0 = su.voxel_state.has_contact_voxel_0 &&
-                          su.voxel_state.is_contact_voxel_0_rigid &&
+                          su.voxel_state.is_contact_voxel_0_rigid_or_static &&
                           FloatC(V_G(voxel, contact_depth_0)) > FloatC(0);
             bool slot_1 = su.voxel_state.has_contact_voxel_1 &&
-                          su.voxel_state.is_contact_voxel_1_rigid &&
+                          su.voxel_state.is_contact_voxel_1_rigid_or_static &&
                           FloatC(V_G(voxel, contact_depth_1)) > FloatC(0);
             bool floor = su.voxel_state.has_contact_floor;
             flags.template get<RIndex>(base + RIndex(0)) = slot_0 ? 1 : 0;
@@ -132,9 +132,9 @@ class RS_ContactCompute {
         template <typename Kernel, typename Contacts>
         HOST_DEVICE_INLINE_QUALIFIER static void run(
             Kernel *k,
-            RS_MemoryPtr flags,
             RHandle rigid_body_surface_voxel,
             RIndex dense_index,
+            RS_MemoryPtr flags,
             Contacts contacts,
             RS_MemoryPtr prefix
         ) {
@@ -148,7 +148,7 @@ class RS_ContactCompute {
             if (voxel == RS_NULL_HANDLE || body == RS_NULL_HANDLE) return;
 
             RHandle voxel_material = V_G(voxel, voxel_material);
-            FloatC u_dynamic_a = VM_G(voxel_material, u_dynamic);
+            RIndex mat_gid_a = VM_G(voxel_material, material_gid);
 
             if (flags.template get<RIndex>(base + RIndex(0))) {
                 _emitRigidSlot(
@@ -157,7 +157,7 @@ class RS_ContactCompute {
                     prefix.template get<RIndex>(base + RIndex(0)) - 1,
                     voxel,
                     body,
-                    u_dynamic_a,
+                    mat_gid_a,
                     RState(0),
                     V_G(voxel, contact_voxel_0),
                     Vec3C(V_G(voxel, contact_normal_0)),
@@ -171,7 +171,7 @@ class RS_ContactCompute {
                     prefix.template get<RIndex>(base + RIndex(1)) - 1,
                     voxel,
                     body,
-                    u_dynamic_a,
+                    mat_gid_a,
                     RState(1),
                     V_G(voxel, contact_voxel_1),
                     Vec3C(V_G(voxel, contact_normal_1)),
@@ -185,7 +185,7 @@ class RS_ContactCompute {
                     prefix.template get<RIndex>(base + RIndex(2)) - 1,
                     voxel,
                     body,
-                    u_dynamic_a
+                    mat_gid_a
                 );
             }
         }
@@ -199,7 +199,7 @@ class RS_ContactCompute {
             RIndex out,
             RHandle voxel,
             RHandle body,
-            FloatC u_dynamic_a,
+            RIndex mat_gid_a,
             RState slot,
             RHandle other_voxel,
             const Vec3C &normal,
@@ -209,10 +209,11 @@ class RS_ContactCompute {
             using C = typename Contacts::ObjectType;
             RHandle other_body = other_voxel == RS_NULL_HANDLE ? RS_NULL_HANDLE
                                                                : V_G(other_voxel, rigid_body);
+            RIndex mat_gid_b = other_voxel == RS_NULL_HANDLE
+                                   ? mat_gid_a
+                                   : VM_G(V_G(other_voxel, voxel_material), material_gid);
             FloatC mu =
-                other_voxel == RS_NULL_HANDLE
-                    ? u_dynamic_a
-                    : harmonicMu(u_dynamic_a, VM_G(V_G(other_voxel, voxel_material), u_dynamic));
+                FloatC(ctx.material_friction_dynamic_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]);
             FloatC depth = slot == 0 ? FloatC(V_G(voxel, contact_depth_0))
                                      : FloatC(V_G(voxel, contact_depth_1));
 
@@ -240,10 +241,13 @@ class RS_ContactCompute {
             RIndex out,
             RHandle voxel,
             RHandle body,
-            FloatC u_dynamic_a
+            RIndex mat_gid_a
         ) {
             auto &ctx = k->ctx;
             using C = typename Contacts::ObjectType;
+            RIndex mat_gid_b = ctx.floor.material_gid;
+            FloatC mu =
+                FloatC(ctx.material_friction_dynamic_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]);
             Vec3C voxel_pos = V_G(voxel, position);
             FloatC floor_height;
             Vec3C floor_normal(FloatC(0), FloatC(0), FloatC(1));
@@ -283,7 +287,7 @@ class RS_ContactCompute {
             contact.contact_point = contact_point;
             contact.contact_normal = floor_normal;
             contact.depth = depth;
-            contact.mu = u_dynamic_a;
+            contact.mu = mu;
             contacts.set(out, contact);
         }
     };
@@ -646,24 +650,24 @@ class RS_ContactCompute {
             Vec3C n = Vec3C(contacts.template get<Pr(C, contact_normal)>(i));
             Vec3C cp = Vec3C(contacts.template get<Pr(C, contact_point)>(i));
 
-            bool fixed_a = RS_RigidBodyStateUnion{RB_G(owner_a, state)}.rigid_body_state.is_fixed;
+            bool static_a = RS_RigidBodyStateUnion{RB_G(owner_a, state)}.rigid_body_state.is_static;
             Vec3C com_a = RB_G(owner_a, com);
-            FloatC mass_inv_a = fixed_a ? FloatC(0) : FloatC(RB_G(owner_a, mass_inverse));
-            Mat3C I_inv_a = fixed_a ? Mat3C::zero() : Mat3C(RB_G(owner_a, moment_inertia_inverse));
+            FloatC mass_inv_a = static_a ? FloatC(0) : FloatC(RB_G(owner_a, mass_inverse));
+            Mat3C I_inv_a = static_a ? Mat3C::zero() : Mat3C(RB_G(owner_a, moment_inertia_inverse));
             Vec3C r_a = cp - com_a;
             FloatC K = contactEffectiveMassInverse(mass_inv_a, I_inv_a, r_a, n);
 
-            bool fixed_b =
+            bool static_b =
                 is_floor ? true
-                         : RS_RigidBodyStateUnion{RB_G(owner_b, state)}.rigid_body_state.is_fixed;
-            Vec3C com_b = (is_floor || fixed_b) ? Vec3C::zero() : Vec3C(RB_G(owner_b, com));
-            FloatC mass_inv_b = fixed_b ? FloatC(0) : FloatC(RB_G(owner_b, mass_inverse));
-            Mat3C I_inv_b = fixed_b ? Mat3C::zero() : Mat3C(RB_G(owner_b, moment_inertia_inverse));
-            Vec3C r_b = fixed_b ? Vec3C::zero() : (cp - com_b);
-            if (!fixed_b) K += contactEffectiveMassInverse(mass_inv_b, I_inv_b, r_b, n);
+                         : RS_RigidBodyStateUnion{RB_G(owner_b, state)}.rigid_body_state.is_static;
+            Vec3C com_b = (is_floor || static_b) ? Vec3C::zero() : Vec3C(RB_G(owner_b, com));
+            FloatC mass_inv_b = static_b ? FloatC(0) : FloatC(RB_G(owner_b, mass_inverse));
+            Mat3C I_inv_b = static_b ? Mat3C::zero() : Mat3C(RB_G(owner_b, moment_inertia_inverse));
+            Vec3C r_b = static_b ? Vec3C::zero() : (cp - com_b);
+            if (!static_b) K += contactEffectiveMassInverse(mass_inv_b, I_inv_b, r_b, n);
 
             RSize count_a = RB_G(owner_a, contact_count_now_step);
-            RSize count_b = fixed_b ? RSize(0) : RB_G(owner_b, contact_count_now_step);
+            RSize count_b = static_b ? RSize(0) : RB_G(owner_b, contact_count_now_step);
             FloatC normalizer = FloatC(RS_MAX(RS_MAX(count_a, count_b), RSize(1)));
             contacts.template set<Pr(C, k_n)>(i, K * normalizer);
             contacts.template set<Pr(C, normalizer)>(i, normalizer);
@@ -691,11 +695,11 @@ class RS_ContactCompute {
 
             if (lambda_n > FloatC(0) || lambda_t.length2() > FloatC(0)) {
                 Vec3C imp = lambda_n * n + lambda_t;
-                if (!fixed_a) {
+                if (!static_a) {
                     device::deviceAtomicAdd(&RB_G(owner_a, linear_momentum), imp);
                     device::deviceAtomicAdd(&RB_G(owner_a, angular_momentum), r_a.cross(imp));
                 }
-                if (!fixed_b) {
+                if (!static_b) {
                     device::deviceAtomicAdd(&RB_G(owner_b, linear_momentum), -imp);
                     device::deviceAtomicAdd(&RB_G(owner_b, angular_momentum), r_b.cross(-imp));
                 }
@@ -745,7 +749,16 @@ class RS_ContactCompute {
             RHandle owner_a = contacts.template get<Pr(C, rigid_body_a)>(i);
             RHandle owner_b = contacts.template get<Pr(C, rigid_body_b)>(i);
             bool is_floor = (owner_b == RS_NULL_HANDLE);
-            FloatC restitution = k->rigidbody_contact_restitution;
+
+            RHandle voxel_a = contacts.template get<Pr(C, voxel_a)>(i);
+            RHandle voxel_b = contacts.template get<Pr(C, voxel_b)>(i);
+            RIndex mat_gid_a = VM_G(V_G(voxel_a, voxel_material), material_gid);
+            // A null voxel_b is the floor; a fixed or frozen anchor still carries its voxel.
+            RIndex mat_gid_b = voxel_b == RS_NULL_HANDLE
+                                   ? ctx.floor.material_gid
+                                   : VM_G(V_G(voxel_b, voxel_material), material_gid);
+            FloatC restitution =
+                FloatC(ctx.material_restitution_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]);
 
             Vec3C n = Vec3C(contacts.template get<Pr(C, contact_normal)>(i));
             Vec3C cp = Vec3C(contacts.template get<Pr(C, contact_point)>(i));
@@ -754,24 +767,24 @@ class RS_ContactCompute {
             FloatC mu = contacts.template get<Pr(C, mu)>(i);
             if (k_n <= FloatC(0)) return;
 
-            bool fixed_a = RS_RigidBodyStateUnion{RB_G(owner_a, state)}.rigid_body_state.is_fixed;
+            bool static_a = RS_RigidBodyStateUnion{RB_G(owner_a, state)}.rigid_body_state.is_static;
             Vec3C com_a = RB_G(owner_a, com);
-            FloatC mass_inv_a = fixed_a ? FloatC(0) : FloatC(RB_G(owner_a, mass_inverse));
-            Mat3C I_inv_a = fixed_a ? Mat3C::zero() : Mat3C(RB_G(owner_a, moment_inertia_inverse));
+            FloatC mass_inv_a = static_a ? FloatC(0) : FloatC(RB_G(owner_a, mass_inverse));
+            Mat3C I_inv_a = static_a ? Mat3C::zero() : Mat3C(RB_G(owner_a, moment_inertia_inverse));
             Vec3C v_a = Vec3C(RB_G(owner_a, linear_momentum)) * mass_inv_a;
             Vec3C w_a = I_inv_a * Vec3C(RB_G(owner_a, angular_momentum));
             Vec3C r_a = cp - com_a;
 
-            bool fixed_b =
+            bool static_b =
                 is_floor ? true
-                         : RS_RigidBodyStateUnion{RB_G(owner_b, state)}.rigid_body_state.is_fixed;
+                         : RS_RigidBodyStateUnion{RB_G(owner_b, state)}.rigid_body_state.is_static;
             Vec3C com_b = is_floor ? Vec3C::zero() : Vec3C(RB_G(owner_b, com));
-            FloatC mass_inv_b = fixed_b ? FloatC(0) : FloatC(RB_G(owner_b, mass_inverse));
-            Mat3C I_inv_b = fixed_b ? Mat3C::zero() : Mat3C(RB_G(owner_b, moment_inertia_inverse));
+            FloatC mass_inv_b = static_b ? FloatC(0) : FloatC(RB_G(owner_b, mass_inverse));
+            Mat3C I_inv_b = static_b ? Mat3C::zero() : Mat3C(RB_G(owner_b, moment_inertia_inverse));
             Vec3C r_b = is_floor ? Vec3C::zero() : (cp - com_b);
-            Vec3C v_b = fixed_b ? Vec3C::zero()
+            Vec3C v_b = static_b ? Vec3C::zero()
                                 : Vec3C(RB_G(owner_b, linear_momentum)) * mass_inv_b;
-            Vec3C w_b = fixed_b ? Vec3C::zero()
+            Vec3C w_b = static_b ? Vec3C::zero()
                                 : (I_inv_b * Vec3C(RB_G(owner_b, angular_momentum)));
 
             FloatC lambda_n = contacts.template get<Pr(C, accumulated_lambda_n)>(i);
@@ -779,7 +792,7 @@ class RS_ContactCompute {
             lambda_t = lambda_t - n * lambda_t.dot(n);
 
             Vec3C vel_a = v_a + w_a.cross(r_a);
-            Vec3C vel_b = fixed_b ? Vec3C::zero() : (v_b + w_b.cross(r_b));
+            Vec3C vel_b = static_b ? Vec3C::zero() : (v_b + w_b.cross(r_b));
             Vec3C v_rel = vel_a - vel_b;
             FloatC v_n = v_rel.dot(n);
 
@@ -797,7 +810,7 @@ class RS_ContactCompute {
             if (v_t_len > FloatC(0)) {
                 Vec3C tdir = v_t / v_t_len;
                 FloatC K_t = contactEffectiveMassInverse(mass_inv_a, I_inv_a, r_a, tdir);
-                if (!fixed_b) K_t += contactEffectiveMassInverse(mass_inv_b, I_inv_b, r_b, tdir);
+                if (!static_b) K_t += contactEffectiveMassInverse(mass_inv_b, I_inv_b, r_b, tdir);
                 K_t *= normalizer;
                 if (K_t > FloatC(0)) {
                     Vec3C lambda_t_new = lambda_t + (-v_t_len / K_t) * tdir;
@@ -814,11 +827,11 @@ class RS_ContactCompute {
             contacts.template set<Pr(C, accumulated_lambda_n)>(i, lambda_n);
             contacts.template set<Pr(C, accumulated_lambda_t)>(i, lambda_t);
 
-            if (!fixed_a) {
+            if (!static_a) {
                 device::deviceAtomicAdd(&RB_G(owner_a, linear_momentum), imp);
                 device::deviceAtomicAdd(&RB_G(owner_a, angular_momentum), r_a.cross(imp));
             }
-            if (!fixed_b) {
+            if (!static_b) {
                 device::deviceAtomicAdd(&RB_G(owner_b, linear_momentum), -imp);
                 device::deviceAtomicAdd(&RB_G(owner_b, angular_momentum), r_b.cross(-imp));
             }
@@ -914,25 +927,25 @@ class RS_ContactCompute {
             Vec3C cp = Vec3C(contacts.template get<Pr(C, contact_point)>(i));
             FloatC depth_stored = contacts.template get<Pr(C, depth)>(i);
 
-            bool fixed_a = RS_RigidBodyStateUnion{RB_G(owner_a, state)}.rigid_body_state.is_fixed;
+            bool static_a = RS_RigidBodyStateUnion{RB_G(owner_a, state)}.rigid_body_state.is_static;
             Vec3C com_a = RB_G(owner_a, com);
             Vec3C delta_a = com_a - Vec3C(RB_G(owner_a, com_at_position_correction_start));
-            FloatC mass_inv_a = fixed_a ? FloatC(0) : FloatC(RB_G(owner_a, mass_inverse));
-            Mat3C I_inv_a = fixed_a ? Mat3C::zero()
+            FloatC mass_inv_a = static_a ? FloatC(0) : FloatC(RB_G(owner_a, mass_inverse));
+            Mat3C I_inv_a = static_a ? Mat3C::zero()
                                     : worldInertiaInverse(
                                           Mat3C(RB_G(owner_a, local_moment_inertia_inverse)),
                                           RB_G(owner_a, orientation)
                                       );
 
-            bool fixed_b =
+            bool static_b =
                 is_floor ? true
-                         : RS_RigidBodyStateUnion{RB_G(owner_b, state)}.rigid_body_state.is_fixed;
+                         : RS_RigidBodyStateUnion{RB_G(owner_b, state)}.rigid_body_state.is_static;
             Vec3C com_b = is_floor ? Vec3C::zero() : Vec3C(RB_G(owner_b, com));
-            Vec3C delta_b = (is_floor || fixed_b)
+            Vec3C delta_b = (is_floor || static_b)
                                 ? Vec3C::zero()
                                 : (com_b - Vec3C(RB_G(owner_b, com_at_position_correction_start)));
-            FloatC mass_inv_b = fixed_b ? FloatC(0) : FloatC(RB_G(owner_b, mass_inverse));
-            Mat3C I_inv_b = fixed_b ? Mat3C::zero()
+            FloatC mass_inv_b = static_b ? FloatC(0) : FloatC(RB_G(owner_b, mass_inverse));
+            Mat3C I_inv_b = static_b ? Mat3C::zero()
                                     : worldInertiaInverse(
                                           Mat3C(RB_G(owner_b, local_moment_inertia_inverse)),
                                           RB_G(owner_b, orientation)
@@ -944,18 +957,18 @@ class RS_ContactCompute {
             Vec3C r_a = (cp + delta_a) - com_a;
             Vec3C r_b = is_floor ? Vec3C::zero() : ((cp + delta_b) - com_b);
             FloatC K = contactEffectiveMassInverse(mass_inv_a, I_inv_a, r_a, n);
-            if (!fixed_b) K += contactEffectiveMassInverse(mass_inv_b, I_inv_b, r_b, n);
+            if (!static_b) K += contactEffectiveMassInverse(mass_inv_b, I_inv_b, r_b, n);
             if (K <= FloatC(0)) return;
 
             FloatC normalizer = contacts.template get<Pr(C, normalizer)>(i);
             FloatC lambda_pos = baumgarte * (pen - slop) / (K * normalizer);
             Vec3C P = lambda_pos * n;
 
-            if (!fixed_a) {
+            if (!static_a) {
                 device::deviceAtomicAdd(&RB_G(owner_a, com), mass_inv_a * P);
                 _applyAngularCorrection(k, owner_a, I_inv_a * r_a.cross(P));
             }
-            if (!fixed_b) {
+            if (!static_b) {
                 device::deviceAtomicAdd(&RB_G(owner_b, com), -(mass_inv_b * P));
                 _applyAngularCorrection(k, owner_b, I_inv_b * r_b.cross(-P));
             }
@@ -985,12 +998,6 @@ class RS_ContactCompute {
     ) {
         Vec3C rxd = r.cross(dir);
         return mass_inv + (I_inv * rxd).dot(rxd);
-    }
-
-    /// Returns the harmonic mean of two friction coefficients.
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC harmonicMu(FloatC a, FloatC b) {
-        FloatC s = a + b;
-        return s > FloatC(0) ? (FloatC(2) * a * b) / s : FloatC(0);
     }
 
     /// Returns the world-frame inverse inertia, R I_inv_local R^T.

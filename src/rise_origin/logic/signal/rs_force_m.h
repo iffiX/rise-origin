@@ -4,7 +4,7 @@
 #ifndef RS_FORCE_M_H
 #define RS_FORCE_M_H
 
-#include "rise_origin/utils/rs_bound.h"
+#include "rise_origin/utils/math/rs_bound.h"
 #include "rise_origin/utils/rs_def.h"
 
 namespace rise {

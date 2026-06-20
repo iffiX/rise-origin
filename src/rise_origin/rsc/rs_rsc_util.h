@@ -5,18 +5,29 @@
 #define RS_RSC_UTIL_H
 
 #include <array>
-#include <cstdint>
-#include <highfive/highfive.hpp>
-#include <type_traits>
 
-#include "rise_origin/rsc/rs_config_property_tree.h"
-#include "rise_origin/utils/rs_bound.h"
-#include "rise_origin/utils/rs_color.h"
+#include "rise_origin/rsc/rs_characterization_property_tree.h"
+#include "rise_origin/utils/math/rs_bound.h"
+#include "rise_origin/utils/math/rs_color.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/rs_quat.h"
-#include "rise_origin/utils/rs_string.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_quat.h"
+#include "rise_origin/utils/string/rs_string.h"
+#include "rise_origin/utils/math/rs_vec.h"
 namespace rise {
+
+namespace rsc {
+
+template <typename EnumT>
+inline void readEnum(const std::string &str, EnumT &out_value, const std::string &key) {
+    try {
+        stringToEnum(str, out_value);
+    } catch (const std::invalid_argument &e) {
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Invalid enum value for '{}': '{}' ({})", key, str, e.what()
+        ));
+    }
+}
 
 namespace detail {
 
@@ -27,6 +38,7 @@ inline constexpr auto CHAR_LUT = [] {
     t[','] = DELIM;
     t[' '] = DELIM;
     t['\t'] = DELIM;
+    t['\n'] = DELIM;
     t['+'] = SIGN;
     t['-'] = SIGN;
     for (int c = '0'; c <= '9'; ++c) t[c] = DIGIT;
@@ -35,15 +47,7 @@ inline constexpr auto CHAR_LUT = [] {
 
 }  // namespace detail
 
-inline RSE_FloatType readFloatType(const std::string &s, const char *field) {
-    if (s == "Float32") return RSE_FLOAT_32;
-    if (s == "Float64") return RSE_FLOAT_64;
-    RS_THROW(RS_InvalidConfigurationException(
-        "Invalid RS_SimulationConfig: {} must be 'Float32' or 'Float64', got '{}'", field, s
-    ));
-}
-
-inline RColor3b readColor3c(const std::string &str) {
+inline RColor3b readColor3b(const std::string &str) {
     auto split_values = split(str, ",");
 
     if (split_values.size() == 3) {
@@ -55,12 +59,32 @@ inline RColor3b readColor3c(const std::string &str) {
             };
         } catch ([[maybe_unused]] const std::invalid_argument &e) {
             RS_THROW(
-                RS_InvalidConfigurationException("Invalid input {} for RColor3b data type", str)
+                RS_InvalidCharacterizationException("Invalid input {} for RColor3b data type", str)
             );
         }
     }
-    RS_THROW(RS_InvalidConfigurationException("Invalid input {} for RColor3b data type", str));
+    RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RColor3b data type", str));
 }
+
+inline RColor3f readColor3f(const std::string &str) {
+    auto split_values = split(str, ",");
+
+    if (split_values.size() == 3) {
+        try {
+            return {
+                static_cast<float>(std::stof(split_values[0])),
+                static_cast<float>(std::stof(split_values[1])),
+                static_cast<float>(std::stof(split_values[2]))
+            };
+        } catch ([[maybe_unused]] const std::invalid_argument &e) {
+            RS_THROW(
+                RS_InvalidCharacterizationException("Invalid input {} for RColor3f data type", str)
+            );
+        }
+    }
+    RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RColor3f data type", str));
+}
+
 
 inline RVec3rf readVec3rf(const std::string &str) {
     auto split_values = split(str, ",");
@@ -74,11 +98,11 @@ inline RVec3rf readVec3rf(const std::string &str) {
             };
         } catch ([[maybe_unused]] const std::invalid_argument &e) {
             RS_THROW(
-                RS_InvalidConfigurationException("Invalid input {} for RVec3rf data type", str)
+                RS_InvalidCharacterizationException("Invalid input {} for RVec3rf data type", str)
             );
         }
     }
-    RS_THROW(RS_InvalidConfigurationException("Invalid input {} for RVec3rf data type", str));
+    RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RVec3rf data type", str));
 }
 
 inline RQuat3rf readQuat3rf(const std::string &str) {
@@ -94,11 +118,11 @@ inline RQuat3rf readQuat3rf(const std::string &str) {
             };
         } catch ([[maybe_unused]] const std::invalid_argument &e) {
             RS_THROW(
-                RS_InvalidConfigurationException("Invalid input {} for RQuat3rf data type", str)
+                RS_InvalidCharacterizationException("Invalid input {} for RQuat3rf data type", str)
             );
         }
     }
-    RS_THROW(RS_InvalidConfigurationException("Invalid input {} for RQuat3rf data type", str));
+    RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RQuat3rf data type", str));
 }
 
 inline RBound3ri readBound3ri(const std::string &str) {
@@ -116,15 +140,15 @@ inline RBound3ri readBound3ri(const std::string &str) {
             };
         } catch ([[maybe_unused]] const std::invalid_argument &e) {
             RS_THROW(
-                RS_InvalidConfigurationException("Invalid input {} for RBound3ri data type", str)
+                RS_InvalidCharacterizationException("Invalid input {} for RBound3ri data type", str)
             );
         }
     }
-    RS_THROW(RS_InvalidConfigurationException("Invalid input {} for RBound3ri data type", str));
+    RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RBound3ri data type", str));
 }
 
 inline void readIndexLayersFromXML(
-    const RS_ConfigPropertyTree &body_tree,
+    const RS_CharacterizationPropertyTree &body_tree,
     const std::string &section,
     size_t voxel_num,
     size_t voxel_per_layer_num,
@@ -134,12 +158,12 @@ inline void readIndexLayersFromXML(
     layer_data.clear();
     if (!body_tree.isChildExist(section)) {
         if (required)
-            RS_THROW(RS_InvalidConfigurationException("Missing required section {:s}", section));
+            RS_THROW(RS_InvalidCharacterizationException("Missing required section {:s}", section));
         else
             return;
     }
 
-    // Access the boost ptree children directly to avoid RS_ConfigPropertyTree
+    // Access the boost ptree children directly to avoid RS_CharacterizationPropertyTree
     // copies (each copy duplicates the entire root tree).
     const auto &section_node = body_tree.current_node->get_child(section);
     std::vector<std::string_view> layer_strings;
@@ -181,46 +205,15 @@ inline void readIndexLayersFromXML(
             ++count;
         }
         if (count != voxel_per_layer_num)
-            RS_THROW(RS_InvalidConfigurationException(
+            RS_THROW(RS_InvalidCharacterizationException(
                 "{} layer {} size is {}, required {}", section, l, count, voxel_per_layer_num
             ));
     }
 }
 
-inline void readIndexLayersFromHDF5(
-    const HighFive::File &hdf5_file,
-    const RS_ConfigPropertyTree &body_tree,
-    const std::string &section,
-    size_t voxel_num,
-    std::vector<RIndex> &layer_data,
-    bool required
-) {
-    layer_data.clear();
-    if (!body_tree.isChildExist(section)) {
-        if (required)
-            RS_THROW(RS_InvalidConfigurationException("Missing required section {:s}", section));
-        else
-            return;
-    }
-    HighFive::DataSetAccessProps access_props;
-    access_props.add(HighFive::Caching(8192, 131072));
-    auto dataset = hdf5_file.getDataSet(body_tree.get<std::string>(section), access_props);
-    std::vector<long long> tmp_data;
-    dataset.read(tmp_data);
-    layer_data.resize(tmp_data.size());
-    for (size_t i = 0; i < tmp_data.size(); ++i) {
-        layer_data[i] = tmp_data[i] < 0 ? static_cast<RIndex>(RS_NULL_INDEX)
-                                        : static_cast<RIndex>(tmp_data[i]);
-    }
-    if (layer_data.size() != voxel_num)
-        RS_THROW(RS_InvalidConfigurationException(
-            "HDF5 {} size is {}, required {}", section, layer_data.size(), voxel_num
-        ));
-}
-
 template <typename Enum>
 inline void readEnumLayersFromXML(
-    const RS_ConfigPropertyTree &body_tree,
+    const RS_CharacterizationPropertyTree &body_tree,
     const std::string &section,
     size_t voxel_num,
     size_t voxel_per_layer_num,
@@ -231,7 +224,7 @@ inline void readEnumLayersFromXML(
     layer_data.clear();
     if (!body_tree.isChildExist(section)) {
         if (required)
-            RS_THROW(RS_InvalidConfigurationException("Missing required section {:s}", section));
+            RS_THROW(RS_InvalidCharacterizationException("Missing required section {:s}", section));
         else
             return;
     }
@@ -269,7 +262,7 @@ inline void readEnumLayersFromXML(
             int64_t val = neg ? -static_cast<int64_t>(uval) : static_cast<int64_t>(uval);
             Enum candidate = static_cast<Enum>(val);
             if (!isValidEnum(candidate)) {
-                RS_THROW(RS_InvalidConfigurationException(
+                RS_THROW(RS_InvalidCharacterizationException(
                     "{} layer {} contains invalid enum value {}", section, l, val
                 ));
             }
@@ -277,49 +270,13 @@ inline void readEnumLayersFromXML(
             ++count;
         }
         if (count != voxel_per_layer_num)
-            RS_THROW(RS_InvalidConfigurationException(
+            RS_THROW(RS_InvalidCharacterizationException(
                 "{} layer {} size is {}, required {}", section, l, count, voxel_per_layer_num
             ));
     }
 }
 
-template <typename Enum>
-inline void readEnumLayersFromHDF5(
-    const HighFive::File &hdf5_file,
-    const RS_ConfigPropertyTree &body_tree,
-    const std::string &section,
-    size_t voxel_num,
-    std::vector<Enum> &layer_data,
-    bool required
-) {
-    static_assert(std::is_enum_v<Enum>, "readEnumLayersFromHDF5 requires an enum element type");
-    layer_data.clear();
-    if (!body_tree.isChildExist(section)) {
-        if (required)
-            RS_THROW(RS_InvalidConfigurationException("Missing required section {:s}", section));
-        else
-            return;
-    }
-    HighFive::DataSetAccessProps access_props;
-    access_props.add(HighFive::Caching(8192, 131072));
-    auto dataset = hdf5_file.getDataSet(body_tree.get<std::string>(section), access_props);
-    std::vector<int64_t> tmp_data;
-    dataset.read(tmp_data);
-    if (tmp_data.size() != voxel_num)
-        RS_THROW(RS_InvalidConfigurationException(
-            "HDF5 {} size is {}, required {}", section, tmp_data.size(), voxel_num
-        ));
-    layer_data.resize(tmp_data.size());
-    for (size_t i = 0; i < tmp_data.size(); ++i) {
-        Enum candidate = static_cast<Enum>(tmp_data[i]);
-        if (!isValidEnum(candidate)) {
-            RS_THROW(RS_InvalidConfigurationException(
-                "HDF5 {} index {} contains invalid enum value {}", section, i, tmp_data[i]
-            ));
-        }
-        layer_data[i] = candidate;
-    }
-}
+}  // namespace rsc
 
 }  // namespace rise
 

@@ -8,7 +8,7 @@
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/logic/soft/rs_link_c.h"
 #include "rise_origin/logic/soft/rs_voxel_m.h"
-#include "rise_origin/utils/rs_memory.h"
+#include "rise_origin/utils/memory/rs_memory.h"
 #include "rs_basic_metric_m.h"
 
 namespace rise {
@@ -19,7 +19,7 @@ class RSCF_GetMassDotPosMetric : public device::RS_ComputeFunction<RSCF_GetMassD
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_MemoryPtr result, RHandle voxel, RIndex result_index) {
+    run(const Kernel *k, RHandle voxel, RIndex result_index, RS_MemoryPtr result) {
         if (k != nullptr && voxel != RS_NULL_HANDLE) {
             auto &ctx = k->ctx;
 
@@ -40,7 +40,7 @@ class RSCF_GetVoxelBoundMetric : public device::RS_ComputeFunction<RSCF_GetVoxel
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_MemoryPtr result, RHandle voxel, RIndex result_index) {
+    run(const Kernel *k, RHandle voxel, RIndex result_index, RS_MemoryPtr result) {
         if (k != nullptr && voxel != RS_NULL_HANDLE) {
             auto &ctx = k->ctx;
 
@@ -61,15 +61,19 @@ class RSCF_GetIsVoxelNanMetric : public device::RS_ComputeFunction<RSCF_GetIsVox
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_MemoryPtr result, RHandle voxel, RIndex result_index) {
+    run(const Kernel *k, RHandle voxel, RIndex result_index, RS_MemoryPtr result) {
         if (k != nullptr && voxel != RS_NULL_HANDLE) {
             auto &ctx = k->ctx;
 
             auto &is_nan = result.get<bool>(result_index);
             auto state = RS_VoxelStateUnion{V_G(state)}.voxel_state;
 
-            if (state.is_enabled && !state.is_fixed) {
-                is_nan = !V_G(voxel, position).template toVec3D<RFloat>().isValid();
+            if (state.is_enabled && !state.is_static) {
+                RVec3rf position = V_G(voxel, position).template toVec3D<RFloat>();
+                RFloat size = V_G(voxel, size);
+                RFloat radius = V_G(voxel, radius);
+                RFloat ratio = radius / size;
+                is_nan = !position.isValid() || ratio > 100 || ratio < 0.01;
             } else {
                 is_nan = false;
             }
@@ -81,18 +85,26 @@ class RSCF_GetLinkFrequencyMetric : public device::RS_ComputeFunction<RSCF_GetLi
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_MemoryPtr result, RHandle link, RIndex result_index) {
+    run(const Kernel *k, RHandle link, RIndex result_index, RS_MemoryPtr result) {
         if (k != nullptr && link != RS_NULL_HANDLE) {
             auto &ctx = k->ctx;
 
             auto state = RS_LinkStateUnion{L_G(state)}.link_state;
-            if (state.is_enabled && !state.is_failed && !state.is_tendon) {
+
+            // Note: when freezing a structure, its links are not in layout, so
+            // no need to be checked, if both sides rigid/fixed link will not be 
+            // generated so that also does not need to be checked.
+            if (state.is_enabled && !state.is_failed) {
                 RIndex voxel_neg = L_G(voxel_neg);
                 RIndex voxel_pos = L_G(voxel_pos);
-                RIndex voxel_neg_mat = V_G(voxel_neg, voxel_material);
-                RIndex voxel_pos_mat = V_G(voxel_pos, voxel_material);
-                RFloat mass_neg = VM_G(voxel_neg_mat, mass);
-                RFloat mass_pos = VM_G(voxel_pos_mat, mass);
+
+                RFloat mass_neg = 0, mass_pos = 0;
+                if (!state.is_voxel_neg_rigid_or_fixed)
+                    mass_neg = VM_G(V_G(voxel_neg, voxel_material), mass);
+                if (!state.is_voxel_pos_rigid_or_fixed)
+                    mass_pos = VM_G(V_G(voxel_pos, voxel_material), mass);
+                RFloat mass = mass_neg > mass_pos ? mass_neg : mass_pos;
+
                 RIndex link_material = L_G(link_material);
                 RFloat stiffness = RS_LinkCompute<RS_DEFAULT_FLOAT_TYPE>::axialStiffness(
                     LM_G(link_material, nu),
@@ -104,7 +116,7 @@ class RSCF_GetLinkFrequencyMetric : public device::RS_ComputeFunction<RSCF_GetLi
                 );
 
                 // axial
-                RFloat freq = stiffness / (mass_neg < mass_pos ? mass_neg : mass_pos);
+                RFloat freq = stiffness / mass;
                 result.get<RFloat>(result_index) = freq;
             } else {
                 result.get<RFloat>(result_index) = 0;
@@ -118,12 +130,12 @@ class RSCF_GetVoxelFrequencyMetric
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, RS_MemoryPtr result, RHandle voxel, RIndex result_index) {
+    run(const Kernel *k, RHandle voxel, RIndex result_index, RS_MemoryPtr result) {
         if (k != nullptr && voxel != RS_NULL_HANDLE) {
             auto &ctx = k->ctx;
 
             auto state = RS_VoxelStateUnion{V_G(state)}.voxel_state;
-            if (state.is_enabled && !state.is_fixed && !state.is_rigid) {
+            if (state.is_enabled && !state.is_static && !state.is_rigid && !state.is_fixed) {
                 RIndex mat = V_G(voxel_material);
                 RFloat youngs_modulus = VM_G(mat, E);
                 RFloat nom_size = VM_G(mat, voxel_size);

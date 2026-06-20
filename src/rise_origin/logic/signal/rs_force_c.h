@@ -84,8 +84,8 @@ class RS_ForceCompute {
             if (k != nullptr && rigid_body != RS_NULL_HANDLE) {
                 auto &ctx = k->ctx;
 
-                // Fixed rigid body is an immovable anchor, skip
-                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_fixed) return;
+                // Immobile body from fixed material or freeze takes no applied force, skip
+                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_static) return;
 
                 RBigFloat current_time = k->getDeviceTime();
 
@@ -103,21 +103,17 @@ class RS_ForceCompute {
                         force_mem.rigid_body_sid == rb_sid) {
                         // Calculate time delta since last application
                         RBigFloat dt = current_time - force_mem.last_force_signal_apply_time;
-                        if (dt <= 0.0) continue;  // Skip if already applied at this time
+                        if (dt <= 0.0) continue;
 
-                        // Read force signal (3 RFloat values: x, y, z)
+                        // Read force signal (one 3D vector entry).
                         RHandle signal_handle = force_mem.force_signal;
-                        FloatC force_x =
-                            static_cast<FloatC>(ctx.force_signals[signal_handle * 3 + 0]);
-                        FloatC force_y =
-                            static_cast<FloatC>(ctx.force_signals[signal_handle * 3 + 1]);
-                        FloatC force_z =
-                            static_cast<FloatC>(ctx.force_signals[signal_handle * 3 + 2]);
+                        Vec3C force =
+                            Vec3C(ctx.force_signals[signal_handle].force_signals.force[0]);
 
                         // Compute impulse = force * unit_portion * dt
                         FloatC portion = static_cast<FloatC>(force_mem.unit_portion);
                         FloatC dt_f = static_cast<FloatC>(dt);
-                        Vec3C impulse = Vec3C(force_x, force_y, force_z) * portion * dt_f;
+                        Vec3C impulse = force * portion * dt_f;
 
                         // Apply impulse to linear momentum
                         Vec3C linear_momentum = RB_G(linear_momentum);
@@ -160,6 +156,9 @@ class RS_ForceCompute {
                     return;  // Skip rigid voxels
                 }
 
+                // Immobile voxel from fixed material or freeze takes no applied force, skip
+                if (RS_VoxelStateUnion{V_G(state)}.voxel_state.is_static) return;
+
                 // Iterate through all soft force memories
                 RSize force_count = ctx.force_soft.size();
                 for (RIndex i = 0; i < force_count; i++) {
@@ -183,18 +182,16 @@ class RS_ForceCompute {
 
                     // Calculate time delta since last application
                     RBigFloat dt = current_time - force_mem.last_force_signal_apply_time;
-                    if (dt <= 0.0) continue;  // Skip if already applied at this time
+                    if (dt <= 0.0) continue;
 
-                    // Read force signal (3 RFloat values: x, y, z)
+                    // Read force signal (one 3D vector entry).
                     RHandle signal_handle = force_mem.force_signal;
-                    FloatC force_x = static_cast<FloatC>(ctx.force_signals[signal_handle * 3 + 0]);
-                    FloatC force_y = static_cast<FloatC>(ctx.force_signals[signal_handle * 3 + 1]);
-                    FloatC force_z = static_cast<FloatC>(ctx.force_signals[signal_handle * 3 + 2]);
+                    Vec3C force = Vec3C(ctx.force_signals[signal_handle].force_signals.force[0]);
 
                     // Compute impulse = force * unit_portion * dt
                     FloatC portion = static_cast<FloatC>(force_mem.unit_portion);
                     FloatC dt_f = static_cast<FloatC>(dt);
-                    Vec3C impulse = Vec3C(force_x, force_y, force_z) * portion * dt_f;
+                    Vec3C impulse = force * portion * dt_f;
 
                     // Apply impulse to linear momentum
                     Vec3C linear_momentum = V_G(linear_momentum);

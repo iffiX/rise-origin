@@ -7,7 +7,7 @@
 #include <refl.hpp>
 
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 

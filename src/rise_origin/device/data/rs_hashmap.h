@@ -6,7 +6,6 @@
 
 #include <algorithm>
 #include <cassert>
-#include <execution>
 #include <unordered_set>
 
 #include "rise_origin/device/platform/rs_platform.h"
@@ -370,7 +369,7 @@ class RS_HashSet {
 #pragma unroll
             for (RSize g = 0; g < GroupIter; g++) {
                 if (int leader = group.elect(probe_keys[g] == key); leader != -1) {
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d found key %d\n",
@@ -391,7 +390,7 @@ class RS_HashSet {
                         RIndex value_local_index = g * ActualGroupSize + lane_id;
                         bucket_keys->keys[value_local_index] = key;
                     }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d created key %d\n",
@@ -412,7 +411,7 @@ class RS_HashSet {
 
             if (lane_id == evict_lane) {
                 KeyType evict_key = probe_keys[evict_iter];
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                 printf(
                     "Thread %d inserted key %d, evicted key %d\n",
                     (int)blockDim.x * blockIdx.x + threadIdx.x,
@@ -429,7 +428,7 @@ class RS_HashSet {
             key = group.shfl(key, evict_lane);
             is_second_table = !is_second_table;
         }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
         if (group.thread_rank() == 0)
             printf(
                 "Group %d failed to insert %d\n",
@@ -603,7 +602,7 @@ class RS_HashSet {
     HOST_DEVICE_INLINE_QUALIFIER void
     _lockBucket(bool is_second_table, uint32_t bucket_id, SynchronizedGroup &group) {
         if (group.thread_rank() == 0) {
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d begin locking by thread %d\n",
                 (int)is_second_table,
@@ -612,7 +611,7 @@ class RS_HashSet {
             );
 #endif
             tables[is_second_table].bucket_locks[bucket_id].lock();
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d locked by thread %d\n",
                 (int)is_second_table,
@@ -632,7 +631,7 @@ class RS_HashSet {
         group.sync();
         if (group.thread_rank() == 0) {
             tables[is_second_table].bucket_locks[bucket_id].unlock();
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d unlocked by thread %d\n",
                 (int)is_second_table,
@@ -915,8 +914,10 @@ class RS_HashFlatMap {
      * @tparam MaxEvictNum The maximum number of elements to evict.
      */
     template <RSize GroupSize = 1, RSize MaxEvictNum = 16>
-    HOST_DEVICE_INLINE_QUALIFIER bool insert(KeyType key, ValueType value) {
+    HOST_DEVICE_INLINE_QUALIFIER bool insert(KeyType key, const ValueType &value_in) {
         if (bucket_num_per_table < 1) return false;
+        // Cuckoo eviction displaces the value as it walks tables, so it needs a mutable copy.
+        ValueType value = value_in;
         static_assert(isPowerOfTwo(GroupSize), "GroupSize must be power of two");
         auto group = getCurrentSynchronizedGroup<RS_MIN(GroupSize, BucketSize)>();
         constexpr RSize ActualGroupSize = RS_MIN(GroupSize, BucketSize);
@@ -956,7 +957,7 @@ class RS_HashFlatMap {
                         RIndex value_local_index = g * ActualGroupSize + lane_id;
                         bucket_values->values[value_local_index] = value;
                     }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d insert to existing key %d\n",
@@ -978,7 +979,7 @@ class RS_HashFlatMap {
                         bucket_keys->keys[value_local_index] = key;
                         bucket_values->values[value_local_index] = value;
                     }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d created key %d\n",
@@ -1000,7 +1001,7 @@ class RS_HashFlatMap {
             if (lane_id == evict_lane) {
                 KeyType evict_key = probe_keys[evict_iter];
                 ValueType evict_value = bucket_values->values[evict_local_index];
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                 printf(
                     "Thread %d inserted key %d, evicted key %d\n",
                     (int)blockDim.x * blockIdx.x + threadIdx.x,
@@ -1020,7 +1021,7 @@ class RS_HashFlatMap {
             value = group.shfl(value, evict_lane);
             is_second_table = !is_second_table;
         }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
         if (group.thread_rank() == 0)
             printf(
                 "Group %d failed to insert %d\n",
@@ -1222,7 +1223,7 @@ class RS_HashFlatMap {
     HOST_DEVICE_INLINE_QUALIFIER void
     _lockBucket(bool is_second_table, uint32_t bucket_id, SynchronizedGroup &group) {
         if (group.thread_rank() == 0) {
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d begin locking by thread %d\n",
                 (int)is_second_table,
@@ -1231,7 +1232,7 @@ class RS_HashFlatMap {
             );
 #endif
             tables[is_second_table].bucket_locks[bucket_id].lock();
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d locked by thread %d\n",
                 (int)is_second_table,
@@ -1251,7 +1252,7 @@ class RS_HashFlatMap {
         group.sync();
         if (group.thread_rank() == 0) {
             tables[is_second_table].bucket_locks[bucket_id].unlock();
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d unlocked by thread %d\n",
                 (int)is_second_table,
@@ -1337,7 +1338,7 @@ class RS_HashStableFlatMap
      * make sure all threads in the group are calling into this function with same arguments.
      */
     template <RSize GroupSize = 1>
-    HOST_DEVICE_INLINE_QUALIFIER bool insert(KeyType key, ValueType value) {
+    HOST_DEVICE_INLINE_QUALIFIER bool insert(KeyType key, const ValueType &value) {
         bool exists;
         return insertUnique<GroupSize>(key, value, exists, true) != nullptr;
     }
@@ -1358,7 +1359,7 @@ class RS_HashStableFlatMap
      */
     template <RSize GroupSize = 1>
     HOST_DEVICE_INLINE_QUALIFIER ValueType *
-    insertUnique(KeyType key, ValueType value, bool &exists, bool overwrite = false) {
+    insertUnique(KeyType key, const ValueType &value, bool &exists, bool overwrite = false) {
         if (bucket_num_per_table < 1) return nullptr;
         static_assert(isPowerOfTwo(GroupSize), "GroupSize must be power of two");
         auto group = getCurrentSynchronizedGroup<RS_MIN(GroupSize, BucketSize)>();
@@ -1397,7 +1398,7 @@ class RS_HashStableFlatMap
                     if (overwrite && lane_id == leader) {
                         bucket_values->values[value_local_index] = value;
                     }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d insert to existing key %d\n",
@@ -1420,7 +1421,7 @@ class RS_HashStableFlatMap
                         bucket_keys->keys[value_local_index] = key;
                         bucket_values->values[value_local_index] = value;
                     }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d created key %d\n",
@@ -2150,7 +2151,7 @@ class RS_HashMultiMap {
                         } else
                             bucket_values->values[value_local_index] = value_list;
                     }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d insert to existing key %d\n",
@@ -2177,7 +2178,7 @@ class RS_HashMultiMap {
                         bucket_keys->keys[value_local_index] = key;
                         bucket_values->values[value_local_index] = value_list;
                     }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                     if (group.thread_rank() == 0)
                         printf(
                             "Group %d created key %d\n",
@@ -2203,7 +2204,7 @@ class RS_HashMultiMap {
                         value_list.append(&value_chunk_pool, value, static_cast<RIndex>(hash));
                 KeyType evict_key = probe_keys[evict_iter];
                 ListHeaderType evict_value_list = bucket_values->values[evict_local_index];
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
                 printf(
                     "Thread %d inserted key %d, evicted key %d\n",
                     (int)blockDim.x * blockIdx.x + threadIdx.x,
@@ -2228,7 +2229,7 @@ class RS_HashMultiMap {
 
             is_second_table = !is_second_table;
         }
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
         if (group.thread_rank() == 0)
             printf(
                 "Group %d failed to insert %d\n",
@@ -2449,7 +2450,7 @@ class RS_HashMultiMap {
     HOST_DEVICE_INLINE_QUALIFIER void
     _lockBucket(bool is_second_table, uint32_t bucket_id, SynchronizedGroup &group) {
         if (group.thread_rank() == 0) {
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d begin locking by thread %d\n",
                 (int)is_second_table,
@@ -2458,7 +2459,7 @@ class RS_HashMultiMap {
             );
 #endif
             tables[is_second_table].bucket_locks[bucket_id].lock();
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d locked by thread %d\n",
                 (int)is_second_table,
@@ -2478,7 +2479,7 @@ class RS_HashMultiMap {
         group.sync();
         if (group.thread_rank() == 0) {
             tables[is_second_table].bucket_locks[bucket_id].unlock();
-#ifdef RS_DEBUG_HASHMAP
+#ifdef RS_DEBUG_ENABLE_DEVICE_HASHMAP
             printf(
                 "Table %d Bucket %d unlocked by thread %d\n",
                 (int)is_second_table,

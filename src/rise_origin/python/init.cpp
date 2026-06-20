@@ -5,7 +5,6 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <any>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -23,7 +22,7 @@
 #include "init_def.h"
 #include "init_rsc.h"
 #include "rise_origin/rise_origin.h"
-#include "rise_origin/utils/rs_string.h"
+#include "rise_origin/utils/string/rs_string.h"
 namespace py = pybind11;
 
 class RSPY_RiseOrigin {
@@ -58,8 +57,7 @@ class RSPY_RiseOrigin {
         }
     }
 
-    RSPY_SimulationHandle
-    run_sim(py::object py_config, RIndex id, py::object py_callback = py::none()) {
+    RSPY_WorldHandle hello(const rsc::RSC_World &world, py::object py_callback = py::none()) {
         std::lock_guard lock(_simulation_mutex);
 
         size_t current_job_idx = _job_counter++;
@@ -68,11 +66,12 @@ class RSPY_RiseOrigin {
             _callbacks[current_job_idx] = py_callback;
         }
 
-        RS_SimulationCallback cxx_cb;
+        RS_WorldCallback cxx_cb;
         if (!py_callback.is_none()) {
             cxx_cb = [this, current_job_idx](
-                         RIndex sim_id,
-                         std::vector<std::pair<RSE_SimulationControllerType, RS_Any>> controllers
+                         const std::string &name,
+                         RBigFloat time,
+                         std::vector<RS_WorldController> controllers
                      ) {
                 py::gil_scoped_acquire gil;
 
@@ -89,65 +88,33 @@ class RSPY_RiseOrigin {
                 }
 
                 py::list controllers_list;
-
-                for (const auto &[type, controller] : controllers) {
-                    if (type == RSE_SIMULATION_STRUCTURE_CONTROLLER) {
-                        auto &struct_controller = controller.as<RS_SimulationStructureController>();
-                        controllers_list.append(
-                            py::make_tuple(
-                                type, RSPY_SimulationStructureController(struct_controller)
-                            )
-                        );
-                    } else if (type == RSE_SIMULATION_CAMERA_CONTROLLER) {
-                        auto &camera_controller = controller.as<RS_SimulationCameraController>();
-                        controllers_list.append(
-                            py::make_tuple(type, RSPY_SimulationCameraController(camera_controller))
-                        );
-                    } else if (type == RSE_SIMULATION_FORCE_CONTROLLER) {
-                        auto &force_controller = controller.as<RS_SimulationForceController>();
-                        controllers_list.append(
-                            py::make_tuple(type, RSPY_SimulationForceController(force_controller))
-                        );
-                    } else if (type == RSE_SIMULATION_TORQUE_CONTROLLER) {
-                        auto &torque_controller = controller.as<RS_SimulationTorqueController>();
-                        controllers_list.append(
-                            py::make_tuple(type, RSPY_SimulationTorqueController(torque_controller))
-                        );
-                    }
+                for (auto &controller : controllers) {
+                    controllers_list.append(RSPY_WorldController(controller));
                 }
 
                 try {
-                    py::cast<py::function>(callback_obj)(sim_id, controllers_list);
+                    py::cast<py::function>(callback_obj)(name, time, controllers_list);
                 } catch (const py::error_already_set &e) {
-                    print("Exception in simulation callback: {}", e.what());
+                    print("Exception in world callback: {}", e.what());
                 }
             };
         }
 
-        std::shared_ptr<RS_SimulationHandle> handle;
-        if (py::isinstance<RS_Config>(py_config)) {
-            handle = _rise_origin.runSim(py::cast<RS_Config>(py_config), id, cxx_cb);
-        } else {
-            std::vector<std::string> config;
-            for (auto s : py::cast<py::iterable>(py_config)) {
-                config.push_back(py::cast<std::string>(s));
-            }
-            handle = _rise_origin.runSim(config, id, cxx_cb);
-        }
+        auto handle = _rise_origin.hello(world, cxx_cb);
 
         _job_handles[current_job_idx] = handle;
 
         _cleanup_queue.push(current_job_idx);
         _cleanup_cv.notify_one();
 
-        return RSPY_SimulationHandle(handle);
+        return RSPY_WorldHandle(handle);
     }
 
    private:
     RiseOrigin _rise_origin;
     std::mutex _simulation_mutex;
     std::unordered_map<size_t, py::object> _callbacks;
-    std::map<size_t, std::shared_ptr<RS_SimulationHandle>> _job_handles;
+    std::map<size_t, std::shared_ptr<RS_WorldHandle>> _job_handles;
     std::atomic<size_t> _job_counter{0};
     std::unique_ptr<std::thread> _cleanup_thread;
     std::mutex _cleanup_mutex;
@@ -179,7 +146,7 @@ class RSPY_RiseOrigin {
                 _cleanup_queue.pop();
             }
 
-            std::shared_ptr<RS_SimulationHandle> handle;
+            std::shared_ptr<RS_WorldHandle> handle;
             {
                 std::lock_guard sim_lock(_simulation_mutex);
                 handle = _job_handles.at(job_idx);
@@ -206,10 +173,9 @@ PYBIND11_MODULE(_core, m) {
         .def(py::init<const RSPY_DeviceLocation &>(), py::arg("device") = RSPY_DeviceLocation())
         .def(py::init<const std::string &>(), py::arg("device_str") = "")
         .def(
-            "run_sim",
-            &RSPY_RiseOrigin::run_sim,
-            py::arg("config"),
-            py::arg("id"),
+            "hello",
+            &RSPY_RiseOrigin::hello,
+            py::arg("world"),
             py::arg("callback") = py::none()
         );
 }

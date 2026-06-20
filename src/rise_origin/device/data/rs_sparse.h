@@ -8,7 +8,7 @@
 
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/device/rs_static_construct.h"
-#include "rise_origin/utils/rs_coord.h"
+#include "rise_origin/utils/math/rs_coord.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rs_array.h"
 #include "rs_hashmap.h"
@@ -451,12 +451,15 @@ class RS_Sparse3DMap {
         refl::trait::append_t<RS_Sparse3DSize<1, 1, 1>, DescendantLevelSizeList>;
 
     // Descendant mem_pool storage helper
+    template <typename T2>
+    using AsDescendantMemPool = RS_MemArrayPool<sizeof(T2)>;
+
     template <typename>
     struct AsSparseDescendantMemPoolTuple;
 
     template <template <typename...> typename T2, typename... Ts>
     struct AsSparseDescendantMemPoolTuple<T2<Ts...>> {
-        using type = rs_device_std::tuple<RS_MemArrayPool<sizeof(Ts)>...>;
+        using type = rs_device_std::tuple<AsDescendantMemPool<Ts>...>;
     };
 
     template <typename T2>
@@ -594,7 +597,7 @@ class RS_Sparse3DMap {
      * - 1.
      * @param mem_pool_size The new size of the memory pool.
      */
-    void resizeMemPool(RIndex level, RSize mem_pool_size, bool copy = true) {
+    void resizeMemPool(RIndex level, RSize mem_pool_size, bool copy = true, bool sync = true) {
         RS_DATA_EXPECT_INIT(root.provider() != nullptr);
 
         if (level < 1 || level >= LevelNum) {

@@ -8,7 +8,7 @@
 
 #include "rise_origin/device/rs_dev_util.h"
 #include "rise_origin/device/rs_static_construct.h"
-#include "rise_origin/utils/rs_coord.h"
+#include "rise_origin/utils/math/rs_coord.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rs_array.h"
 #include "rs_bitmask.h"

@@ -9,28 +9,25 @@
 
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/rs_host_block.h"
+#include "rise_origin/utils/concurrency/rs_cpu_block.h"
 
-#define RS_COMPUTE_FUNCTION_CHECK_HAS(something)                                      \
+#define RS_COMPUTE_FUNCTION_CHECK_HAS(something)                                       \
+    template <typename T, typename = void>                                             \
+    struct Has##something : std::false_type {};                                        \
+    template <typename T>                                                              \
+    struct Has##something<T, std::void_t<typename T::something>> : std::true_type {}
+
+#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_FALSE(something)                               \
+    template <typename T, typename = void>                                             \
+    struct ValueOf##something : std::false_type {};                                    \
+    template <typename T>                                                              \
+    struct ValueOf##something<T, std::void_t<typename T::something>> : T::something {}
+
+#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_TRUE(something)                                \
     template <typename T, typename = void>                                            \
-    struct Has##something : std::false_type {};                                       \
-    template <typename T>                                                             \
-    struct Has##something<T, std::void_t<typename T::something>> : std::true_type {}; \
-    static constexpr bool Has##something##_V = Has##something<DerivedComputeFunction>::value
-
-#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_FALSE(something)                                \
-    template <typename T, typename = void>                                              \
-    struct ValueOf##something : std::false_type {};                                     \
-    template <typename T>                                                               \
-    struct ValueOf##something<T, std::void_t<typename T::something>> : T::something {}; \
-    static constexpr bool something##_V = ValueOf##something<DerivedComputeFunction>::value
-
-#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_TRUE(something)                                 \
-    template <typename T, typename = void>                                              \
-    struct ValueOf##something : std::true_type {};                                      \
-    template <typename T>                                                               \
-    struct ValueOf##something<T, std::void_t<typename T::something>> : T::something {}; \
-    static constexpr bool something##_V = ValueOf##something<DerivedComputeFunction>::value;
+    struct ValueOf##something : std::true_type {};                                     \
+    template <typename T>                                                              \
+    struct ValueOf##something<T, std::void_t<typename T::something>> : T::something {}
 
 // Does not check templates
 #define RS_COMPUTE_FUNCTION_CHECK_METHOD(method)                                        \
@@ -72,7 +69,7 @@ class RS_ComputeFunctionBase {
         return sharedMemPtr;
     }
 
-    static void setHostIndicesAndBlockSize(
+    static void setIndicesAndBlockSize(
         RSize /*blockDimX*/,
         RSize /*blockDimY*/,
         RSize /*blockDimZ*/,
@@ -86,7 +83,7 @@ class RS_ComputeFunctionBase {
         // No-op on device side
     }
 
-    static void setBlock(RS_HostBlock* /*b*/) {
+    static void setBlock(RS_CPUBlock* /*b*/) {
         // No-op on device side
     }
 
@@ -110,7 +107,7 @@ class RS_ComputeFunctionBase {
     inline static thread_local RSize block_dim_y = 1;
     inline static thread_local RSize block_dim_z = 1;
 
-    inline static thread_local RS_HostBlock* block = nullptr;
+    inline static thread_local RS_CPUBlock* block = nullptr;
     inline static thread_local void* shared_mem_ptr = nullptr;
 
     static RSize blockDimX() { return block_dim_x; }
@@ -130,7 +127,7 @@ class RS_ComputeFunctionBase {
         return static_cast<std::byte*>(shared_mem_ptr);
     }
 
-    static void setHostIndicesAndBlockSize(
+    static void setIndicesAndBlockSize(
         RSize blockDimX,
         RSize blockDimY,
         RSize blockDimZ,
@@ -154,7 +151,7 @@ class RS_ComputeFunctionBase {
         thread_idx_z = threadIdxZ;
     }
 
-    static void setBlock(RS_HostBlock* b) { block = b; }
+    static void setBlock(RS_CPUBlock* b) { block = b; }
 
     static void setSharedMem(void* ptr) { shared_mem_ptr = ptr; }
 #endif
@@ -174,17 +171,23 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
      * Attribute query methods
      *****************************************************************/
     static constexpr size_t sharedMemLayoutSize() {
-        if constexpr (HasSharedMemLayout_V) {
+        if constexpr (HasSharedMemLayout<DerivedComputeFunction>::value) {
             return sizeof(typename DerivedComputeFunction::SharedMemLayout);
         } else {
             return 0;
         }
     }
 
-    static constexpr bool isCudaSupported() { return IsCudaSupported_V; }
-    static constexpr bool isCPUSupported() { return IsCPUSupported_V; }
+    static constexpr bool isCudaSupported() {
+        return ValueOfIsCudaSupported<DerivedComputeFunction>::value;
+    }
+    static constexpr bool isCPUSupported() {
+        return ValueOfIsCPUSupported<DerivedComputeFunction>::value;
+    }
 
-    static constexpr bool isSyncBlockRequired() { return IsSyncBlockRequired_V; }
+    static constexpr bool isSyncBlockRequired() {
+        return ValueOfIsSyncBlockRequired<DerivedComputeFunction>::value;
+    }
 
     // Note: compute function runner must invoke this function, we cannot put
     // static_assert outside since at the time of initialization of:
@@ -192,7 +195,8 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
     // the DerivedComputeFunction will not be initialized yet.
     static constexpr void validate() {
         static_assert(
-            IsCudaSupported_V || IsCPUSupported_V,
+            ValueOfIsCudaSupported<DerivedComputeFunction>::value ||
+                ValueOfIsCPUSupported<DerivedComputeFunction>::value,
             "Compute function must be either IsCudaSupported or IsCPUSupported."
         );
     }
@@ -200,9 +204,9 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
     static std::map<std::string, std::string> getProperties() {
         return {
             {"SharedMemLayoutSize", std::to_string(sharedMemLayoutSize())},
-            {"IsCudaSupported", std::to_string(IsCudaSupported_V)},
-            {"IsCPUSupported", std::to_string(IsCPUSupported_V)},
-            {"IsSyncBlockRequired", std::to_string(IsSyncBlockRequired_V)}
+            {"IsCudaSupported", std::to_string(isCudaSupported())},
+            {"IsCPUSupported", std::to_string(isCPUSupported())},
+            {"IsSyncBlockRequired", std::to_string(isSyncBlockRequired())}
         };
     }
 
@@ -215,8 +219,8 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
     DEVICE_INLINE_QUALIFIER static void threadfence() { __threadfence(); }
 #else
     static void syncThreadsInBlock() {
-        // Defer to the RS_HostBlock's sync
-        assert(block != nullptr && "RS_HostBlock pointer must be set before syncing.");
+        // Defer to the RS_CPUBlock's sync
+        assert(block != nullptr && "RS_CPUBlock pointer must be set before syncing.");
         block->syncThreadsInBlockImpl<RS_ComputeFunction>(thread_idx_x);
     }
 

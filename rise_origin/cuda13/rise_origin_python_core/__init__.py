@@ -6,10 +6,25 @@ import importlib.util
 import os
 
 
-def _preload(component: str, soname: str) -> None:
-    # Load the CUDA runtime into the global symbol scope so _core.so's NEEDED
-    # entry resolves. Prefer the pip-installed runtime (nvidia.<component>),
-    # then fall back to the system loader (LD_LIBRARY_PATH / ldconfig).
+def _preload(component: str, soname: str, dllname: str) -> None:
+    # Load the CUDA runtime so _core's dependency on it resolves. Prefer the
+    # pip-installed runtime (nvidia.<component>), then fall back to the system
+    # loader. On Windows the runtime lives under nvidia/<component>/bin and the
+    # DLL search path must be extended explicitly (os.add_dll_directory).
+    if os.name == "nt":
+        try:
+            spec = importlib.util.find_spec(f"nvidia.{component}")
+            if spec and spec.submodule_search_locations:
+                bin_dir = os.path.join(list(spec.submodule_search_locations)[0], "bin")
+                if os.path.isdir(bin_dir):
+                    os.add_dll_directory(bin_dir)
+        except Exception:
+            pass
+        try:
+            ctypes.WinDLL(dllname)
+        except OSError:
+            pass  # let the _core import below surface the missing-library error
+        return
     try:
         spec = importlib.util.find_spec(f"nvidia.{component}")
         if spec and spec.submodule_search_locations:
@@ -25,6 +40,6 @@ def _preload(component: str, soname: str) -> None:
         pass  # let the _core import below surface the missing-library error
 
 
-_preload("cu13", "libcudart.so.13")
+_preload("cu13", "libcudart.so.13", "cudart64_13.dll")
 
 from ._core import *  # noqa: F401,F403,E402

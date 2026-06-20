@@ -6,7 +6,7 @@
 
 #include "refl.hpp"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_float.h"
+#include "rise_origin/utils/math/rs_float.h"
 
 namespace rise {
 
@@ -26,8 +26,6 @@ class RS_MaterialMem {
     FloatM nu = 0;                                         //!< Poissons Ratio
     FloatM rho = 0;                                        //!< Density in Kg/m^3
     FloatM fail_stress = RS_NumTraits<FloatM>::highest();  //!< Failure stress in Pa.
-    FloatM u_static = 0;                                   //!< Static coefficient of friction
-    FloatM u_dynamic = 0;                                  //!< Dynamic coefficient of friction
     FloatM zeta_internal = 0;                              //!< Internal damping ratio
     FloatM zeta_contact = 0;                               //!< Contact damping ratio
     FloatM zeta_global = 0;                                //!< Global damping ratio
@@ -53,8 +51,6 @@ class RS_MaterialMem {
         field(nu),                              \
         field(rho),                             \
         field(fail_stress),                     \
-        field(u_static),                        \
-        field(u_dynamic),                       \
         field(zeta_internal),                   \
         field(zeta_contact),                    \
         field(zeta_global),                     \

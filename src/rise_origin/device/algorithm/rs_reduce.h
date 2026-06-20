@@ -13,7 +13,7 @@
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/device/rs_cooperative_group.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_vec.h"
 #include "rs_search.h"
 
 #define RS_REDUCE_MAX_GROUP_REDUCE_LEVEL 5
@@ -31,11 +31,11 @@ namespace device {
  * @param block_elem_num Elements per block (2 * block size)
  */
 template <typename T, typename ReduceOp>
-class RSCF_HostBlockReduce : public RS_ComputeFunction<RSCF_HostBlockReduce<T, ReduceOp>> {
+class RSCF_CPUBlockReduce : public RS_ComputeFunction<RSCF_CPUBlockReduce<T, ReduceOp>> {
    public:
     using IsCudaSupported = std::false_type;
 
-    using BaseType = RS_ComputeFunction<RSCF_HostBlockReduce>;
+    using BaseType = RS_ComputeFunction<RSCF_CPUBlockReduce>;
     using BaseType::blockDimX;
     using BaseType::blockIdxX;
     using BaseType::index1D;
@@ -316,7 +316,7 @@ class RS_Reduce {
      * @note reduce implicitly synchronizes execution before returning results.
      */
     template <typename ReduceOp, typename T>
-    T reduce(const T *in, RSize in_len, T init_value = 0, RSize block_size = RS_MAX_BLOCK_SIZE) {
+    T reduce(const T *in, RSize in_len, T init_value = 0, RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         return reduce<T, ReduceOp>(
             RS_ConstMemoryPtr(in, sizeof(T) * in_len, mem_provider->device, mem_provider),
@@ -337,7 +337,7 @@ class RS_Reduce {
      * @note reduce implicitly synchronizes execution before returning results.
      */
     template <typename ReduceOp, typename T>
-    T reduce(RS_Array<T, 1> array, T init_value = 0, RSize block_size = RS_MAX_BLOCK_SIZE) {
+    T reduce(RS_Array<T, 1> array, T init_value = 0, RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         RS_DATA_ASSERT_ARGUMENT(
             array.device() == device(), "Array device must be the same as the reducer device"
@@ -356,7 +356,7 @@ class RS_Reduce {
      * @note reduce implicitly synchronizes execution before returning results.
      */
     template <typename ReduceOp, typename T>
-    T reduce(RS_Vector<T> vector, T init_value = 0, RSize block_size = RS_MAX_BLOCK_SIZE) {
+    T reduce(RS_Vector<T> vector, T init_value = 0, RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         RS_DATA_ASSERT_ARGUMENT(
             vector.device() == device(), "Vector device must be the same as the reducer device"
@@ -379,7 +379,7 @@ class RS_Reduce {
     std::enable_if_t<
         std::is_same_v<MemoryPtr, RS_MemoryPtr> || std::is_same_v<MemoryPtr, RS_ConstMemoryPtr>,
         T>
-    reduce(MemoryPtr in, RSize in_len, T init_value = 0, RSize block_size = RS_MAX_BLOCK_SIZE) {
+    reduce(MemoryPtr in, RSize in_len, T init_value = 0, RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         RS_DATA_ASSERT_ARGUMENT(
             in.device() == device(), "Input memory device must be the same as the reducer device"
@@ -395,7 +395,7 @@ class RS_Reduce {
         }
 
         // Compute max block size and take shared memory limit into account
-        while (block_size * sizeof(T) > RS_SHARED_MEMORY_MAX_SIZE) {
+        while (block_size * sizeof(T) > RS_DEVICE_SHARED_MEMORY_MAX_SIZE) {
             block_size /= 2;
             if (block_size < 1) {
                 // Unlikely to happen
@@ -451,7 +451,7 @@ class RS_Reduce {
 
         // Perform block level reduce
         if (mem_provider->device.type == RSE_DEVICE_TYPE_CPU) {
-            mem_provider->template run<RSCF_HostBlockReduce<T, ReduceOp>>(
+            mem_provider->template run<RSCF_CPUBlockReduce<T, ReduceOp>>(
                 {block_num, 1, true},
                 static_cast<const T *>(in.ptr()),
                 static_cast<T *>(buffer1.ptr()),
@@ -717,10 +717,10 @@ class RS_ReduceByGroup {
         if (block_size == RS_AUTO_BLOCK_SIZE) {
             RSize group_mean_len =
                 RS_CEIL_DIV(std::reduce(group_len.begin(), group_len.end()), group_len.size());
-            block_size = min2PowerAbove(group_mean_len, RS_MAX_BLOCK_SIZE);
+            block_size = min2PowerAbove(group_mean_len, RS_DEVICE_MAX_BLOCK_SIZE);
 
             // Compute max block size and take shared memory limit into account
-            while (block_size * sizeof(T) > RS_SHARED_MEMORY_MAX_SIZE) {
+            while (block_size * sizeof(T) > RS_DEVICE_SHARED_MEMORY_MAX_SIZE) {
                 block_size /= 2;
                 if (block_size < 1) {
                     // Unlikely to happen
@@ -798,10 +798,10 @@ class RS_ReduceByGroup {
             RSize group_mean_len =
                 RS_CEIL_DIV(std::reduce(group_len.begin(), group_len.end()), group_len.size());
 
-            block_size = min2PowerAbove(group_mean_len, RS_MAX_BLOCK_SIZE);
+            block_size = min2PowerAbove(group_mean_len, RS_DEVICE_MAX_BLOCK_SIZE);
 
             // Compute max block size and take shared memory limit into account
-            while (block_size * sizeof(T) > RS_SHARED_MEMORY_MAX_SIZE) {
+            while (block_size * sizeof(T) > RS_DEVICE_SHARED_MEMORY_MAX_SIZE) {
                 block_size /= 2;
                 if (block_size < 1) {
                     // Unlikely to happen

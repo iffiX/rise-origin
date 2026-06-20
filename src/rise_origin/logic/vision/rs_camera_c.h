@@ -5,9 +5,9 @@
 #define RS_CAMERA_C_H
 
 #include "rise_origin/device/rs_compute.h"
-#include "rise_origin/utils/rs_color.h"
+#include "rise_origin/utils/math/rs_color.h"
 #include "rise_origin/utils/rs_conf.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 
@@ -18,8 +18,8 @@ class RSCF_ResolveRigidBodyLinkedPerspectiveCameraDependency
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(Kernel k, RHandle camera, RSize rigid_body_segment_offset) {
-        auto& ctx = k.ctx;
+    run(Kernel *k, RHandle camera, RSize rigid_body_segment_offset) {
+        auto& ctx = k->ctx;
         RIndex rigid_body_sid = CA_G(rigid_body_sid);
         RHandle rigid_body = rigid_body_sid + rigid_body_segment_offset;
 
@@ -69,27 +69,16 @@ class RS_CameraCompute {
                     CA_S(position, position);
                     CA_S(orientation, orientation);
                 } else {
-                    RSize camera_control_signal_offset = CA_G(camera_control_signal_offset);
-                    if (camera_control_signal_offset != RS_NULL_INDEX) {
-                        RFloat* camera_control_signal =
-                            ctx.camera_control_signals.data.template as<RFloat>() +
-                            camera_control_signal_offset;
+                    RHandle camera_signal_handle = CA_G(camera_signal_handle);
+                    if (camera_signal_handle != RS_NULL_HANDLE) {
+                        auto& signal = ctx.camera_signals[camera_signal_handle];
 
-                        Vec3C position(
-                            camera_control_signal[0],
-                            camera_control_signal[1],
-                            camera_control_signal[2]
-                        );
-                        Quat3C orientation(
-                            camera_control_signal[3],
-                            camera_control_signal[4],
-                            camera_control_signal[5],
-                            camera_control_signal[6]
-                        );
+                        Vec3C position(signal.position_signals.position[0]);
+                        Quat3C orientation(signal.orientation_signals.orientation[0]);
                         orientation = orientation.normalized();
 
-                        FloatC focus_distance = camera_control_signal[7];
-                        FloatC field_of_view = camera_control_signal[8];
+                        FloatC focus_distance = signal.optics_signals.focus_distance[0];
+                        FloatC field_of_view = signal.optics_signals.field_of_view[0];
 
                         RBigFloat current_time = k->getDeviceTime();
                         FloatC dt = current_time - CA_G(last_update_time);

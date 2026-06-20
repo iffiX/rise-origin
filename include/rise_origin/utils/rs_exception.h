@@ -13,7 +13,7 @@
 #include <exception>
 #include <string>
 
-#include "rs_format.h"
+#include "rise_origin/utils/string/rs_format.h"
 
 #define RS_MAKE_EXCEPTION(exception_name, exception_base)                              \
     class exception_name : public exception_base {                                     \
@@ -35,13 +35,23 @@ namespace rise {
 // Base exception for all RiseOrigin exceptions
 RS_MAKE_EXCEPTION(RS_BaseException, std::exception)
 
+// Implementation exceptions (not implemented, deprecated, etc)
+RS_MAKE_EXCEPTION(RS_ImplementationException, RS_BaseException)
+RS_MAKE_EXCEPTION(RS_NotImplementedException, RS_ImplementationException)
+RS_MAKE_EXCEPTION(RS_DeprecatedFeatureException, RS_ImplementationException)
+
 // Data exceptions (out of bounds, invalid argument in function, etc)
 RS_MAKE_EXCEPTION(RS_DataException, RS_BaseException)
 RS_MAKE_EXCEPTION(RS_ReinitializedException, RS_DataException)
 RS_MAKE_EXCEPTION(RS_UninitializedException, RS_DataException)
 RS_MAKE_EXCEPTION(RS_OutOfBoundsException, RS_DataException)
 RS_MAKE_EXCEPTION(RS_InvalidArgumentException, RS_DataException)
-RS_MAKE_EXCEPTION(RS_InvalidConfigurationException, RS_DataException)
+RS_MAKE_EXCEPTION(RS_InvalidCharacterizationException, RS_DataException)
+RS_MAKE_EXCEPTION(RS_NotFoundException, RS_DataException)
+RS_MAKE_EXCEPTION(RS_DuplicateException, RS_DataException)
+RS_MAKE_EXCEPTION(RS_InvalidAccessException, RS_DataException)
+RS_MAKE_EXCEPTION(RS_InvalidConversionException, RS_DataException)
+RS_MAKE_EXCEPTION(RS_InvalidCastException, RS_DataException)
 
 // Simulation exceptions (nan values, etc)
 RS_MAKE_EXCEPTION(RS_SimulationException, RS_BaseException)
@@ -54,6 +64,7 @@ RS_MAKE_EXCEPTION(RS_HostExecutionException, RS_RuntimeException)
 RS_MAKE_EXCEPTION(RS_DeviceMemoryException, RS_RuntimeException)
 RS_MAKE_EXCEPTION(RS_DeviceExecutionException, RS_RuntimeException)
 RS_MAKE_EXCEPTION(RS_CommunicationException, RS_RuntimeException)
+
 };  // namespace rise
 
 #endif  // RS_EXCEPTION_H

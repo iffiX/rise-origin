@@ -6,8 +6,8 @@
 
 #ifdef __CUDACC__
 
-__constant__ char rs_cuda_constant_memory[RS_CONSTANT_MEMORY_MAX_SIZE];
+__constant__ char rs_cuda_constant_memory[RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE];
 
 #endif
 
-char rs_host_constant_memory[RS_CONSTANT_MEMORY_MAX_SIZE];
+char rs_host_constant_memory[RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE];

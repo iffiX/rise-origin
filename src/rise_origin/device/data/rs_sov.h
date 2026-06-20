@@ -38,7 +38,7 @@ class RS_StructOfVectors;
 
 namespace sov_helper {
 
-constexpr RSize SOV_ALIGN_SIZE = RS_MEMORY_ALIGN_SIZE;
+constexpr RSize SOV_ALIGN_SIZE = RS_DEVICE_MEMORY_ALIGN_SIZE;
 
 /**
  * The type the member returns when invoked.

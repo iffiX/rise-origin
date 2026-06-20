@@ -14,6 +14,7 @@ endif ()
 string(TOUPPER "${CMAKE_BUILD_TYPE}" uppercase_CMAKE_BUILD_TYPE)
 
 include(cmake/RiseOptions.cmake)
+include(cmake/RiseTestOptions.cmake)
 
 # Backend selects enabled languages; resolved before project().
 if (RISE_ORIGIN_BACKEND STREQUAL "cuda")
@@ -31,6 +32,25 @@ project(rise_origin LANGUAGES ${_rise_languages})
 include(cmake/RiseSourceUtils.cmake)
 
 ################################################################
+# Compiler flags
+################################################################
+# -march=native is GCC/Clang only and invalid for MSVC, so map the requested
+# arch onto each compiler's flag. The result is consumed by the build targets.
+if (MSVC)
+    if (RISE_ORIGIN_CPU_ARCH MATCHES "^/arch:")
+        set(RISE_CPU_ARCH_FLAG "${RISE_ORIGIN_CPU_ARCH}")
+    elseif (RISE_ORIGIN_CPU_ARCH MATCHES "v4$")
+        set(RISE_CPU_ARCH_FLAG "/arch:AVX512")
+    elseif (RISE_ORIGIN_CPU_ARCH MATCHES "v3$")
+        set(RISE_CPU_ARCH_FLAG "/arch:AVX2")
+    else ()
+        set(RISE_CPU_ARCH_FLAG "")
+    endif ()
+else ()
+    set(RISE_CPU_ARCH_FLAG "-march=${RISE_ORIGIN_CPU_ARCH}")
+endif ()
+
+################################################################
 # Dependencies
 ################################################################
 if (BUILD_RISE_ORIGIN OR BUILD_RISE_ORIGIN_TEST)
@@ -41,17 +61,17 @@ endif ()
 # Main builds
 ################################################################
 if (BUILD_RISE_ORIGIN)
-    message(STATUS "rise_origin is configured to be built")
+    message(STATUS "rise origin is configured to be built")
     add_subdirectory(src/rise_origin)
 else ()
-    message(STATUS "rise_origin is configured to be not built")
+    message(STATUS "rise origin is not configured to be built")
 endif ()
 
 if (BUILD_RISE_ORIGIN_TEST)
-    message(STATUS "rise_origin_test is configured to be built")
+    message(STATUS "rise origin tests are configured to be built (backend: ${RISE_ORIGIN_TEST_DEVICE_BACKEND})")
     add_subdirectory(test)
 else ()
-    message(STATUS "rise_origin_test is configured to be not built")
+    message(STATUS "rise origin tests are not configured to be built")
 endif ()
 
 ################################################################

@@ -9,15 +9,16 @@
 #include <utility>
 #include <vector>
 
-#include "core/rs_simulation_local_handle.h"
 #include "core/rs_simulation_manager.h"
+#include "core/rs_world_local_handle.h"
 #include "device/platform/rs_platform.h"
-#include "rise_origin/rsc/rs_config.h"
+#include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/rs_logging.h"
 
 using namespace std;
 using namespace rise;
+using namespace rise::rsc;
 using namespace rise::device;
 
 class RiseOriginImpl {
@@ -38,26 +39,24 @@ class RiseOriginImpl {
 
     explicit RiseOriginImpl(const RS_DeviceLocation &device) : local_device(device) {}
 
-    [[nodiscard]] std::shared_ptr<RS_SimulationHandle> runSim(
-        RS_Config &&config, RIndex id, RS_SimulationCallback &&callback
-    ) {
-        const auto &sim_config = config.simulation_config;
-
+    [[nodiscard]] std::shared_ptr<RS_WorldHandle>
+    hello(RSC_World &&world, RS_WorldCallback &&callback) {
         sim_manager_mutex.lock();
 
+        auto log_level = parseLogLevel(world.simulation.runtime.log_level);
         if (!logging::get("root")) {
             auto logger = std::make_shared<logging::logger>("root");
             register_logger(logger);
             logger->sinks().emplace_back(make_shared<logging::sinks::stdout_color_sink_mt>());
         }
-        logging::get("root")->set_level(parseLogLevel(sim_config.runtime_log_level));
+        logging::get("root")->set_level(log_level);
         sim_manager = new RS_SimulationManager(local_device);
 
         sim_manager->init();
 
-        auto local_handle = sim_manager->runSim(std::move(config), id, std::move(callback));
+        auto local_handle = sim_manager->run(std::move(world), std::move(callback));
 
-        auto sim_handle = std::make_shared<RS_SimulationLocalHandle>(local_handle);
+        auto handle = std::make_shared<RS_WorldLocalHandle>(local_handle);
 
         sim_manager_free_thread.reset(new std::thread([&]() {
             sim_manager->free();
@@ -67,11 +66,7 @@ class RiseOriginImpl {
             sim_manager_mutex.unlock();
         }));
 
-        return sim_handle;
-    }
-
-    static RS_Config parseConfig(const vector<string> &config) {
-        return std::move(RS_Config(config, false));
+        return handle;
     }
 
     static logging::level::level_enum parseLogLevel(const string &log_level_str) {
@@ -91,16 +86,9 @@ class RiseOriginImpl {
 RiseOrigin::RiseOrigin(const RS_DeviceLocation &device)
     : _rise_impl(make_shared<RiseOriginImpl>(device)) {}
 
-std::shared_ptr<RS_SimulationHandle> RiseOrigin::runSim(
-    std::vector<std::string> config, RIndex id, RS_SimulationCallback callback
-) {
-    auto parsed_config = RiseOriginImpl::parseConfig(config);
-    return _rise_impl->runSim(std::move(parsed_config), id, std::move(callback));
-}
-
-std::shared_ptr<RS_SimulationHandle> RiseOrigin::runSim(
-    RS_Config config, RIndex id, RS_SimulationCallback callback
-) {
-    config.validate(false);
-    return _rise_impl->runSim(std::move(config), id, std::move(callback));
+std::shared_ptr<RS_WorldHandle>
+RiseOrigin::hello(const RSC_World &world, RS_WorldCallback callback) {
+    RSC_World local = world;
+    local.validate(false);
+    return _rise_impl->hello(std::move(local), std::move(callback));
 }

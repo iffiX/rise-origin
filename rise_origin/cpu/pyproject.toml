@@ -33,7 +33,7 @@ RISE_ORIGIN_BACKEND = "cpu"
 BUILD_RISE_ORIGIN = "ON"
 BUILD_RISE_ORIGIN_TEST = "OFF"
 
-[tool.cibuildwheel]
+[tool.cibuildwheel.linux]
 build = "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"
 manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64"
 before-all = """
@@ -44,3 +44,9 @@ dnf -y install gcc-toolset-11 boost-devel hdf5-devel libxcrypt-devel && \
 """
 environment = { PATH = "/opt/rh/gcc-toolset-11/root/usr/bin:$PATH", LD_LIBRARY_PATH = "/usr/local/lib:$LD_LIBRARY_PATH", CC = "/opt/rh/gcc-toolset-11/root/usr/bin/gcc", CXX = "/opt/rh/gcc-toolset-11/root/usr/bin/g++" }
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
+
+[tool.cibuildwheel.windows]
+# Build deps (ninja, hdf5, boost, tbb) come from the CI environment;
+# CMAKE_PREFIX_PATH is forwarded via CIBW_ENVIRONMENT_PASS_WINDOWS.
+build = "cp310-win_amd64 cp311-win_amd64 cp312-win_amd64 cp313-win_amd64"
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel}"

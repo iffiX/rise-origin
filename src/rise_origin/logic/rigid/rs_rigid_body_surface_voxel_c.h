@@ -28,13 +28,13 @@ class RSCF_ResolveRigidBodySurfaceVoxelDependency
     using BaseType = device::RS_ComputeFunction<RSCF_ResolveRigidBodySurfaceVoxelDependency>;
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void run(
-        Kernel k,
+        Kernel *k,
         RSize rigid_body_surface_voxel_segment_offset,
         RSize voxel_segment_offset,
         RSize rigid_body_segment_offset
     ) {
         RHandle rigid_body_surface_voxel = index1D() + rigid_body_surface_voxel_segment_offset;
-        auto &ctx = k.ctx;
+        auto &ctx = k->ctx;
         RHandle voxel = RBSV_G(voxel_sid) + voxel_segment_offset;
         RHandle rigid_body = RBSV_G(rigid_body_sid) + rigid_body_segment_offset;
 
@@ -95,9 +95,9 @@ class RS_RigidBodySurfaceVoxelCompute {
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void run(
             Kernel *k,
-            RS_MemoryPtr rigid_body_couplings,
             RHandle rigid_body_surface_voxel,
-            RIndex rigid_body_coupling_index
+            RIndex rigid_body_coupling_index,
+            RS_MemoryPtr rigid_body_couplings
         ) {
             using namespace device;
             if (k != nullptr && rigid_body_surface_voxel != RS_NULL_HANDLE) {

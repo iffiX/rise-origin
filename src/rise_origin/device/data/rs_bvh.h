@@ -8,7 +8,7 @@
 #include "rise_origin/device/algorithm/rs_sort.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/device/rs_compute.h"
-#include "rise_origin/utils/rs_bound.h"
+#include "rise_origin/utils/math/rs_bound.h"
 #include "rs_data_util.h"
 
 namespace rise {
@@ -612,42 +612,60 @@ class RS_BVHBase {
     void resize(RSize size, bool copy = true) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
 
-        if (size == 0) return;
-        // Reserve double space for future insertions
-        if (object_identifiers.capacity() < size) {
-            RSize capacity = size * 2;
-            object_identifiers.resize(capacity, copy);
-            spatial_codes.resize(capacity, copy);
+        if (size == 0) {
+            // Clear everything.
+            object_identifiers.clear();
+            spatial_codes.clear();
 
-            internal_nodes.resize(capacity, copy);
-            internal_parent_nodes.resize(capacity, copy);
+            internal_nodes.clear();
+            internal_parent_nodes.clear();
 
-            leaf_parent_nodes.resize(capacity, copy);
-            leaf_bounds.resize(capacity, copy);
+            leaf_parent_nodes.clear();
+            leaf_bounds.clear();
 
-            host_data->indices.resize(capacity, false);
-            host_data->sorted_indices.resize(capacity, false);
-            host_data->sorted_spatial_codes.resize(capacity, false);
-            host_data->sorted_object_identifiers.resize(capacity, false);
-            host_data->sorted_bounds.resize(capacity, false);
-            host_data->node_operation_count.resize(capacity, false);
+            host_data->indices.clear();
+            host_data->sorted_indices.clear();
+            host_data->sorted_spatial_codes.clear();
+            host_data->sorted_object_identifiers.clear();
+            host_data->sorted_bounds.clear();
+            host_data->node_operation_count.clear();
+        } else {
+            // Reserve double space for future insertions.
+            if (object_identifiers.capacity() < size) {
+                RSize capacity = size * 2;
+                object_identifiers.resize(capacity, copy);
+                spatial_codes.resize(capacity, copy);
+
+                internal_nodes.resize(capacity, copy);
+                internal_parent_nodes.resize(capacity, copy);
+
+                leaf_parent_nodes.resize(capacity, copy);
+                leaf_bounds.resize(capacity, copy);
+
+                host_data->indices.resize(capacity, false);
+                host_data->sorted_indices.resize(capacity, false);
+                host_data->sorted_spatial_codes.resize(capacity, false);
+                host_data->sorted_object_identifiers.resize(capacity, false);
+                host_data->sorted_bounds.resize(capacity, false);
+                host_data->node_operation_count.resize(capacity, false);
+            }
+
+            object_identifiers.occupy(size);
+            spatial_codes.occupy(size);
+
+            internal_nodes.occupy(size - 1);
+            internal_parent_nodes.occupy(size - 1);
+
+            leaf_parent_nodes.occupy(size);
+            leaf_bounds.occupy(size);
+
+            host_data->indices.occupy(size);
+            host_data->sorted_indices.occupy(size);
+            host_data->sorted_spatial_codes.occupy(size);
+            host_data->sorted_object_identifiers.occupy(size);
+            host_data->sorted_bounds.occupy(size);
+            host_data->node_operation_count.occupy(size);
         }
-
-        object_identifiers.occupy(size);
-        spatial_codes.occupy(size);
-
-        internal_nodes.occupy(size - 1);
-        internal_parent_nodes.occupy(size - 1);
-
-        leaf_parent_nodes.occupy(size);
-        leaf_bounds.occupy(size);
-
-        host_data->indices.occupy(size);
-        host_data->sorted_indices.occupy(size);
-        host_data->sorted_spatial_codes.occupy(size);
-        host_data->sorted_object_identifiers.occupy(size);
-        host_data->sorted_bounds.occupy(size);
-        host_data->node_operation_count.occupy(size);
     }
 
     /**

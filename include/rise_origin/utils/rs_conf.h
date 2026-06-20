@@ -3,53 +3,101 @@
 
 #ifndef RS_CONF_H
 #define RS_CONF_H
-// #define RS_DEBUG_SOA  true
-// #define RS_DEBUG_VOXEL true
-// #define RS_DEBUG_LINK true
-// #define RS_DEBUG_HASHMAP true
-// #define RS_DEBUG_CAMERA true
-#define RS_HOST_FIBER_STACK_SIZE 32768
-#define RS_MEMORY_ALIGN_SIZE 128
 
-#define RS_MAX_BLOCK_SIZE 1024
-#define RS_HOST_THREAD_POOL_TASK_TO_THREAD_RATIO 8
-#define RS_HOST_DEFAULT_BLOCK_SIZE 256
-#define RS_CUDA_DEFAULT_BLOCK_SIZE 256
+/*****************************************************************
+ * Debug
+ *****************************************************************/
+// #define RS_DEBUG_ENABLE_DEVICE_SOA true
+// #define RS_DEBUG_ENABLE_DEVICE_HASHMAP true
+// #define RS_DEBUG_ENABLE_LOGIC_VOXEL true
+// #define RS_DEBUG_ENABLE_LOGIC_LINK true
 
-#define RS_KERNEL_GENERIC_BLOCK_SIZE 256
-#define RS_KERNEL_UPDATE_LINK_BLOCK_SIZE 256
-#define RS_KERNEL_UPDATE_RIGID_BODY_VOXEL_BLOCK_SIZE 256
-#define RS_KERNEL_UPDATE_VOXEL_BLOCK_SIZE 256
-#define RS_KERNEL_UPDATE_CONSTRAINT_BLOCK_SIZE 256
+/*****************************************************************
+ * Device
+ *****************************************************************/
+#ifndef RS_DEVICE_MEMORY_ALIGN_SIZE
+#define RS_DEVICE_MEMORY_ALIGN_SIZE 32
+#endif
+#ifndef RS_DEVICE_MAX_BLOCK_SIZE
+#define RS_DEVICE_MAX_BLOCK_SIZE 1024
+#endif
+#ifndef RS_DEVICE_SHARED_MEMORY_MAX_SIZE
+#define RS_DEVICE_SHARED_MEMORY_MAX_SIZE 49152
+#endif
+// Note: Should not use 65536 (full 64KB) for constant memory,
+// as ptxas will reject it.
+#ifndef RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE
+#define RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE 62000
+#endif
+#ifndef RS_DEVICE_ENABLE_INTRINSICS
+#define RS_DEVICE_ENABLE_INTRINSICS
+#endif
 
-#define RS_MATH_EXPR_MAX_STACK_SIZE 64
-#define RS_MATH_EXPR_MAX_EXPRESSION_TOKENS 128
-#define RS_ENABLE_INTRINSICS true
-// Note: Should not use 65536 (full 64KB) for constant memory, as ptxas will reject it
-#define RS_CONSTANT_MEMORY_MAX_SIZE 62000
-#define RS_SHARED_MEMORY_MAX_SIZE 49152
 
-// Per-structure simulation limits
-#define RS_SIMULATION_MAX_MATERIAL_NUM (1u << 30)
-#define RS_SIMULATION_MAX_RECORD_NUM (1u << 30)
-#define RS_SIMULATION_MAX_SIGNAL_NUM (1u << 30)
-#define RS_SIMULATION_MAX_STRUCTURE_NUM (1u << 30)
-#define RS_SIMULATION_MAX_CAMERA_NUM (1u << 30)
+#ifndef RS_DEVICE_CPU_FIBER_STACK_SIZE
+#define RS_DEVICE_CPU_FIBER_STACK_SIZE 32768
+#endif
+#ifndef RS_DEVICE_CPU_THREAD_POOL_TASK_TO_THREAD_RATIO
+#define RS_DEVICE_CPU_THREAD_POOL_TASK_TO_THREAD_RATIO 8
+#endif
+#ifndef RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE
+#define RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE 256
+#endif
 
-#define RS_SIMULATION_MAX_BODY_PER_STRUCTURE 4096
-#define RS_SIMULATION_MAX_VOXEL_PER_STRUCTURE (1u << 31)
-#define RS_SIMULATION_MAX_LINK_PER_STRUCTURE (1u << 31)
-#define RS_SIMULATION_MAX_RIGID_BODY_PER_STRUCTURE 4096
-#define RS_SIMULATION_MAX_CONSTRAINT_PER_STRUCTURE 64
+#ifndef RS_DEVICE_CUDA_MAX_WARP_SIZE
+#define RS_DEVICE_CUDA_MAX_WARP_SIZE 32
+#endif
+#ifndef RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE
+#define RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE 256
+#endif
 
-// K spread points kept per rigid-body pair by the contact manifold reduction
-#define RS_SIMULATION_MAX_RIGID_BODY_PAIR_CONTACT_NUM 4
+/*****************************************************************
+ * World
+ *****************************************************************/
+// Reserved id for messages the world emits internally.
+#ifndef RS_WORLD_MESSAGE_SYSTEM_ID
+#define RS_WORLD_MESSAGE_SYSTEM_ID (0xFFFFFFFEu)
+#endif
 
-#define RS_SIMULATION_MAX_VOXEL_DIMENSION_OF_STRUCTURE 4096
+// Message ids wrap back to 0 once they pass this threshold; stays below the system id.
+#ifndef RS_WORLD_MESSAGE_ID_ROTATE_THRESHOLD
+#define RS_WORLD_MESSAGE_ID_ROTATE_THRESHOLD (0xFFFFFFFDu)
+#endif
 
-#define RS_SIMULATION_MAX_ARRAY_FLOOR_RAY_TRACE_TILES 16
+// World range in meters.
+#ifndef RS_WORLD_MAX_RANGE
+#define RS_WORLD_MAX_RANGE 1000.0
+#endif
 
-// World range in meters
-#define RS_SIMULATION_WORLD_RANGE 1000.0
+// Hard limit on algorithms.
+#ifndef RS_WORLD_VISION_TRACE_MAX_ARRAY_FLOOR_TILE_NUM
+#define RS_WORLD_VISION_TRACE_MAX_ARRAY_FLOOR_TILE_NUM 16
+#endif
+#ifndef RS_WORLD_VISION_TRACE_MAX_DEPTH
+#define RS_WORLD_VISION_TRACE_MAX_DEPTH 64
+#endif
+
+// Per-structure-voxel limits.
+/// Hard limit on total bodies, set by the 20-bit body_sid contact filter field.
+#ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM
+#define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM (1u << 20)
+#endif
+#ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_VOXEL_NUM
+#define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_VOXEL_NUM (1u << 31)
+#endif
+#ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_LINK_NUM
+#define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_LINK_NUM (1u << 31)
+#endif
+/// Rigid body count ceiling in an unconstrained structure.
+#ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_UNCONSTRAINED_NUM
+#define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_UNCONSTRAINED_NUM (1u << 20)
+#endif
+/// Rigid body count ceiling in a constrained structure, set by the 128-bit connected mask.
+#ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM
+#define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM 128
+#endif
+#ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM
+#define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM 128
+#endif
 
 #endif

@@ -7,7 +7,7 @@
 #include "rise_origin/device/data/rs_array.h"
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/utils/rs_conf.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 #define RS_PHILOX_M4x32_0 0xD2511F53U
 #define RS_PHILOX_M4x32_1 0xCD9E8D57U
@@ -249,7 +249,7 @@ class RS_RandomState {
     }
 
     HOST_DEVICE_INLINE_QUALIFIER uint32_t _mulhi32(const uint32_t x, const uint32_t y) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
         return __umulhi(x, y);
 #else
         uint64_t product = static_cast<uint64_t>(x) * static_cast<uint64_t>(y);
@@ -259,11 +259,11 @@ class RS_RandomState {
 
     HOST_DEVICE_INLINE_QUALIFIER
     uint64_t _mulhi64(const uint64_t x, const uint64_t y) {
-#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_ENABLE_INTRINSICS)
+#if (defined(__CUDA_ARCH__) || defined(__HIP__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
         return __umul64hi(x, y);
-#elif defined(_MSC_VER) && defined(RS_ENABLE_INTRINSICS)
+#elif defined(_MSC_VER) && defined(RS_DEVICE_ENABLE_INTRINSICS)
         return __umulh(x, y);
-#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_ENABLE_INTRINSICS)
+#elif (defined(__GNUC__) || defined(__clang__)) && defined(RS_DEVICE_ENABLE_INTRINSICS)
         __uint128_t result = static_cast<__uint128_t>(x) * static_cast<__uint128_t>(y);
         return static_cast<uint64_t>(result >> 64);
 #else

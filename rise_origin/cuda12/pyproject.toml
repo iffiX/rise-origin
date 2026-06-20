@@ -33,7 +33,7 @@ RISE_ORIGIN_BACKEND = "cuda"
 BUILD_RISE_ORIGIN = "ON"
 BUILD_RISE_ORIGIN_TEST = "OFF"
 
-[tool.cibuildwheel]
+[tool.cibuildwheel.linux]
 build = "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"
 manylinux-x86_64-image = "quay.io/pypa/manylinux_2_28_x86_64"
 before-all = """
@@ -55,3 +55,11 @@ repair-wheel-command = """auditwheel repair -w {dest_dir} {wheel} \
     --exclude libcusparse* \
     --exclude libcusolver* \
     --exclude libcufft*"""
+
+[tool.cibuildwheel.windows]
+# Build deps (ninja, hdf5, boost, tbb) and CUDA come from the CI environment;
+# CMAKE_PREFIX_PATH is forwarded via CIBW_ENVIRONMENT_PASS_WINDOWS.
+build = "cp310-win_amd64 cp311-win_amd64 cp312-win_amd64 cp313-win_amd64"
+# The CUDA runtime DLLs ship via the nvidia-cuda-runtime pip dependency, so they
+# are excluded from the bundle.
+repair-wheel-command = "delvewheel repair -w {dest_dir} {wheel} --no-dll \"cudart64_12.dll;cublas64_12.dll;cublasLt64_12.dll;curand64_10.dll;cusparse64_12.dll;cusolver64_11.dll;cufft64_11.dll;nvrtc64_120_0.dll;nvJitLink_120_0.dll\""

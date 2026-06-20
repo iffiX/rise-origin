@@ -28,6 +28,7 @@ namespace py = pybind11;
 
 inline void initRSPYDefinitions(py::module &m) {
     m.attr("RS_NULL_INDEX") = RS_NULL_INDEX;
+    m.attr("RS_WORLD_MESSAGE_SYSTEM_ID") = RS_WORLD_MESSAGE_SYSTEM_ID;
 
     py::enum_<RSE_FloatType>(m, "RSE_FloatType")
         .value("RSE_FLOAT_32", RSE_FLOAT_32)
@@ -72,6 +73,13 @@ inline void initRSPYDefinitions(py::module &m) {
         .def_readwrite("g", &RColor3b::g)
         .def_readwrite("b", &RColor3b::b);
 
+    py::class_<RColor3f>(m, "RColor3f")
+        .def(py::init<>())
+        .def(py::init<float, float, float>())
+        .def_readwrite("r", &RColor3f::r)
+        .def_readwrite("g", &RColor3f::g)
+        .def_readwrite("b", &RColor3f::b);
+
     py::class_<RBound3rf>(m, "RBound3rf")
         .def(py::init<>())
         .def(py::init<RFloat, RFloat, RFloat, RFloat, RFloat, RFloat>())
@@ -110,44 +118,44 @@ inline void initRSPYDefinitions(py::module &m) {
         .def_readwrite("min_z", &RBound3ri::min_z)
         .def_readwrite("max_z", &RBound3ri::max_z);
 
-    py::enum_<RS_MathExprOperator>(m, "RS_MathExprOperator")
-        .value("meEND", meEND)
-        .value("meCONST", meCONST)
-        .value("meE", meE)
-        .value("mePI", mePI)
-        .value("meVAR", meVAR)
-        .value("meADD", meADD)
-        .value("meSUB", meSUB)
-        .value("meMUL", meMUL)
-        .value("meDIV", meDIV)
-        .value("meMOD", meMOD)
-        .value("mePOW", mePOW)
-        .value("meSQRT", meSQRT)
-        .value("meSIN", meSIN)
-        .value("meCOS", meCOS)
-        .value("meTAN", meTAN)
-        .value("meATAN", meATAN)
-        .value("meLOG", meLOG)
-        .value("meINT", meINT)
-        .value("meABS", meABS)
-        .value("meGREATERTHAN", meGREATERTHAN)
-        .value("meLESSTHAN", meLESSTHAN)
-        .value("meGREATEROREQUAL", meGREATEROREQUAL)
-        .value("meLESSOREQUAL", meLESSOREQUAL)
-        .value("meNOTEQUAL", meNOTEQUAL)
-        .value("meEQUAL", meEQUAL)
-        .value("meAND", meAND)
-        .value("meOR", meOR)
+    py::enum_<RSE_MathExprOperator>(m, "RSE_MathExprOperator")
+        .value("RSE_ME_END", RSE_ME_END)
+        .value("RSE_ME_CONST", RSE_ME_CONST)
+        .value("RSE_ME_E", RSE_ME_E)
+        .value("RSE_ME_PI", RSE_ME_PI)
+        .value("RSE_ME_VAR", RSE_ME_VAR)
+        .value("RSE_ME_ADD", RSE_ME_ADD)
+        .value("RSE_ME_SUB", RSE_ME_SUB)
+        .value("RSE_ME_MUL", RSE_ME_MUL)
+        .value("RSE_ME_DIV", RSE_ME_DIV)
+        .value("RSE_ME_MOD", RSE_ME_MOD)
+        .value("RSE_ME_POW", RSE_ME_POW)
+        .value("RSE_ME_SQRT", RSE_ME_SQRT)
+        .value("RSE_ME_SIN", RSE_ME_SIN)
+        .value("RSE_ME_COS", RSE_ME_COS)
+        .value("RSE_ME_TAN", RSE_ME_TAN)
+        .value("RSE_ME_ATAN", RSE_ME_ATAN)
+        .value("RSE_ME_LOG", RSE_ME_LOG)
+        .value("RSE_ME_INT", RSE_ME_INT)
+        .value("RSE_ME_ABS", RSE_ME_ABS)
+        .value("RSE_ME_GREATER_THAN", RSE_ME_GREATER_THAN)
+        .value("RSE_ME_LESS_THAN", RSE_ME_LESS_THAN)
+        .value("RSE_ME_GREATER_OR_EQUAL", RSE_ME_GREATER_OR_EQUAL)
+        .value("RSE_ME_LESS_OR_EQUAL", RSE_ME_LESS_OR_EQUAL)
+        .value("RSE_ME_NOT_EQUAL", RSE_ME_NOT_EQUAL)
+        .value("RSE_ME_EQUAL", RSE_ME_EQUAL)
+        .value("RSE_ME_AND", RSE_ME_AND)
+        .value("RSE_ME_OR", RSE_ME_OR)
         .export_values();
 
     py::class_<RS_MathExprToken>(m, "RS_MathExprToken")
         .def(py::init<>())
-        .def(py::init<RS_MathExprOperator>())
-        .def(py::init([](RS_MathExprOperator op, py::object val) {
+        .def(py::init<RSE_MathExprOperator>())
+        .def(py::init([](RSE_MathExprOperator op, py::object val) {
             RS_MathExprToken token(op);
-            if (op == meCONST) {
+            if (op == RSE_ME_CONST) {
                 token.value = val.cast<RFloat>();
-            } else if (op == meVAR) {
+            } else if (op == RSE_ME_VAR) {
                 token.value = val.cast<std::vector<std::string>>();
             }
             return token;
@@ -157,13 +165,13 @@ inline void initRSPYDefinitions(py::module &m) {
             "value",
             // Getter
             [](const RS_MathExprToken &token) -> py::object {
-                if (token.op == meCONST) {
+                if (token.op == RSE_ME_CONST) {
                     try {
                         return py::cast(token.value.as<RFloat>());
                     } catch (const RS_InvalidCastException &) {
                         return py::none();
                     }
-                } else if (token.op == meVAR) {
+                } else if (token.op == RSE_ME_VAR) {
                     try {
                         return py::cast(token.value.as<std::vector<std::string>>());
                     } catch (const RS_InvalidCastException &) {
@@ -174,9 +182,9 @@ inline void initRSPYDefinitions(py::module &m) {
             },
             // Setter
             [](RS_MathExprToken &token, py::object val) {
-                if (token.op == meCONST) {
+                if (token.op == RSE_ME_CONST) {
                     token.value = val.cast<RFloat>();
-                } else if (token.op == meVAR) {
+                } else if (token.op == RSE_ME_VAR) {
                     token.value = val.cast<std::vector<std::string>>();
                 }
             }

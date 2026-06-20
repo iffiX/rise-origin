@@ -7,12 +7,12 @@
 #include <vector>
 
 #include "rise_origin/core/rs_simulation.h"
-#include "rise_origin/core/rs_simulation_callback.h"
-#include "rise_origin/core/rs_simulation_local_handle.h"
-#include "rise_origin/rsc/rs_config.h"
+#include "rise_origin/core/rs_world_callback.h"
+#include "rise_origin/core/rs_world_local_handle.h"
+#include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/rs_logging.h"
-#include "rise_origin/utils/rs_memory.h"
-#include "rise_origin/utils/rs_thread_pool.h"
+#include "rise_origin/utils/memory/rs_memory.h"
+#include "rise_origin/utils/concurrency/rs_thread_pool.h"
 
 namespace rise {
 
@@ -45,37 +45,29 @@ class RS_SimulationManager {
     // Copy constructor is deleted
     RS_SimulationManager(const RS_SimulationManager &) = delete;
 
-    // init() -> runSim() -> free() (blocking)
+    // init() -> run() -> free() (blocking)
     void init();
     void free();
 
     /**
-     * @brief Run a simulation
-     * @param config Config for defining the kernel.
-     * @param id Unique unsigned integer id of the kernel.
-     * @param callback Simulation callback for control & modification of the simulation.
-     * @note Execution settings (update intervals, record buffer size, max time, save
-     *       flag, compute/memory accuracy) are read from config.simulation_config's
-     *       runtime_* fields.
-     * @note Config must be validated before used by RS_SimulationManager
+     * @brief Run a world.
+     * @param world The world characterization defining the simulation.
+     * @param callback World callback for control & modification of the running world.
+     * @note Execution settings (time stepping, record buffer size, max time, save flag,
+     *       compute/memory accuracy) are read from world.simulation.
+     * @note world must be validated before used by RS_SimulationManager.
      */
-    RS_SimulationLocalHandle runSim(
-        RS_Config config, RIndex id, RS_SimulationCallback callback = {}
-    );
+    RS_WorldLocalHandle run(rsc::RSC_World world, RS_WorldCallback callback = {});
 
    private:
     // Initialized in init()
     std::shared_ptr<logging::logger> _sm_logger;
 
-    std::string _getLogFormatter(RIndex simulation_index = RS_NULL_INDEX);
+    std::string _getLogFormatter(const std::string &world_name = "");
 
-    bool _initSim(const std::shared_ptr<RS_Simulation> &sim, const RS_Config &config);
-    void _runSim(const RS_Config &config, RS_SimulationExecutor &exec, RFloat max_time);
+    bool _initSim(const std::shared_ptr<RS_Simulation> &sim, const rsc::RSC_World &world);
+    void _runSim(const rsc::RSC_World &world, RS_SimulationExecutor &exec, RFloat max_time);
 
-    void _addSimRecorder(
-        const std::shared_ptr<RS_Simulation> &sim,
-        const RS_RecorderConfig &recorder_config
-    );
     void _syncSimRecorders(const std::shared_ptr<RS_Simulation> &sim);
     void _flushSimRecorders(const std::shared_ptr<RS_Simulation> &sim);
     void _finishSimRecorders(const std::shared_ptr<RS_Simulation> &sim);

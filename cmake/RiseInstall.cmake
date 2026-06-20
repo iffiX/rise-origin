@@ -10,7 +10,8 @@ include(GNUInstallDirs)
 if (DEFINED SKBUILD)
     # Python low-level extension module and type stubs (wheel layout)
     install(TARGETS rise_origin_python_core
-            LIBRARY DESTINATION rise_origin_python_core)
+            LIBRARY DESTINATION rise_origin_python_core
+            RUNTIME DESTINATION rise_origin_python_core)
     install(FILES ${CMAKE_SOURCE_DIR}/src/rise_origin/python/_core.pyi
             DESTINATION rise_origin_python_core)
 else ()
@@ -20,8 +21,8 @@ else ()
             LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
             ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
-    # Executable
-    install(TARGETS rise_origin_main
+    # Applications
+    install(TARGETS rise_origin_instance
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
     # Public headers
@@ -36,7 +37,8 @@ else ()
                 OUTPUT_VARIABLE RISE_ORIGIN_PYTHON_INSTALL_DIR OUTPUT_STRIP_TRAILING_WHITESPACE)
     endif ()
     install(TARGETS rise_origin_python_core
-            LIBRARY DESTINATION ${RISE_ORIGIN_PYTHON_INSTALL_DIR}/rise_origin_python_core)
+            LIBRARY DESTINATION ${RISE_ORIGIN_PYTHON_INSTALL_DIR}/rise_origin_python_core
+            RUNTIME DESTINATION ${RISE_ORIGIN_PYTHON_INSTALL_DIR}/rise_origin_python_core)
     install(FILES ${CMAKE_SOURCE_DIR}/src/rise_origin/python/_core.pyi
             DESTINATION ${RISE_ORIGIN_PYTHON_INSTALL_DIR}/rise_origin_python_core)
 endif ()

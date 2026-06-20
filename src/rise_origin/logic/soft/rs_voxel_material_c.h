@@ -22,7 +22,8 @@ class RS_VoxelMaterialCompute : public RS_MaterialCompute<FloatComputeAccuracy> 
 
     /// @brief Initializer. This function is called by the kernel manager.
     template <typename VoxelMaterialMem>
-    HOST_INLINE_QUALIFIER static void initMaterial(VoxelMaterialMem &material, FloatC grav_acc) {
+    HOST_INLINE_QUALIFIER static void
+    initMaterial(VoxelMaterialMem &material, bool is_rigid_or_fixed, FloatC grav_acc) {
         auto &m = material;
         RS_MaterialCompute<FloatComputeAccuracy>::initMaterial(m);
 
@@ -36,16 +37,21 @@ class RS_VoxelMaterialCompute : public RS_MaterialCompute<FloatComputeAccuracy> 
             m.mass_inverse = 1.0 / m.mass;
             m.sqrt_mass = sqrt(m.mass);
             m.moment_inertia_inverse = 1.0 / m.moment_inertia;
-            FloatC _2xSqMxExS = 2.0 * sqrt(m.mass * m.E * voxel_size);
-            FloatC _2xSqIxExSxSxS =
-                2.0 * sqrt(m.moment_inertia * m.E * voxel_size * voxel_size * voxel_size);
             m.internal_damping_c = 2.0 * m.zeta_internal * sqrt(m.mass);
-            m.global_damping_translate_c = m.zeta_global * _2xSqMxExS;
-            m.global_damping_rotate_c = m.zeta_global * _2xSqIxExSxSxS;
-            m.contact_damping_translate_c = m.zeta_contact * _2xSqMxExS;
-            m.contact_damping_rotate_c = m.zeta_contact * _2xSqIxExSxSxS;
-            m.penetration_stiffness = 2.0 * m.E * voxel_size;
             m.gravity = m.mass * grav_acc;
+
+            // A rigid or fixed voxel does not deform, so it carries no elastic stiffness
+            // or strain rate scaled damping; its contacts defer to the soft side.
+            if (!is_rigid_or_fixed) {
+                FloatC _2xSqMxExS = 2.0 * sqrt(m.mass * m.E * voxel_size);
+                FloatC _2xSqIxExSxSxS =
+                    2.0 * sqrt(m.moment_inertia * m.E * voxel_size * voxel_size * voxel_size);
+                m.global_damping_translate_c = m.zeta_global * _2xSqMxExS;
+                m.global_damping_rotate_c = m.zeta_global * _2xSqIxExSxSxS;
+                m.contact_damping_translate_c = m.zeta_contact * _2xSqMxExS;
+                m.contact_damping_rotate_c = m.zeta_contact * _2xSqIxExSxSxS;
+                m.penetration_stiffness = 2.0 * m.E * voxel_size;
+            }
         }
     }
 };

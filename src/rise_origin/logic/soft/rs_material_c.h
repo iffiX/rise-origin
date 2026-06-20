@@ -30,18 +30,12 @@ class RS_MaterialCompute {
         // exactly 0.5 will still cause problems, but it can get very close.
         m.nu = RS_BOUND(m.nu, 0, 0.5 - FLT_EPSILON * 2);
         m.rho = RS_MAX(m.rho, 0);
-        m.u_static = RS_MAX(m.u_static, 0);
-        m.u_dynamic = RS_MAX(m.u_dynamic, 0);
         m.zeta_internal = RS_MAX(m.zeta_internal, 0);
         m.zeta_contact = RS_MAX(m.zeta_contact, 0);
         m.zeta_global = RS_MAX(m.zeta_global, 0);
 
-        if (m.u_static < m.u_dynamic)
-            RS_THROW(RS_InvalidConfigurationException(
-                "Static friction coefficient is smaller than dynamic friction coefficient"
-            ));
         if (m.fail_stress < 0 && m.fail_stress != -1)
-            RS_THROW(RS_InvalidConfigurationException("Failure stress is negative"));
+            RS_THROW(RS_InvalidCharacterizationException("Failure stress is negative"));
 
         if (m.fail_stress > 0 && m.E > 0)
             m.fail_strain = m.fail_stress / m.E;

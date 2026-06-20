@@ -10,28 +10,54 @@
 #include <string>
 #include <vector>
 
-#include "rise_origin/core/rs_simulation_controller.h"
-#include "rise_origin/core/rs_simulation_def.h"
-#include "rise_origin/core/rs_simulation_handle.h"
-#include "rise_origin/core/rs_simulation_record.h"
-#include "rise_origin/core/rs_simulation_signal.h"
+#include "rise_origin/core/rs_world_controller.h"
+#include "rise_origin/core/rs_world_def.h"
+#include "rise_origin/core/rs_world_handle.h"
+#include "rise_origin/core/rs_world_record.h"
+#include "rise_origin/core/rs_world_signal.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_device.h"
+#include "rise_origin/utils/memory/rs_device.h"
 
 namespace py = pybind11;
 using namespace rise;
+
+// Read-only numpy array helpers: return a copy of the underlying buffer.
+// Used for record snapshots that should not be mutated by Python callers.
+template <typename T>
+inline py::array_t<T> rspyRoArray1D(T *ptr, size_t size) {
+    return py::array_t<T>({size}, {sizeof(T)}, ptr);
+}
+
+template <typename T>
+inline py::array_t<T> rspyRoArray2D(T *ptr, size_t n, size_t dim) {
+    return py::array_t<T>({n, dim}, {dim * sizeof(T), sizeof(T)}, ptr);
+}
+
+// Read-write numpy array helpers: return a non-owning writable view of the
+// underlying buffer through a no-op capsule base. The buffer's lifetime is
+// owned by the manager that produced it.
+template <typename T>
+inline py::array_t<T> rspyRwArray1D(T *ptr, size_t size) {
+    py::capsule view_owner(ptr, [](void *) {});
+    return py::array_t<T>({size}, {sizeof(T)}, ptr, view_owner);
+}
+
+template <typename T>
+inline py::array_t<T> rspyRwArray2D(T *ptr, size_t n, size_t dim) {
+    py::capsule view_owner(ptr, [](void *) {});
+    return py::array_t<T>({n, dim}, {dim * sizeof(T), sizeof(T)}, ptr, view_owner);
+}
 
 class RSPY_DeviceLocation {
    public:
     RS_DeviceLocation loc;
 
-    // Default constructor -> "cpu"
     RSPY_DeviceLocation() {
         loc.type = RSE_DEVICE_TYPE_CPU;
         loc.id = 0;
     }
 
-    // Construct from string: "cpu" or "cuda:<id>"
+    /// Construct from "cpu" or "cuda:<id>".
     explicit RSPY_DeviceLocation(const std::string &device_str) {
         if (device_str == "cpu") {
             loc.type = RSE_DEVICE_TYPE_CPU;
@@ -63,369 +89,265 @@ class RSPY_DeviceLocation {
     }
 };
 
-class RSPY_SimulationStructureSignal {
+/*****************************************************************
+ * Record wrappers.
+ *****************************************************************/
+
+class RSPY_WorldStructureVoxelRecord {
    public:
-    RS_SimulationStructureSignal signal;
-    explicit RSPY_SimulationStructureSignal(const RS_SimulationStructureSignal &sig)
-        : signal(sig) {}
-
-    py::object expansion_signals() {
-        if (!signal.expansion_signals || signal.expansion_signal_num == 0) return py::none();
-        return py::memoryview::from_buffer(
-            signal.expansion_signals, {signal.expansion_signal_num}, {sizeof(RFloat)}
-        );
-    }
-
-    py::object hinge_signals() {
-        if (!signal.hinge_signals || signal.hinge_signal_num == 0) return py::none();
-        return py::memoryview::from_buffer(
-            signal.hinge_signals, {signal.hinge_signal_num}, {sizeof(RFloat)}
-        );
-    }
-
-    py::object prismatic_signals() {
-        if (!signal.prismatic_signals || signal.prismatic_signal_num == 0) return py::none();
-        return py::memoryview::from_buffer(
-            signal.prismatic_signals, {signal.prismatic_signal_num}, {sizeof(RFloat)}
-        );
-    }
-};
-
-class RSPY_SimulationCameraSignal {
-   public:
-    RS_SimulationCameraSignal signal;
-    explicit RSPY_SimulationCameraSignal(const RS_SimulationCameraSignal &sig) : signal(sig) {}
-
-    py::object position_signals() {
-        if (!signal.position_signals || signal.position_num == 0) return py::none();
-        return py::memoryview::from_buffer(
-            signal.position_signals, {signal.position_num}, {sizeof(RFloat)}
-        );
-    }
-
-    py::object orientation_signals() {
-        if (!signal.orientation_signals || signal.orientation_num == 0) return py::none();
-        return py::memoryview::from_buffer(
-            signal.orientation_signals, {signal.orientation_num}, {sizeof(RFloat)}
-        );
-    }
-
-    py::object focus_distance_signals() {
-        if (!signal.focus_distance_signals || signal.focus_distance_num == 0) return py::none();
-        return py::memoryview::from_buffer(
-            signal.focus_distance_signals, {signal.focus_distance_num}, {sizeof(RFloat)}
-        );
-    }
-
-    py::object field_of_view_signals() {
-        if (!signal.field_of_view_signals || signal.field_of_view_num == 0) return py::none();
-        return py::memoryview::from_buffer(
-            signal.field_of_view_signals, {signal.field_of_view_num}, {sizeof(RFloat)}
-        );
-    }
-};
-
-class RSPY_SimulationForceSignal {
-   public:
-    RS_SimulationForceSignal signal;
-    explicit RSPY_SimulationForceSignal(const RS_SimulationForceSignal &sig) : signal(sig) {}
-
-    py::object force_signals() {
-        if (!signal.force_signals) return py::none();
-        // Force signal is a single 3D vector (3 RFloat values)
-        return py::memoryview::from_buffer(
-            signal.force_signals, {static_cast<size_t>(3)}, {sizeof(RFloat)}
-        );
-    }
-};
-
-class RSPY_SimulationTorqueSignal {
-   public:
-    RS_SimulationTorqueSignal signal;
-    explicit RSPY_SimulationTorqueSignal(const RS_SimulationTorqueSignal &sig) : signal(sig) {}
-
-    py::object torque_signals() {
-        if (!signal.torque_signals) return py::none();
-        // Torque signal is a single 3D vector (3 RFloat values)
-        return py::memoryview::from_buffer(
-            signal.torque_signals, {static_cast<size_t>(3)}, {sizeof(RFloat)}
-        );
-    }
-};
-
-class RSPY_SimulationStructureRecord {
-   public:
-    RS_SimulationStructureRecord record;
-
-    explicit RSPY_SimulationStructureRecord(const RS_SimulationStructureRecord &rec)
+    RS_WorldStructureVoxelRecord record;
+    explicit RSPY_WorldStructureVoxelRecord(const RS_WorldStructureVoxelRecord &rec)
         : record(rec) {}
 
-    // 1D array helper (for scalar fields)
-    template <typename T>
-    py::array_t<T> array1D(T *ptr, size_t size) const {
-        return py::array_t<T>(
-            {size},       // shape
-            {sizeof(T)},  // stride
-            ptr
-        );
-    }
+    class Voxel {
+       public:
+        RS_WorldStructureVoxelRecord record;
+        explicit Voxel(const RS_WorldStructureVoxelRecord &rec) : record(rec) {}
 
-    // 2D float array helper (for vectors / quaternions)
-    template <typename T>
-    py::array_t<T> array2D(T *ptr, size_t N, size_t dim) const {
-        // shape: [N, dim]
-        // strides in bytes: row stride = dim*sizeof(T), col stride = sizeof(T)
-        return py::array_t<T>({N, dim}, {dim * sizeof(T), sizeof(T)}, ptr);
-    }
+        [[nodiscard]] RBigSize size() const { return record.voxels.object_num; }
+
+        [[nodiscard]] py::array_t<RIndex> body_sid() const {
+            return rspyRoArray1D(record.voxels.body_sid, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> voxel_sid() const {
+            return rspyRoArray1D(record.voxels.voxel_sid, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> segment_bid() const {
+            return rspyRoArray1D(record.voxels.segment_bid, size());
+        }
+        [[nodiscard]] py::array_t<RSignedIndex> index_x() const {
+            return rspyRoArray1D(record.voxels.index_x, size());
+        }
+        [[nodiscard]] py::array_t<RSignedIndex> index_y() const {
+            return rspyRoArray1D(record.voxels.index_y, size());
+        }
+        [[nodiscard]] py::array_t<RSignedIndex> index_z() const {
+            return rspyRoArray1D(record.voxels.index_z, size());
+        }
+        [[nodiscard]] py::array_t<uint8_t> connectivity() const {
+            return rspyRoArray1D(record.voxels.connectivity, size());
+        }
+        [[nodiscard]] py::array_t<bool> is_surface() const {
+            return rspyRoArray1D(record.voxels.is_surface, size());
+        }
+        [[nodiscard]] py::array_t<bool> is_rigid() const {
+            return rspyRoArray1D(record.voxels.is_rigid, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> material() const {
+            return rspyRoArray1D(record.voxels.material, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> expansion() const {
+            return rspyRoArray1D(record.voxels.expansion, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> orientation() const {
+            return rspyRoArray2D(reinterpret_cast<RFloat *>(record.voxels.orientation), size(), 4);
+        }
+        [[nodiscard]] py::array_t<RFloat> position() const {
+            return rspyRoArray2D(reinterpret_cast<RFloat *>(record.voxels.position), size(), 3);
+        }
+        [[nodiscard]] py::array_t<RFloat> ppp_offset() const {
+            return rspyRoArray2D(reinterpret_cast<RFloat *>(record.voxels.ppp_offset), size(), 3);
+        }
+        [[nodiscard]] py::array_t<RFloat> nnn_offset() const {
+            return rspyRoArray2D(reinterpret_cast<RFloat *>(record.voxels.nnn_offset), size(), 3);
+        }
+        [[nodiscard]] py::array_t<RFloat> linear_velocity() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.voxels.linear_velocity), size(), 3
+            );
+        }
+        [[nodiscard]] py::array_t<RFloat> angular_velocity() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.voxels.angular_velocity), size(), 3
+            );
+        }
+        [[nodiscard]] py::array_t<RFloat> poissons_strain() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.voxels.poissons_strain), size(), 3
+            );
+        }
+    };
+
+    class Link {
+       public:
+        RS_WorldStructureVoxelRecord record;
+        explicit Link(const RS_WorldStructureVoxelRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RBigSize size() const { return record.links.object_num; }
+
+        [[nodiscard]] py::array_t<RIndex> voxel_neg_sid() const {
+            return rspyRoArray1D(record.links.voxel_neg_sid, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> voxel_pos_sid() const {
+            return rspyRoArray1D(record.links.voxel_pos_sid, size());
+        }
+        [[nodiscard]] py::array_t<bool> is_failed() const {
+            return rspyRoArray1D(record.links.is_failed, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> strain() const {
+            return rspyRoArray1D(record.links.strain, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> stress() const {
+            return rspyRoArray1D(record.links.stress, size());
+        }
+    };
+
+    class RigidBody {
+       public:
+        RS_WorldStructureVoxelRecord record;
+        explicit RigidBody(const RS_WorldStructureVoxelRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RBigSize size() const { return record.rigid_bodies.object_num; }
+
+        [[nodiscard]] py::array_t<RIndex> rigid_body_sid() const {
+            return rspyRoArray1D(record.rigid_bodies.rigid_body_sid, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> body_sid() const {
+            return rspyRoArray1D(record.rigid_bodies.body_sid, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> segment_bid() const {
+            return rspyRoArray1D(record.rigid_bodies.segment_bid, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> mass() const {
+            return rspyRoArray1D(record.rigid_bodies.mass, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> orientation() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.rigid_bodies.orientation), size(), 4
+            );
+        }
+        [[nodiscard]] py::array_t<RFloat> com() const {
+            return rspyRoArray2D(reinterpret_cast<RFloat *>(record.rigid_bodies.com), size(), 3);
+        }
+        [[nodiscard]] py::array_t<RFloat> linear_velocity() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.rigid_bodies.linear_velocity), size(), 3
+            );
+        }
+        [[nodiscard]] py::array_t<RFloat> angular_velocity() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.rigid_bodies.angular_velocity), size(), 3
+            );
+        }
+    };
+
+    class Joint {
+       public:
+        RS_WorldStructureVoxelRecord record;
+        explicit Joint(const RS_WorldStructureVoxelRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RBigSize size() const { return record.joints.object_num; }
+
+        [[nodiscard]] py::array_t<RIndex> rigid_body_a_sid() const {
+            return rspyRoArray1D(record.joints.rigid_body_a_sid, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> rigid_body_b_sid() const {
+            return rspyRoArray1D(record.joints.rigid_body_b_sid, size());
+        }
+        [[nodiscard]] py::array_t<RS_WorldStructureRecordBase::JointType> type() const {
+            return rspyRoArray1D(record.joints.type, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> position() const {
+            return rspyRoArray2D(reinterpret_cast<RFloat *>(record.joints.position), size(), 3);
+        }
+        [[nodiscard]] py::array_t<RFloat> axis() const {
+            return rspyRoArray2D(reinterpret_cast<RFloat *>(record.joints.axis), size(), 3);
+        }
+        [[nodiscard]] py::array_t<RIndex> hinge_signal_sid() const {
+            return rspyRoArray1D(record.joints.hinge_signal_sid, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> hinge_min() const {
+            return rspyRoArray1D(record.joints.hinge_min, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> hinge_max() const {
+            return rspyRoArray1D(record.joints.hinge_max, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> hinge_angle() const {
+            return rspyRoArray1D(record.joints.hinge_angle, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> hinge_torque() const {
+            return rspyRoArray1D(record.joints.hinge_torque, size());
+        }
+        [[nodiscard]] py::array_t<RIndex> prismatic_signal_sid() const {
+            return rspyRoArray1D(record.joints.prismatic_signal_sid, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> prismatic_min() const {
+            return rspyRoArray1D(record.joints.prismatic_min, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> prismatic_max() const {
+            return rspyRoArray1D(record.joints.prismatic_max, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> prismatic_distance() const {
+            return rspyRoArray1D(record.joints.prismatic_distance, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> prismatic_force() const {
+            return rspyRoArray1D(record.joints.prismatic_force, size());
+        }
+    };
 
     [[nodiscard]] RBigIndex step() const { return record.getStep(); }
     [[nodiscard]] RBigFloat time() const { return record.getTime(); }
+    [[nodiscard]] RIndex structure_gid() const { return record.structure_gid; }
 
-    [[nodiscard]] RBigSize voxel_size() const { return record.voxels.object_num; }
-    [[nodiscard]] RBigSize link_size() const { return record.links.object_num; }
-    [[nodiscard]] RBigSize rigid_body_size() const { return record.rigid_bodies.object_num; }
-    [[nodiscard]] RBigSize joint_size() const { return record.joints.object_num; }
-
-    // ------------------ Voxel ------------------
-    [[nodiscard]] py::array_t<RIndex> voxel_body_sid() const {
-        return array1D(record.voxels.body_sid, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> voxel_voxel_sid() const {
-        return array1D(record.voxels.voxel_sid, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> voxel_segment_bid() const {
-        return array1D(record.voxels.segment_bid, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<RSignedIndex> voxel_index_x() const {
-        return array1D(record.voxels.index_x, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<RSignedIndex> voxel_index_y() const {
-        return array1D(record.voxels.index_y, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<RSignedIndex> voxel_index_z() const {
-        return array1D(record.voxels.index_z, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<uint8_t> voxel_connectivity() const {
-        return array1D(record.voxels.connectivity, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<bool> voxel_is_surface() const {
-        return array1D(record.voxels.is_surface, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<bool> voxel_is_rigid() const {
-        return array1D(record.voxels.is_rigid, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> voxel_material() const {
-        return array1D(record.voxels.material, voxel_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> voxel_expansion() const {
-        return array1D(record.voxels.expansion, voxel_size());
-    }
-
-    // Quaternion: shape [N, 4]
-    [[nodiscard]] py::array_t<RFloat> voxel_orientation() const {
-        size_t N = voxel_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.voxels.orientation);
-        return array2D(fptr, N, 4);
-    }
-
-    // Vector: shape [N, 3]
-    [[nodiscard]] py::array_t<RFloat> voxel_position() const {
-        size_t N = voxel_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.voxels.position);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> voxel_ppp_offset() const {
-        size_t N = voxel_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.voxels.ppp_offset);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> voxel_nnn_offset() const {
-        size_t N = voxel_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.voxels.nnn_offset);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> voxel_linear_velocity() const {
-        size_t N = voxel_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.voxels.linear_velocity);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> voxel_angular_velocity() const {
-        size_t N = voxel_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.voxels.angular_velocity);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> voxel_poissons_strain() const {
-        size_t N = voxel_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.voxels.poissons_strain);
-        return array2D(fptr, N, 3);
-    }
-
-    // ------------------ Link ------------------
-    [[nodiscard]] py::array_t<RIndex> link_voxel_neg_sid() const {
-        return array1D(record.links.voxel_neg_sid, link_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> link_voxel_pos_sid() const {
-        return array1D(record.links.voxel_pos_sid, link_size());
-    }
-
-    [[nodiscard]] py::array_t<bool> link_is_tendon() const {
-        return array1D(record.links.is_tendon, link_size());
-    }
-
-    [[nodiscard]] py::array_t<bool> link_is_failed() const {
-        return array1D(record.links.is_failed, link_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> link_strain() const {
-        return array1D(record.links.strain, link_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> link_stress() const {
-        return array1D(record.links.stress, link_size());
-    }
-
-    // ------------------ Rigid Body ------------------
-    [[nodiscard]] py::array_t<RIndex> rigid_body_rigid_body_sid() const {
-        return array1D(record.rigid_bodies.rigid_body_sid, rigid_body_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> rigid_body_body_sid() const {
-        return array1D(record.rigid_bodies.body_sid, rigid_body_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> rigid_body_segment_bid() const {
-        return array1D(record.rigid_bodies.segment_bid, rigid_body_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> rigid_body_mass() const {
-        return array1D(record.rigid_bodies.mass, rigid_body_size());
-    }
-
-    // Quaternion: [N, 4]
-    [[nodiscard]] py::array_t<RFloat> rigid_body_orientation() const {
-        size_t N = rigid_body_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.rigid_bodies.orientation);
-        return array2D(fptr, N, 4);
-    }
-
-    // Vector: [N, 3]
-    [[nodiscard]] py::array_t<RFloat> rigid_body_com() const {
-        size_t N = rigid_body_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.rigid_bodies.com);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> rigid_body_linear_velocity() const {
-        size_t N = rigid_body_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.rigid_bodies.linear_velocity);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> rigid_body_angular_velocity() const {
-        size_t N = rigid_body_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.rigid_bodies.angular_velocity);
-        return array2D(fptr, N, 3);
-    }
-
-    // ------------------ Joint ------------------
-    [[nodiscard]] py::array_t<RIndex> joint_rigid_body_a_sid() const {
-        return array1D(record.joints.rigid_body_a_sid, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> joint_rigid_body_b_sid() const {
-        return array1D(record.joints.rigid_body_b_sid, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> joint_hinge_signal_sid() const {
-        return array1D(record.joints.hinge_signal_sid, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RSE_SimulationJointRecordType> joint_type() const {
-        return array1D(record.joints.type, joint_size());
-    }
-
-    // Vector: [N, 3]
-    [[nodiscard]] py::array_t<RFloat> joint_position() const {
-        size_t N = joint_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.joints.position);
-        return array2D(fptr, N, 3);
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_axis() const {
-        size_t N = joint_size();
-        auto *fptr = reinterpret_cast<RFloat *>(record.joints.axis);
-        return array2D(fptr, N, 3);
-    }
-
-    // 1D float arrays
-    [[nodiscard]] py::array_t<RFloat> joint_hinge_min() const {
-        return array1D(record.joints.hinge_min, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_hinge_max() const {
-        return array1D(record.joints.hinge_max, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_hinge_angle() const {
-        return array1D(record.joints.hinge_angle, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_hinge_torque() const {
-        return array1D(record.joints.hinge_torque, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RIndex> joint_prismatic_signal_sid() const {
-        return array1D(record.joints.prismatic_signal_sid, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_prismatic_min() const {
-        return array1D(record.joints.prismatic_min, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_prismatic_max() const {
-        return array1D(record.joints.prismatic_max, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_prismatic_distance() const {
-        return array1D(record.joints.prismatic_distance, joint_size());
-    }
-
-    [[nodiscard]] py::array_t<RFloat> joint_prismatic_force() const {
-        return array1D(record.joints.prismatic_force, joint_size());
-    }
+    [[nodiscard]] Voxel voxels() const { return Voxel(record); }
+    [[nodiscard]] Link links() const { return Link(record); }
+    [[nodiscard]] RigidBody rigid_bodies() const { return RigidBody(record); }
+    [[nodiscard]] Joint joints() const { return Joint(record); }
 };
 
-class RSPY_SimulationCameraRecord {
+class RSPY_WorldCameraPerspectiveRecord {
    public:
-    RS_SimulationCameraRecord record;
+    RS_WorldCameraPerspectiveRecord record;
+    explicit RSPY_WorldCameraPerspectiveRecord(const RS_WorldCameraPerspectiveRecord &rec)
+        : record(rec) {}
 
-    explicit RSPY_SimulationCameraRecord(const RS_SimulationCameraRecord &rec) : record(rec) {}
+    class RGB {
+       public:
+        RS_WorldCameraPerspectiveRecord record;
+        explicit RGB(const RS_WorldCameraPerspectiveRecord &rec) : record(rec) {}
 
-    // Helper method to create 3D NumPy array from pixel data
-    static py::array_t<uint8_t> array3D(RColor3b *ptr, size_t width, size_t height) {
-        // Reinterpret RColor3b as array of uint8_t with shape [height, width, 3]
-        return py::array_t(
-            {height, width, static_cast<size_t>(3)},                              // shape
-            {width * 3 * sizeof(uint8_t), 3 * sizeof(uint8_t), sizeof(uint8_t)},  // strides
-            reinterpret_cast<uint8_t *>(ptr)                                      // data pointer
-        );
-    }
+        [[nodiscard]] RSize width() const { return record.width; }
+        [[nodiscard]] RSize height() const { return record.height; }
+
+        /// Pixel data as a [height, width, 3] uint8 ndarray.
+        [[nodiscard]] py::array_t<uint8_t> pixels() const {
+            if (record.width == 0 || record.height == 0 || !record.isValid()) {
+                return py::array_t<uint8_t>(0);
+            }
+            const size_t w = record.width;
+            const size_t h = record.height;
+            return py::array_t<uint8_t>(
+                {h, w, static_cast<size_t>(3)},
+                {w * 3 * sizeof(uint8_t), 3 * sizeof(uint8_t), sizeof(uint8_t)},
+                reinterpret_cast<uint8_t *>(record.rgb.pixel)
+            );
+        }
+    };
+
+    class State {
+       public:
+        RS_WorldCameraPerspectiveRecord record;
+        explicit State(const RS_WorldCameraPerspectiveRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RBigSize size() const { return record.camera_state.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> position() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.camera_state.position), size(), 3
+            );
+        }
+        [[nodiscard]] py::array_t<RFloat> orientation() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.camera_state.orientation), size(), 4
+            );
+        }
+        [[nodiscard]] py::array_t<RFloat> focus_distance() const {
+            return rspyRoArray1D(record.camera_state.focus_distance, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> field_of_view() const {
+            return rspyRoArray1D(record.camera_state.field_of_view, size());
+        }
+    };
 
     [[nodiscard]] RBigIndex step() const { return record.getStep(); }
     [[nodiscard]] RBigFloat time() const { return record.getTime(); }
@@ -436,125 +358,243 @@ class RSPY_SimulationCameraRecord {
     [[nodiscard]] RSize height() const { return record.height; }
     [[nodiscard]] bool is_valid() const { return record.isValid(); }
 
-    // 1D array helper (for scalar fields)
-    template <typename T>
-    py::array_t<T> array1D(T *ptr, size_t size) const {
-        return py::array_t<T>(
-            {size},       // shape
-            {sizeof(T)},  // stride
-            ptr
-        );
-    }
-
-    // Get pixel data as a 3D NumPy array (height x width x 3)
-    [[nodiscard]] py::array_t<uint8_t> rgb() const {
-        if (record.width == 0 || record.height == 0 || !record.isValid()) {
-            return py::array_t<uint8_t>(0);
-        }
-        return array3D(record.rgb.pixel, record.width, record.height);
-    }
-
-    // Camera position: [3]
-    [[nodiscard]] py::array_t<RFloat> position() const {
-        return array1D(reinterpret_cast<RFloat *>(record.camera_state.position), 3);
-    }
-
-    // Camera orientation: [4]
-    [[nodiscard]] py::array_t<RFloat> orientation() const {
-        return array1D(reinterpret_cast<RFloat *>(record.camera_state.orientation), 4);
-    }
-
-    // Camera focus distance: [1]
-    [[nodiscard]] py::array_t<RFloat> focus_distance() const {
-        return array1D(record.camera_state.focus_distance, 1);
-    }
-
-    // Camera field of view: [1]
-    [[nodiscard]] py::array_t<RFloat> field_of_view() const {
-        return array1D(record.camera_state.field_of_view, 1);
-    }
+    [[nodiscard]] RGB rgb() const { return RGB(record); }
+    [[nodiscard]] State state() const { return State(record); }
 };
 
-class RSPY_SimulationStructureController {
+class RSPY_WorldIntersectRegionRecord {
    public:
-    RS_SimulationStructureController controller;
+    RS_WorldIntersectRegionRecord record;
+    explicit RSPY_WorldIntersectRegionRecord(const RS_WorldIntersectRegionRecord &rec)
+        : record(rec) {}
 
-    explicit RSPY_SimulationStructureController(const RS_SimulationStructureController &ctrl)
-        : controller(ctrl) {}
+    class Membership {
+       public:
+        RS_WorldIntersectRegionRecord record;
+        explicit Membership(const RS_WorldIntersectRegionRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RBigSize size() const { return record.memberships.object_num; }
+
+        [[nodiscard]] py::array_t<RIndex> structure_gid() const {
+            return rspyRoArray1D(record.memberships.structure_gid, size());
+        }
+    };
+
+    [[nodiscard]] RBigIndex step() const { return record.getStep(); }
+    [[nodiscard]] RBigFloat time() const { return record.getTime(); }
+    [[nodiscard]] RIndex record_gid() const { return record.record_gid; }
+
+    [[nodiscard]] Membership memberships() const { return Membership(record); }
+};
+
+/*****************************************************************
+ * Signal wrappers.
+ *****************************************************************/
+
+class RSPY_WorldStructureVoxelSignal {
+   public:
+    RS_WorldStructureVoxelSignal signal;
+    explicit RSPY_WorldStructureVoxelSignal(const RS_WorldStructureVoxelSignal &sig)
+        : signal(sig) {}
+
+    class Expansion {
+       public:
+        RS_WorldStructureVoxelSignal signal;
+        explicit Expansion(const RS_WorldStructureVoxelSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.expansion_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> expansion() const {
+            return rspyRwArray1D(signal.expansion_signals.expansion, size());
+        }
+    };
+
+    class Hinge {
+       public:
+        RS_WorldStructureVoxelSignal signal;
+        explicit Hinge(const RS_WorldStructureVoxelSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.hinge_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> hinge() const {
+            return rspyRwArray1D(signal.hinge_signals.hinge, size());
+        }
+    };
+
+    class Prismatic {
+       public:
+        RS_WorldStructureVoxelSignal signal;
+        explicit Prismatic(const RS_WorldStructureVoxelSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.prismatic_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> prismatic() const {
+            return rspyRwArray1D(signal.prismatic_signals.prismatic, size());
+        }
+    };
+
+    [[nodiscard]] Expansion expansion_signals() const { return Expansion(signal); }
+    [[nodiscard]] Hinge hinge_signals() const { return Hinge(signal); }
+    [[nodiscard]] Prismatic prismatic_signals() const { return Prismatic(signal); }
+};
+
+class RSPY_WorldCameraPerspectiveSignal {
+   public:
+    RS_WorldCameraPerspectiveSignal signal;
+    explicit RSPY_WorldCameraPerspectiveSignal(const RS_WorldCameraPerspectiveSignal &sig)
+        : signal(sig) {}
+
+    class Position {
+       public:
+        RS_WorldCameraPerspectiveSignal signal;
+        explicit Position(const RS_WorldCameraPerspectiveSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.position_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> position() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.position_signals.position), size(), 3
+            );
+        }
+    };
+
+    class Orientation {
+       public:
+        RS_WorldCameraPerspectiveSignal signal;
+        explicit Orientation(const RS_WorldCameraPerspectiveSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.orientation_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> orientation() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.orientation_signals.orientation), size(), 4
+            );
+        }
+    };
+
+    class Optics {
+       public:
+        RS_WorldCameraPerspectiveSignal signal;
+        explicit Optics(const RS_WorldCameraPerspectiveSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.optics_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> focus_distance() const {
+            return rspyRwArray1D(signal.optics_signals.focus_distance, size());
+        }
+        [[nodiscard]] py::array_t<RFloat> field_of_view() const {
+            return rspyRwArray1D(signal.optics_signals.field_of_view, size());
+        }
+    };
+
+    [[nodiscard]] Position position_signals() const { return Position(signal); }
+    [[nodiscard]] Orientation orientation_signals() const { return Orientation(signal); }
+    [[nodiscard]] Optics optics_signals() const { return Optics(signal); }
+};
+
+class RSPY_WorldForceSignal {
+   public:
+    RS_WorldForceSignal signal;
+    explicit RSPY_WorldForceSignal(const RS_WorldForceSignal &sig) : signal(sig) {}
+
+    class Force {
+       public:
+        RS_WorldForceSignal signal;
+        explicit Force(const RS_WorldForceSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.force_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> force() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.force_signals.force), size(), 3
+            );
+        }
+    };
+
+    [[nodiscard]] Force force_signals() const { return Force(signal); }
+};
+
+class RSPY_WorldTorqueSignal {
+   public:
+    RS_WorldTorqueSignal signal;
+    explicit RSPY_WorldTorqueSignal(const RS_WorldTorqueSignal &sig) : signal(sig) {}
+
+    class Torque {
+       public:
+        RS_WorldTorqueSignal signal;
+        explicit Torque(const RS_WorldTorqueSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.torque_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> torque() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.torque_signals.torque), size(), 3
+            );
+        }
+    };
+
+    [[nodiscard]] Torque torque_signals() const { return Torque(signal); }
+};
+
+/*****************************************************************
+ * Controller wrapper.
+ *****************************************************************/
+
+class RSPY_WorldController {
+   public:
+    RS_WorldController controller;
+    explicit RSPY_WorldController(const RS_WorldController &ctrl) : controller(ctrl) {}
 
     [[nodiscard]] std::string name() const { return controller.name; }
 
-    [[nodiscard]] RSPY_SimulationStructureRecord structure_record() const {
-        return RSPY_SimulationStructureRecord(controller.structure_record);
-    }
-
-    [[nodiscard]] RSPY_SimulationStructureSignal signal() const {
-        return RSPY_SimulationStructureSignal(controller.signal);
-    }
-
-    // Return camera records if needed
-    [[nodiscard]] py::list camera_records() const {
+    [[nodiscard]] py::list records() const {
         py::list result;
-        for (const auto &rec : controller.camera_records) {
-            result.append(py::cast(RSPY_SimulationCameraRecord(rec)));
+        for (const auto &record : controller.records) {
+            record.visit([&](const auto &held) {
+                using T = std::decay_t<decltype(held)>;
+                if constexpr (std::is_same_v<T, RS_WorldStructureVoxelRecord>) {
+                    result.append(py::cast(RSPY_WorldStructureVoxelRecord(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldCameraPerspectiveRecord>) {
+                    result.append(py::cast(RSPY_WorldCameraPerspectiveRecord(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldIntersectRegionRecord>) {
+                    result.append(py::cast(RSPY_WorldIntersectRegionRecord(held)));
+                }
+            });
+        }
+        return result;
+    }
+
+    [[nodiscard]] py::list signals() const {
+        py::list result;
+        for (const auto &signal : controller.signals) {
+            signal.visit([&](const auto &held) {
+                using T = std::decay_t<decltype(held)>;
+                if constexpr (std::is_same_v<T, RS_WorldStructureVoxelSignal>) {
+                    result.append(py::cast(RSPY_WorldStructureVoxelSignal(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldCameraPerspectiveSignal>) {
+                    result.append(py::cast(RSPY_WorldCameraPerspectiveSignal(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldForceSignal>) {
+                    result.append(py::cast(RSPY_WorldForceSignal(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldTorqueSignal>) {
+                    result.append(py::cast(RSPY_WorldTorqueSignal(held)));
+                }
+            });
         }
         return result;
     }
 };
 
-class RSPY_SimulationCameraController {
+/*****************************************************************
+ * World handle wrapper.
+ *****************************************************************/
+
+class RSPY_WorldHandle {
    public:
-    RS_SimulationCameraController controller;
+    std::shared_ptr<RS_WorldHandle> handle;
+    explicit RSPY_WorldHandle(std::shared_ptr<RS_WorldHandle> handle)
+        : handle(std::move(handle)) {}
 
-    explicit RSPY_SimulationCameraController(const RS_SimulationCameraController &ctrl)
-        : controller(ctrl) {}
-
-    [[nodiscard]] std::string name() const { return controller.name; }
-
-    // Return wrapped camera record instead of raw record
-    [[nodiscard]] RSPY_SimulationCameraRecord camera_record() const {
-        return RSPY_SimulationCameraRecord(controller.camera_record);
-    }
-
-    [[nodiscard]] RSPY_SimulationCameraSignal signal() const {
-        return RSPY_SimulationCameraSignal(controller.signal);
-    }
-};
-
-class RSPY_SimulationForceController {
-   public:
-    RS_SimulationForceController controller;
-
-    explicit RSPY_SimulationForceController(const RS_SimulationForceController &ctrl)
-        : controller(ctrl) {}
-
-    [[nodiscard]] std::string name() const { return controller.name; }
-
-    [[nodiscard]] RSPY_SimulationForceSignal signal() const {
-        return RSPY_SimulationForceSignal(controller.signal);
-    }
-};
-
-class RSPY_SimulationTorqueController {
-   public:
-    RS_SimulationTorqueController controller;
-
-    explicit RSPY_SimulationTorqueController(const RS_SimulationTorqueController &ctrl)
-        : controller(ctrl) {}
-
-    [[nodiscard]] std::string name() const { return controller.name; }
-
-    [[nodiscard]] RSPY_SimulationTorqueSignal signal() const {
-        return RSPY_SimulationTorqueSignal(controller.signal);
-    }
-};
-
-class RSPY_SimulationHandle {
-   public:
-    std::shared_ptr<RS_SimulationHandle> handle;
-    explicit RSPY_SimulationHandle(std::shared_ptr<RS_SimulationHandle> &handle)
-        : handle(handle) {}
-
+    // Lifecycle
     [[nodiscard]] bool is_pending() const { return handle->isPending(); }
     [[nodiscard]] bool is_running() const { return handle->isRunning(); }
     [[nodiscard]] bool is_paused() const { return handle->isPaused(); }
@@ -562,306 +602,425 @@ class RSPY_SimulationHandle {
     void pause() const { handle->pause(); }
     void resume() const { handle->resume(); }
     void terminate() const { handle->terminate(); }
-
-    [[nodiscard]] RSE_SimulationStatus get_status() const { return handle->getStatus(); }
+    [[nodiscard]] RSE_WorldStatus get_status() const { return handle->getStatus(); }
 
     bool wait_for_running() const {
-        // Make sure to release the GIL before current thread waits on mutex
+        // Release the GIL before blocking on the simulation thread.
         py::gil_scoped_release release;
         return handle->waitForRunning();
     }
 
     void wait_for_end() const {
-        // Make sure to release the GIL before current thread waits on mutex
         py::gil_scoped_release release;
         handle->waitForEnd();
+    }
+
+    RS_WorldMessage wait_for_message(
+        RIndex message_id = RS_NULL_INDEX,
+        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_ANY_LEVEL
+    ) const {
+        py::gil_scoped_release release;
+        return handle->waitForMessage(message_id, level);
     }
 
     void begin_modification_transaction() const { handle->beginModificationTransaction(); }
     void end_modification_transaction() const { handle->endModificationTransaction(); }
 
-    void set_simulation_config(const RS_SimulationConfig &config) const {
-        handle->setSimulationConfig(config);
+    [[nodiscard]] rsc::RSC_World get_world() const { return handle->getWorld(); }
+
+    RIndex set_simulation(const rsc::RSC_Simulation &simulation) const {
+        return handle->setSimulation(simulation);
     }
 
-    void set_world(const RS_WorldConfig &config) const { handle->setWorld(config); }
-    void set_floor(const RS_FloorConfig &config) const { handle->setFloor(config); }
-
-    void add_material(const RS_MaterialConfig &config) const { handle->addMaterial(config); }
-    void add_record(const RS_RecordConfig &config) const { handle->addRecord(config); }
-    void add_signal(const RS_SignalConfig &config) const { handle->addSignal(config); }
-    void add_structure(const RS_StructureConfig &config) const { handle->addStructure(config); }
-    void add_camera(const RS_CameraConfig &config) const { handle->addCamera(config); }
-
-    void update_material(const RS_MaterialConfig &config) const { handle->updateMaterial(config); }
-
-    void delete_floor() const { handle->deleteFloor(); }
-    void delete_material(RIndex id) const { handle->deleteMaterial(id); }
-    void delete_record(RIndex id) const { handle->deleteRecord(id); }
-    void delete_signal(RIndex id) const { handle->deleteSignal(id); }
-    void delete_structure(RIndex id) const { handle->deleteStructure(id); }
-    void delete_camera(RIndex id) const { handle->deleteCamera(id); }
-
-    [[nodiscard]] RIndex find_material(const std::string &name) const {
-        return handle->findMaterial(name);
+    // Resource
+    RIndex add_resource(const rsc::RSC_ResourceVariant &resource) const {
+        return handle->addResource(resource);
     }
-    [[nodiscard]] RIndex find_record(const std::string &name) const {
+    RIndex remove_resource(const std::string &name) const { return handle->removeResource(name); }
+    [[nodiscard]] rsc::RSC_ResourceVariant find_resource(const std::string &name) const {
+        return handle->findResource(name);
+    }
+
+    // Essence
+    RIndex add_essence(const rsc::RSC_EssenceVariant &essence) const {
+        return handle->addEssence(essence);
+    }
+    RIndex update_essence(const std::string &name, const rsc::RSC_EssenceVariant &essence) const {
+        return handle->updateEssence(name, essence);
+    }
+    RIndex remove_essence(const std::string &name) const { return handle->removeEssence(name); }
+    [[nodiscard]] rsc::RSC_EssenceVariant find_essence(const std::string &name) const {
+        return handle->findEssence(name);
+    }
+
+    // Entity
+    RIndex add_entity(const rsc::RSC_EntityVariant &entity) const {
+        return handle->addEntity(entity);
+    }
+    RIndex remove_entity(const std::string &name) const { return handle->removeEntity(name); }
+    RIndex freeze_entity(const std::string &name) const { return handle->freezeEntity(name); }
+    RIndex unfreeze_entity(const std::string &name) const { return handle->unfreezeEntity(name); }
+    [[nodiscard]] rsc::RSC_EntityVariant find_entity(const std::string &name) const {
+        return handle->findEntity(name);
+    }
+    [[nodiscard]] bool is_entity_frozen(const std::string &name) const {
+        return handle->isEntityFrozen(name);
+    }
+
+    // Record
+    RIndex add_record(const rsc::RSC_RecordVariant &record) const {
+        return handle->addRecord(record);
+    }
+    RIndex remove_record(const std::string &name) const { return handle->removeRecord(name); }
+    [[nodiscard]] rsc::RSC_RecordVariant find_record(const std::string &name) const {
         return handle->findRecord(name);
     }
-    [[nodiscard]] RIndex find_signal(const std::string &name) const {
+
+    // Signal
+    RIndex add_signal(const rsc::RSC_SignalVariant &signal) const {
+        return handle->addSignal(signal);
+    }
+    RIndex remove_signal(const std::string &name) const { return handle->removeSignal(name); }
+    [[nodiscard]] rsc::RSC_SignalVariant find_signal(const std::string &name) const {
         return handle->findSignal(name);
     }
-    [[nodiscard]] RIndex find_structure(const std::string &name) const {
-        return handle->findStructure(name);
+
+    // Recorder
+    RIndex add_recorder(const rsc::RSC_RecorderVariant &recorder) const {
+        return handle->addRecorder(recorder);
     }
-    [[nodiscard]] RIndex find_camera(const std::string &name) const {
-        return handle->findCamera(name);
+    RIndex remove_recorder(const std::string &name) const { return handle->removeRecorder(name); }
+    [[nodiscard]] rsc::RSC_RecorderVariant find_recorder(const std::string &name) const {
+        return handle->findRecorder(name);
     }
 
-    [[nodiscard]] RS_Config get_config() const { return handle->getConfig(); }
-    [[nodiscard]] RS_SimulationConfig get_simulation_config() const {
-        return handle->getSimulationConfig();
+    // Controller
+    RIndex add_controller(const rsc::RSC_ControllerVariant &controller) const {
+        return handle->addController(controller);
     }
-    [[nodiscard]] RS_FloorConfig get_floor_config() const { return handle->getFloorConfig(); }
-    [[nodiscard]] std::vector<RS_MaterialConfig> get_material_configs() const {
-        return handle->getMaterialConfigs();
+    RIndex remove_controller(const std::string &name) const {
+        return handle->removeController(name);
     }
-    [[nodiscard]] std::vector<RS_RecordConfig> get_record_configs() const {
-        return handle->getRecordConfigs();
-    }
-    [[nodiscard]] std::vector<RS_SignalConfig> get_signal_configs() const {
-        return handle->getSignalConfigs();
-    }
-    [[nodiscard]] std::vector<RS_StructureConfig> get_structure_configs() const {
-        return handle->getStructureConfigs();
-    }
-    [[nodiscard]] std::vector<RS_CameraConfig> get_camera_configs() const {
-        return handle->getCameraConfigs();
+    [[nodiscard]] rsc::RSC_ControllerVariant find_controller(const std::string &name) const {
+        return handle->findController(name);
     }
 };
 
 inline void initRSPYCore(py::module &m) {
-    // Device types enum
+    /*****************************************************************
+     * Enums and device location
+     *****************************************************************/
+
     py::enum_<RSE_DeviceType>(m, "RSE_DeviceType")
         .value("RSE_DEVICE_TYPE_UNKNOWN", RSE_DEVICE_TYPE_UNKNOWN)
         .value("RSE_DEVICE_TYPE_CPU", RSE_DEVICE_TYPE_CPU)
         .value("RSE_DEVICE_TYPE_CUDA", RSE_DEVICE_TYPE_CUDA)
         .export_values();
 
-    py::enum_<RSE_SimulationStatus>(m, "RSE_SimulationStatus")
-        .value("RSE_SIMULATION_END_SUCCESS", RSE_SIMULATION_END_SUCCESS)
-        .value("RSE_SIMULATION_END_TERMINATED", RSE_SIMULATION_END_TERMINATED)
+    py::enum_<RSE_WorldStatus>(m, "RSE_WorldStatus")
+        .value("RSE_WORLD_END_SUCCESS", RSE_WORLD_END_SUCCESS)
+        .value("RSE_WORLD_END_TERMINATED", RSE_WORLD_END_TERMINATED)
         .value(
-            "RSE_SIMULATION_END_FAILED_WITH_INVALID_CONFIG",
-            RSE_SIMULATION_END_FAILED_WITH_INVALID_CONFIG
+            "RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG",
+            RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG
         )
         .value(
-            "RSE_SIMULATION_END_FAILED_WITH_SIMULATION_EXCEPTION",
-            RSE_SIMULATION_END_FAILED_WITH_SIMULATION_EXCEPTION
+            "RSE_WORLD_END_FAILED_WITH_SIMULATION_EXCEPTION",
+            RSE_WORLD_END_FAILED_WITH_SIMULATION_EXCEPTION
         )
         .value(
-            "RSE_SIMULATION_END_FAILED_WITH_SIMULATION_MANAGER_EXCEPTION",
-            RSE_SIMULATION_END_FAILED_WITH_SIMULATION_MANAGER_EXCEPTION
+            "RSE_WORLD_END_FAILED_WITH_SIMULATION_MANAGER_EXCEPTION",
+            RSE_WORLD_END_FAILED_WITH_SIMULATION_MANAGER_EXCEPTION
         )
-        .value("RSE_SIMULATION_UNINITIALIZED", RSE_SIMULATION_UNINITIALIZED)
-        .value("RSE_SIMULATION_INITIALIZING", RSE_SIMULATION_INITIALIZING)
-        .value("RSE_SIMULATION_RUNNING", RSE_SIMULATION_RUNNING)
-        .value("RSE_SIMULATION_PAUSED", RSE_SIMULATION_PAUSED)
-        .value("RSE_SIMULATION_TERMINATING", RSE_SIMULATION_TERMINATING)
-        .value("RSE_SIMULATION_MAX_NORMAL_STATE", RSE_SIMULATION_MAX_NORMAL_STATE)
+        .value("RSE_WORLD_UNINITIALIZED", RSE_WORLD_UNINITIALIZED)
+        .value("RSE_WORLD_INITIALIZING", RSE_WORLD_INITIALIZING)
+        .value("RSE_WORLD_RUNNING", RSE_WORLD_RUNNING)
+        .value("RSE_WORLD_PAUSED", RSE_WORLD_PAUSED)
+        .value("RSE_WORLD_TERMINATING", RSE_WORLD_TERMINATING)
+        .value("RSE_WORLD_MAX_NORMAL_STATE", RSE_WORLD_MAX_NORMAL_STATE)
         .export_values();
 
-    // Simulation controller type enum
-    py::enum_<RSE_SimulationControllerType>(m, "RSE_SimulationControllerType")
-        .value("RSE_SIMULATION_STRUCTURE_CONTROLLER", RSE_SIMULATION_STRUCTURE_CONTROLLER)
-        .value("RSE_SIMULATION_CAMERA_CONTROLLER", RSE_SIMULATION_CAMERA_CONTROLLER)
-        .value("RSE_SIMULATION_FORCE_CONTROLLER", RSE_SIMULATION_FORCE_CONTROLLER)
-        .value("RSE_SIMULATION_TORQUE_CONTROLLER", RSE_SIMULATION_TORQUE_CONTROLLER)
-        .export_values();
-
-    // Device location wrapper
     py::class_<RSPY_DeviceLocation>(m, "RS_DeviceLocation")
-        // Expose multiple constructors:
-        .def(py::init<>())  // Defaults to CPU
+        .def(py::init<>())
         .def(py::init<const std::string &>())
         .def(py::init<RSE_DeviceType, RIndex>())
         .def(py::init<const RS_DeviceLocation &>())
-
-        // Expose device attributes
         .def("type", &RSPY_DeviceLocation::type)
         .def("id", &RSPY_DeviceLocation::id)
         .def("__str__", &RSPY_DeviceLocation::str);
 
-    // Simulation handle wrapper
-    py::class_<RSPY_SimulationHandle>(m, "RS_SimulationHandle")
-        .def("is_pending", &RSPY_SimulationHandle::is_pending)
-        .def("is_running", &RSPY_SimulationHandle::is_running)
-        .def("is_paused", &RSPY_SimulationHandle::is_paused)
-        .def("is_end", &RSPY_SimulationHandle::is_end)
-        .def("pause", &RSPY_SimulationHandle::pause)
-        .def("resume", &RSPY_SimulationHandle::resume)
-        .def("terminate", &RSPY_SimulationHandle::terminate)
-        .def("get_status", &RSPY_SimulationHandle::get_status)
-        .def("wait_for_running", &RSPY_SimulationHandle::wait_for_running)
-        .def("wait_for_end", &RSPY_SimulationHandle::wait_for_end)
+    /*****************************************************************
+     * World messages
+     *****************************************************************/
+    py::enum_<RSE_WorldMessageLevel>(m, "RSE_WorldMessageLevel")
+        .value("RSE_WORLD_MESSAGE_ANY_LEVEL", RSE_WORLD_MESSAGE_ANY_LEVEL)
+        .value("RSE_WORLD_MESSAGE_INFO", RSE_WORLD_MESSAGE_INFO)
+        .value("RSE_WORLD_MESSAGE_WARNING", RSE_WORLD_MESSAGE_WARNING)
+        .value("RSE_WORLD_MESSAGE_ERROR", RSE_WORLD_MESSAGE_ERROR)
+        .export_values();
+
+    py::enum_<RSE_WorldMessageCreatedType>(m, "RSE_WorldMessageCreatedType")
+        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_NONE", RSE_WORLD_MESSAGE_CREATED_TYPE_NONE)
+        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY", RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY)
+        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE", RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE)
+        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE", RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE)
+        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD", RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD)
+        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL", RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL)
+        .export_values();
+
+    py::class_<RS_WorldMessageText>(m, "RS_WorldMessageText")
+        .def(py::init<>())
+        .def_readwrite("text", &RS_WorldMessageText::text);
+
+    py::class_<RS_WorldMessageCreated>(m, "RS_WorldMessageCreated")
+        .def(py::init<>())
+        .def_readwrite("type", &RS_WorldMessageCreated::type)
+        .def_readwrite("gid", &RS_WorldMessageCreated::gid)
+        .def_readwrite("name", &RS_WorldMessageCreated::name);
+
+    py::class_<RS_WorldMessageData>(m, "RS_WorldMessageData")
+        .def(py::init<>())
+        .def_property_readonly("value", [](const RS_WorldMessageData &self) -> py::object {
+            if (self.index() == RS_NULL_INDEX) return py::none();
+            py::object result = py::none();
+            self.visit([&](auto &held) { result = py::cast(held); });
+            return result;
+        });
+
+    py::class_<RS_WorldMessage>(m, "RS_WorldMessage")
+        .def(py::init<>())
+        .def_readonly("id", &RS_WorldMessage::id)
+        .def_readonly("level", &RS_WorldMessage::level)
+        .def_readonly("data", &RS_WorldMessage::data);
+
+    /*****************************************************************
+     * Records
+     *****************************************************************/
+
+    auto structure_voxel_record =
+        py::class_<RSPY_WorldStructureVoxelRecord>(m, "RS_WorldStructureVoxelRecord")
+            .def("step", &RSPY_WorldStructureVoxelRecord::step)
+            .def("time", &RSPY_WorldStructureVoxelRecord::time)
+            .def("structure_gid", &RSPY_WorldStructureVoxelRecord::structure_gid)
+            .def_property_readonly("voxels", &RSPY_WorldStructureVoxelRecord::voxels)
+            .def_property_readonly("links", &RSPY_WorldStructureVoxelRecord::links)
+            .def_property_readonly("rigid_bodies", &RSPY_WorldStructureVoxelRecord::rigid_bodies)
+            .def_property_readonly("joints", &RSPY_WorldStructureVoxelRecord::joints);
+
+    py::class_<RSPY_WorldStructureVoxelRecord::Voxel>(structure_voxel_record, "Voxel")
+        .def("size", &RSPY_WorldStructureVoxelRecord::Voxel::size)
+        .def("body_sid", &RSPY_WorldStructureVoxelRecord::Voxel::body_sid)
+        .def("voxel_sid", &RSPY_WorldStructureVoxelRecord::Voxel::voxel_sid)
+        .def("segment_bid", &RSPY_WorldStructureVoxelRecord::Voxel::segment_bid)
+        .def("index_x", &RSPY_WorldStructureVoxelRecord::Voxel::index_x)
+        .def("index_y", &RSPY_WorldStructureVoxelRecord::Voxel::index_y)
+        .def("index_z", &RSPY_WorldStructureVoxelRecord::Voxel::index_z)
+        .def("connectivity", &RSPY_WorldStructureVoxelRecord::Voxel::connectivity)
+        .def("is_surface", &RSPY_WorldStructureVoxelRecord::Voxel::is_surface)
+        .def("is_rigid", &RSPY_WorldStructureVoxelRecord::Voxel::is_rigid)
+        .def("material", &RSPY_WorldStructureVoxelRecord::Voxel::material)
+        .def("expansion", &RSPY_WorldStructureVoxelRecord::Voxel::expansion)
+        .def("orientation", &RSPY_WorldStructureVoxelRecord::Voxel::orientation)
+        .def("position", &RSPY_WorldStructureVoxelRecord::Voxel::position)
+        .def("ppp_offset", &RSPY_WorldStructureVoxelRecord::Voxel::ppp_offset)
+        .def("nnn_offset", &RSPY_WorldStructureVoxelRecord::Voxel::nnn_offset)
+        .def("linear_velocity", &RSPY_WorldStructureVoxelRecord::Voxel::linear_velocity)
+        .def("angular_velocity", &RSPY_WorldStructureVoxelRecord::Voxel::angular_velocity)
+        .def("poissons_strain", &RSPY_WorldStructureVoxelRecord::Voxel::poissons_strain);
+
+    py::class_<RSPY_WorldStructureVoxelRecord::Link>(structure_voxel_record, "Link")
+        .def("size", &RSPY_WorldStructureVoxelRecord::Link::size)
+        .def("voxel_neg_sid", &RSPY_WorldStructureVoxelRecord::Link::voxel_neg_sid)
+        .def("voxel_pos_sid", &RSPY_WorldStructureVoxelRecord::Link::voxel_pos_sid)
+        .def("is_failed", &RSPY_WorldStructureVoxelRecord::Link::is_failed)
+        .def("strain", &RSPY_WorldStructureVoxelRecord::Link::strain)
+        .def("stress", &RSPY_WorldStructureVoxelRecord::Link::stress);
+
+    py::class_<RSPY_WorldStructureVoxelRecord::RigidBody>(structure_voxel_record, "RigidBody")
+        .def("size", &RSPY_WorldStructureVoxelRecord::RigidBody::size)
+        .def("rigid_body_sid", &RSPY_WorldStructureVoxelRecord::RigidBody::rigid_body_sid)
+        .def("body_sid", &RSPY_WorldStructureVoxelRecord::RigidBody::body_sid)
+        .def("segment_bid", &RSPY_WorldStructureVoxelRecord::RigidBody::segment_bid)
+        .def("mass", &RSPY_WorldStructureVoxelRecord::RigidBody::mass)
+        .def("orientation", &RSPY_WorldStructureVoxelRecord::RigidBody::orientation)
+        .def("com", &RSPY_WorldStructureVoxelRecord::RigidBody::com)
+        .def("linear_velocity", &RSPY_WorldStructureVoxelRecord::RigidBody::linear_velocity)
+        .def("angular_velocity", &RSPY_WorldStructureVoxelRecord::RigidBody::angular_velocity);
+
+    py::class_<RSPY_WorldStructureVoxelRecord::Joint>(structure_voxel_record, "Joint")
+        .def("size", &RSPY_WorldStructureVoxelRecord::Joint::size)
+        .def("rigid_body_a_sid", &RSPY_WorldStructureVoxelRecord::Joint::rigid_body_a_sid)
+        .def("rigid_body_b_sid", &RSPY_WorldStructureVoxelRecord::Joint::rigid_body_b_sid)
+        .def("type", &RSPY_WorldStructureVoxelRecord::Joint::type)
+        .def("position", &RSPY_WorldStructureVoxelRecord::Joint::position)
+        .def("axis", &RSPY_WorldStructureVoxelRecord::Joint::axis)
+        .def("hinge_signal_sid", &RSPY_WorldStructureVoxelRecord::Joint::hinge_signal_sid)
+        .def("hinge_min", &RSPY_WorldStructureVoxelRecord::Joint::hinge_min)
+        .def("hinge_max", &RSPY_WorldStructureVoxelRecord::Joint::hinge_max)
+        .def("hinge_angle", &RSPY_WorldStructureVoxelRecord::Joint::hinge_angle)
+        .def("hinge_torque", &RSPY_WorldStructureVoxelRecord::Joint::hinge_torque)
+        .def(
+            "prismatic_signal_sid",
+            &RSPY_WorldStructureVoxelRecord::Joint::prismatic_signal_sid
+        )
+        .def("prismatic_min", &RSPY_WorldStructureVoxelRecord::Joint::prismatic_min)
+        .def("prismatic_max", &RSPY_WorldStructureVoxelRecord::Joint::prismatic_max)
+        .def("prismatic_distance", &RSPY_WorldStructureVoxelRecord::Joint::prismatic_distance)
+        .def("prismatic_force", &RSPY_WorldStructureVoxelRecord::Joint::prismatic_force);
+
+    auto camera_perspective_record =
+        py::class_<RSPY_WorldCameraPerspectiveRecord>(m, "RS_WorldCameraPerspectiveRecord")
+            .def("step", &RSPY_WorldCameraPerspectiveRecord::step)
+            .def("time", &RSPY_WorldCameraPerspectiveRecord::time)
+            .def("camera_gid", &RSPY_WorldCameraPerspectiveRecord::camera_gid)
+            .def("structure_gid", &RSPY_WorldCameraPerspectiveRecord::structure_gid)
+            .def("rigid_body_sid", &RSPY_WorldCameraPerspectiveRecord::rigid_body_sid)
+            .def("width", &RSPY_WorldCameraPerspectiveRecord::width)
+            .def("height", &RSPY_WorldCameraPerspectiveRecord::height)
+            .def("is_valid", &RSPY_WorldCameraPerspectiveRecord::is_valid)
+            .def_property_readonly("rgb", &RSPY_WorldCameraPerspectiveRecord::rgb)
+            .def_property_readonly("state", &RSPY_WorldCameraPerspectiveRecord::state);
+
+    py::class_<RSPY_WorldCameraPerspectiveRecord::RGB>(camera_perspective_record, "RGB")
+        .def("width", &RSPY_WorldCameraPerspectiveRecord::RGB::width)
+        .def("height", &RSPY_WorldCameraPerspectiveRecord::RGB::height)
+        .def("pixels", &RSPY_WorldCameraPerspectiveRecord::RGB::pixels);
+
+    py::class_<RSPY_WorldCameraPerspectiveRecord::State>(camera_perspective_record, "State")
+        .def("size", &RSPY_WorldCameraPerspectiveRecord::State::size)
+        .def("position", &RSPY_WorldCameraPerspectiveRecord::State::position)
+        .def("orientation", &RSPY_WorldCameraPerspectiveRecord::State::orientation)
+        .def("focus_distance", &RSPY_WorldCameraPerspectiveRecord::State::focus_distance)
+        .def("field_of_view", &RSPY_WorldCameraPerspectiveRecord::State::field_of_view);
+
+    auto intersect_region_record =
+        py::class_<RSPY_WorldIntersectRegionRecord>(m, "RS_WorldIntersectRegionRecord")
+            .def("step", &RSPY_WorldIntersectRegionRecord::step)
+            .def("time", &RSPY_WorldIntersectRegionRecord::time)
+            .def("record_gid", &RSPY_WorldIntersectRegionRecord::record_gid)
+            .def_property_readonly(
+                "memberships", &RSPY_WorldIntersectRegionRecord::memberships
+            );
+
+    py::class_<RSPY_WorldIntersectRegionRecord::Membership>(
+        intersect_region_record, "Membership"
+    )
+        .def("size", &RSPY_WorldIntersectRegionRecord::Membership::size)
+        .def("structure_gid", &RSPY_WorldIntersectRegionRecord::Membership::structure_gid);
+
+    /*****************************************************************
+     * Signals
+     *****************************************************************/
+
+    auto structure_voxel_signal =
+        py::class_<RSPY_WorldStructureVoxelSignal>(m, "RS_WorldStructureVoxelSignal");
+    py::class_<RSPY_WorldStructureVoxelSignal::Expansion>(structure_voxel_signal, "Expansion")
+        .def("size", &RSPY_WorldStructureVoxelSignal::Expansion::size)
+        .def("expansion", &RSPY_WorldStructureVoxelSignal::Expansion::expansion);
+    py::class_<RSPY_WorldStructureVoxelSignal::Hinge>(structure_voxel_signal, "Hinge")
+        .def("size", &RSPY_WorldStructureVoxelSignal::Hinge::size)
+        .def("hinge", &RSPY_WorldStructureVoxelSignal::Hinge::hinge);
+    py::class_<RSPY_WorldStructureVoxelSignal::Prismatic>(structure_voxel_signal, "Prismatic")
+        .def("size", &RSPY_WorldStructureVoxelSignal::Prismatic::size)
+        .def("prismatic", &RSPY_WorldStructureVoxelSignal::Prismatic::prismatic);
+    structure_voxel_signal
+        .def("expansion_signals", &RSPY_WorldStructureVoxelSignal::expansion_signals)
+        .def("hinge_signals", &RSPY_WorldStructureVoxelSignal::hinge_signals)
+        .def("prismatic_signals", &RSPY_WorldStructureVoxelSignal::prismatic_signals);
+
+    auto camera_perspective_signal =
+        py::class_<RSPY_WorldCameraPerspectiveSignal>(m, "RS_WorldCameraPerspectiveSignal");
+    py::class_<RSPY_WorldCameraPerspectiveSignal::Position>(camera_perspective_signal, "Position")
+        .def("size", &RSPY_WorldCameraPerspectiveSignal::Position::size)
+        .def("position", &RSPY_WorldCameraPerspectiveSignal::Position::position);
+    py::class_<RSPY_WorldCameraPerspectiveSignal::Orientation>(
+        camera_perspective_signal, "Orientation"
+    )
+        .def("size", &RSPY_WorldCameraPerspectiveSignal::Orientation::size)
+        .def("orientation", &RSPY_WorldCameraPerspectiveSignal::Orientation::orientation);
+    py::class_<RSPY_WorldCameraPerspectiveSignal::Optics>(camera_perspective_signal, "Optics")
+        .def("size", &RSPY_WorldCameraPerspectiveSignal::Optics::size)
+        .def("focus_distance", &RSPY_WorldCameraPerspectiveSignal::Optics::focus_distance)
+        .def("field_of_view", &RSPY_WorldCameraPerspectiveSignal::Optics::field_of_view);
+    camera_perspective_signal
+        .def("position_signals", &RSPY_WorldCameraPerspectiveSignal::position_signals)
+        .def("orientation_signals", &RSPY_WorldCameraPerspectiveSignal::orientation_signals)
+        .def("optics_signals", &RSPY_WorldCameraPerspectiveSignal::optics_signals);
+
+    auto force_signal = py::class_<RSPY_WorldForceSignal>(m, "RS_WorldForceSignal");
+    py::class_<RSPY_WorldForceSignal::Force>(force_signal, "Force")
+        .def("size", &RSPY_WorldForceSignal::Force::size)
+        .def("force", &RSPY_WorldForceSignal::Force::force);
+    force_signal.def("force_signals", &RSPY_WorldForceSignal::force_signals);
+
+    auto torque_signal = py::class_<RSPY_WorldTorqueSignal>(m, "RS_WorldTorqueSignal");
+    py::class_<RSPY_WorldTorqueSignal::Torque>(torque_signal, "Torque")
+        .def("size", &RSPY_WorldTorqueSignal::Torque::size)
+        .def("torque", &RSPY_WorldTorqueSignal::Torque::torque);
+    torque_signal.def("torque_signals", &RSPY_WorldTorqueSignal::torque_signals);
+
+    /*****************************************************************
+     * Controller
+     *****************************************************************/
+
+    py::class_<RSPY_WorldController>(m, "RS_WorldController")
+        .def("name", &RSPY_WorldController::name)
+        .def("records", &RSPY_WorldController::records)
+        .def("signals", &RSPY_WorldController::signals);
+
+    /*****************************************************************
+     * World handle
+     *****************************************************************/
+
+    py::class_<RSPY_WorldHandle>(m, "RS_WorldHandle")
+        .def("is_pending", &RSPY_WorldHandle::is_pending)
+        .def("is_running", &RSPY_WorldHandle::is_running)
+        .def("is_paused", &RSPY_WorldHandle::is_paused)
+        .def("is_end", &RSPY_WorldHandle::is_end)
+        .def("pause", &RSPY_WorldHandle::pause)
+        .def("resume", &RSPY_WorldHandle::resume)
+        .def("terminate", &RSPY_WorldHandle::terminate)
+        .def("get_status", &RSPY_WorldHandle::get_status)
+        .def("wait_for_running", &RSPY_WorldHandle::wait_for_running)
+        .def("wait_for_end", &RSPY_WorldHandle::wait_for_end)
+        .def(
+            "wait_for_message",
+            &RSPY_WorldHandle::wait_for_message,
+            py::arg("message_id") = RS_NULL_INDEX,
+            py::arg("level") = RSE_WORLD_MESSAGE_ANY_LEVEL
+        )
         .def(
             "begin_modification_transaction",
-            &RSPY_SimulationHandle::begin_modification_transaction
+            &RSPY_WorldHandle::begin_modification_transaction
         )
-        .def("end_modification_transaction", &RSPY_SimulationHandle::end_modification_transaction)
-        .def("set_simulation_config", &RSPY_SimulationHandle::set_simulation_config)
-        .def("set_world", &RSPY_SimulationHandle::set_world)
-        .def("set_floor", &RSPY_SimulationHandle::set_floor)
-        .def("add_material", &RSPY_SimulationHandle::add_material)
-        .def("add_record", &RSPY_SimulationHandle::add_record)
-        .def("add_signal", &RSPY_SimulationHandle::add_signal)
-        .def("add_structure", &RSPY_SimulationHandle::add_structure)
-        .def("add_camera", &RSPY_SimulationHandle::add_camera)
-        .def("update_material", &RSPY_SimulationHandle::update_material)
-        .def("delete_floor", &RSPY_SimulationHandle::delete_floor)
-        .def("delete_material", &RSPY_SimulationHandle::delete_material)
-        .def("delete_record", &RSPY_SimulationHandle::delete_record)
-        .def("delete_signal", &RSPY_SimulationHandle::delete_signal)
-        .def("delete_structure", &RSPY_SimulationHandle::delete_structure)
-        .def("delete_camera", &RSPY_SimulationHandle::delete_camera)
-        .def("find_material", &RSPY_SimulationHandle::find_material)
-        .def("find_record", &RSPY_SimulationHandle::find_record)
-        .def("find_signal", &RSPY_SimulationHandle::find_signal)
-        .def("find_structure", &RSPY_SimulationHandle::find_structure)
-        .def("find_camera", &RSPY_SimulationHandle::find_camera)
-        .def("get_config", &RSPY_SimulationHandle::get_config)
-        .def("get_simulation_config", &RSPY_SimulationHandle::get_simulation_config)
-        .def("get_floor_config", &RSPY_SimulationHandle::get_floor_config)
-        .def("get_material_configs", &RSPY_SimulationHandle::get_material_configs)
-        .def("get_record_configs", &RSPY_SimulationHandle::get_record_configs)
-        .def("get_signal_configs", &RSPY_SimulationHandle::get_signal_configs)
-        .def("get_structure_configs", &RSPY_SimulationHandle::get_structure_configs)
-        .def("get_camera_configs", &RSPY_SimulationHandle::get_camera_configs);
-
-    // Signal wrappers
-    py::class_<RSPY_SimulationStructureSignal>(m, "RS_SimulationStructureSignal")
-        .def("expansion_signals", &RSPY_SimulationStructureSignal::expansion_signals)
-        .def("hinge_signals", &RSPY_SimulationStructureSignal::hinge_signals)
-        .def(
-            "prismatic_signals", &RSPY_SimulationStructureSignal::prismatic_signals
-        );
-
-    py::class_<RSPY_SimulationCameraSignal>(m, "RS_SimulationCameraSignal")
-        .def("position_signals", &RSPY_SimulationCameraSignal::position_signals)
-        .def("orientation_signals", &RSPY_SimulationCameraSignal::orientation_signals)
-        .def("focus_distance_signals", &RSPY_SimulationCameraSignal::focus_distance_signals)
-        .def("field_of_view_signals", &RSPY_SimulationCameraSignal::field_of_view_signals);
-
-    py::class_<RSPY_SimulationForceSignal>(m, "RS_SimulationForceSignal")
-        .def("force_signals", &RSPY_SimulationForceSignal::force_signals);
-
-    py::class_<RSPY_SimulationTorqueSignal>(m, "RS_SimulationTorqueSignal")
-        .def("torque_signals", &RSPY_SimulationTorqueSignal::torque_signals);
-
-    // Record wrapper
-    py::class_<RSPY_SimulationStructureRecord>(m, "RS_SimulationStructureRecord")
-        .def("step", &RSPY_SimulationStructureRecord::step)
-        .def("time", &RSPY_SimulationStructureRecord::time)
-        .def("voxel_size", &RSPY_SimulationStructureRecord::voxel_size)
-        .def("link_size", &RSPY_SimulationStructureRecord::link_size)
-        .def("rigid_body_size", &RSPY_SimulationStructureRecord::rigid_body_size)
-        .def("joint_size", &RSPY_SimulationStructureRecord::joint_size)
-        .def("voxel_body_sid", &RSPY_SimulationStructureRecord::voxel_body_sid)
-        .def("voxel_voxel_sid", &RSPY_SimulationStructureRecord::voxel_voxel_sid)
-        .def("voxel_segment_bid", &RSPY_SimulationStructureRecord::voxel_segment_bid)
-        .def("voxel_index_x", &RSPY_SimulationStructureRecord::voxel_index_x)
-        .def("voxel_index_y", &RSPY_SimulationStructureRecord::voxel_index_y)
-        .def("voxel_index_z", &RSPY_SimulationStructureRecord::voxel_index_z)
-        .def("voxel_connectivity", &RSPY_SimulationStructureRecord::voxel_connectivity)
-        .def("voxel_is_surface", &RSPY_SimulationStructureRecord::voxel_is_surface)
-        .def("voxel_is_rigid", &RSPY_SimulationStructureRecord::voxel_is_rigid)
-        .def("voxel_material", &RSPY_SimulationStructureRecord::voxel_material)
-        .def("voxel_expansion", &RSPY_SimulationStructureRecord::voxel_expansion)
-        .def("voxel_orientation", &RSPY_SimulationStructureRecord::voxel_orientation)
-        .def("voxel_position", &RSPY_SimulationStructureRecord::voxel_position)
-        .def("voxel_ppp_offset", &RSPY_SimulationStructureRecord::voxel_ppp_offset)
-        .def("voxel_nnn_offset", &RSPY_SimulationStructureRecord::voxel_nnn_offset)
-        .def("voxel_linear_velocity", &RSPY_SimulationStructureRecord::voxel_linear_velocity)
-        .def("voxel_angular_velocity", &RSPY_SimulationStructureRecord::voxel_angular_velocity)
-        .def("voxel_poissons_strain", &RSPY_SimulationStructureRecord::voxel_poissons_strain)
-        .def("link_voxel_neg_sid", &RSPY_SimulationStructureRecord::link_voxel_neg_sid)
-        .def("link_voxel_pos_sid", &RSPY_SimulationStructureRecord::link_voxel_pos_sid)
-        .def("link_is_tendon", &RSPY_SimulationStructureRecord::link_is_tendon)
-        .def("link_is_failed", &RSPY_SimulationStructureRecord::link_is_failed)
-        .def("link_strain", &RSPY_SimulationStructureRecord::link_strain)
-        .def("link_stress", &RSPY_SimulationStructureRecord::link_stress)
-        .def(
-            "rigid_body_rigid_body_sid", &RSPY_SimulationStructureRecord::rigid_body_rigid_body_sid
-        )
-        .def("rigid_body_body_sid", &RSPY_SimulationStructureRecord::rigid_body_body_sid)
-        .def("rigid_body_segment_bid", &RSPY_SimulationStructureRecord::rigid_body_segment_bid)
-        .def("rigid_body_mass", &RSPY_SimulationStructureRecord::rigid_body_mass)
-        .def("rigid_body_orientation", &RSPY_SimulationStructureRecord::rigid_body_orientation)
-        .def("rigid_body_com", &RSPY_SimulationStructureRecord::rigid_body_com)
-        .def(
-            "rigid_body_linear_velocity",
-            &RSPY_SimulationStructureRecord::rigid_body_linear_velocity
-        )
-        .def(
-            "rigid_body_angular_velocity",
-            &RSPY_SimulationStructureRecord::rigid_body_angular_velocity
-        )
-        .def("joint_rigid_body_a_sid", &RSPY_SimulationStructureRecord::joint_rigid_body_a_sid)
-        .def("joint_rigid_body_b_sid", &RSPY_SimulationStructureRecord::joint_rigid_body_b_sid)
-        .def(
-            "joint_hinge_signal_sid",
-            &RSPY_SimulationStructureRecord::joint_hinge_signal_sid
-        )
-        .def("joint_type", &RSPY_SimulationStructureRecord::joint_type)
-        .def("joint_position", &RSPY_SimulationStructureRecord::joint_position)
-        .def("joint_axis", &RSPY_SimulationStructureRecord::joint_axis)
-        .def("joint_hinge_min", &RSPY_SimulationStructureRecord::joint_hinge_min)
-        .def("joint_hinge_max", &RSPY_SimulationStructureRecord::joint_hinge_max)
-        .def("joint_hinge_angle", &RSPY_SimulationStructureRecord::joint_hinge_angle)
-        .def("joint_hinge_torque", &RSPY_SimulationStructureRecord::joint_hinge_torque)
-        .def(
-            "joint_prismatic_signal_sid",
-            &RSPY_SimulationStructureRecord::joint_prismatic_signal_sid
-        )
-        .def("joint_prismatic_min", &RSPY_SimulationStructureRecord::joint_prismatic_min)
-        .def("joint_prismatic_max", &RSPY_SimulationStructureRecord::joint_prismatic_max)
-        .def("joint_prismatic_distance", &RSPY_SimulationStructureRecord::joint_prismatic_distance)
-        .def("joint_prismatic_force", &RSPY_SimulationStructureRecord::joint_prismatic_force);
-
-    py::class_<RSPY_SimulationCameraRecord>(m, "RS_SimulationCameraRecord")
-        .def("step", &RSPY_SimulationCameraRecord::step)
-        .def("time", &RSPY_SimulationCameraRecord::time)
-        .def("camera_gid", &RSPY_SimulationCameraRecord::camera_gid)
-        .def("structure_gid", &RSPY_SimulationCameraRecord::structure_gid)
-        .def("rigid_body_sid", &RSPY_SimulationCameraRecord::rigid_body_sid)
-        .def("width", &RSPY_SimulationCameraRecord::width)
-        .def("height", &RSPY_SimulationCameraRecord::height)
-        .def("is_valid", &RSPY_SimulationCameraRecord::is_valid)
-        .def("rgb", &RSPY_SimulationCameraRecord::rgb)
-        .def("position", &RSPY_SimulationCameraRecord::position)
-        .def("orientation", &RSPY_SimulationCameraRecord::orientation)
-        .def("field_of_view", &RSPY_SimulationCameraRecord::field_of_view)
-        .def("focus_distance", &RSPY_SimulationCameraRecord::focus_distance);
-
-    // Controller wrappers
-    py::class_<RSPY_SimulationStructureController>(m, "RS_SimulationStructureController")
-        .def("name", &RSPY_SimulationStructureController::name)
-        .def("structure_record", &RSPY_SimulationStructureController::structure_record)
-        .def("signal", &RSPY_SimulationStructureController::signal)
-        .def("camera_records", &RSPY_SimulationStructureController::camera_records);
-
-    py::class_<RSPY_SimulationCameraController>(m, "RS_SimulationCameraController")
-        .def("name", &RSPY_SimulationCameraController::name)
-        .def("camera_record", &RSPY_SimulationCameraController::camera_record)
-        .def("signal", &RSPY_SimulationCameraController::signal);
-
-    py::class_<RSPY_SimulationForceController>(m, "RS_SimulationForceController")
-        .def("name", &RSPY_SimulationForceController::name)
-        .def("signal", &RSPY_SimulationForceController::signal);
-
-    py::class_<RSPY_SimulationTorqueController>(m, "RS_SimulationTorqueController")
-        .def("name", &RSPY_SimulationTorqueController::name)
-        .def("signal", &RSPY_SimulationTorqueController::signal);
+        .def("end_modification_transaction", &RSPY_WorldHandle::end_modification_transaction)
+        .def("get_world", &RSPY_WorldHandle::get_world)
+        .def("set_simulation", &RSPY_WorldHandle::set_simulation)
+        .def("add_resource", &RSPY_WorldHandle::add_resource)
+        .def("remove_resource", &RSPY_WorldHandle::remove_resource)
+        .def("find_resource", &RSPY_WorldHandle::find_resource)
+        .def("add_essence", &RSPY_WorldHandle::add_essence)
+        .def("update_essence", &RSPY_WorldHandle::update_essence)
+        .def("remove_essence", &RSPY_WorldHandle::remove_essence)
+        .def("find_essence", &RSPY_WorldHandle::find_essence)
+        .def("add_entity", &RSPY_WorldHandle::add_entity)
+        .def("remove_entity", &RSPY_WorldHandle::remove_entity)
+        .def("freeze_entity", &RSPY_WorldHandle::freeze_entity)
+        .def("unfreeze_entity", &RSPY_WorldHandle::unfreeze_entity)
+        .def("find_entity", &RSPY_WorldHandle::find_entity)
+        .def("is_entity_frozen", &RSPY_WorldHandle::is_entity_frozen)
+        .def("add_record", &RSPY_WorldHandle::add_record)
+        .def("remove_record", &RSPY_WorldHandle::remove_record)
+        .def("find_record", &RSPY_WorldHandle::find_record)
+        .def("add_signal", &RSPY_WorldHandle::add_signal)
+        .def("remove_signal", &RSPY_WorldHandle::remove_signal)
+        .def("find_signal", &RSPY_WorldHandle::find_signal)
+        .def("add_recorder", &RSPY_WorldHandle::add_recorder)
+        .def("remove_recorder", &RSPY_WorldHandle::remove_recorder)
+        .def("find_recorder", &RSPY_WorldHandle::find_recorder)
+        .def("add_controller", &RSPY_WorldHandle::add_controller)
+        .def("remove_controller", &RSPY_WorldHandle::remove_controller)
+        .def("find_controller", &RSPY_WorldHandle::find_controller);
 }
 
 #endif  // INIT_CORE_H

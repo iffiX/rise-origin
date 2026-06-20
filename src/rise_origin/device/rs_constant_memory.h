@@ -37,17 +37,17 @@ class RS_ConstantMemory {
 #endif
     }
 
-    static constexpr RSize size() { return RS_CONSTANT_MEMORY_MAX_SIZE; }
+    static constexpr RSize size() { return RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE; }
 
     static void write(void* src, RS_DeviceLocation device, RSize size, RSize offset = 0) {
         if (size == 0) return;
-        if (size + offset > RS_CONSTANT_MEMORY_MAX_SIZE) {
+        if (size + offset > RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE) {
             RS_THROW(RS_OutOfBoundsException(
                 "Cannot write to constant memory with size {} and offset {}, "
                 "max size is {} bytes",
                 size,
                 offset,
-                RS_CONSTANT_MEMORY_MAX_SIZE
+                RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE
             ));
         }
         if (device.type == RSE_DEVICE_TYPE_CPU) {

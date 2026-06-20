@@ -14,7 +14,7 @@
 #include "rise_origin/utils/rs_def.h"
 #include "rs_data_util.h"
 
-#ifndef RS_DEBUG_SOA
+#ifndef RS_DEBUG_ENABLE_DEVICE_SOA
 #define DEBUG_INPUT
 #define DEBUG_OUTPUT_AND_ASSERT(index, max_size) assert(index < max_size);
 #define DEBUG_FORWARD
@@ -36,7 +36,7 @@ namespace device {
 
 namespace soa_helper {
 
-constexpr RSize SOA_ALIGN_SIZE = RS_MEMORY_ALIGN_SIZE;
+constexpr RSize SOA_ALIGN_SIZE = RS_DEVICE_MEMORY_ALIGN_SIZE;
 
 /**
  * The type the member returns when invoked.

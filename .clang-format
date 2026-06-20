@@ -1,0 +1,13 @@
+BasedOnStyle: Google
+IndentWidth: 4
+ColumnLimit: 100
+UseTab: Never
+AlignOperands: Align
+PenaltyBreakAssignment: 6
+BinPackArguments: false
+BinPackParameters: false
+ExperimentalAutoDetectBinPacking: false
+AllowAllParametersOfDeclarationOnNextLine: false
+AlwaysBreakAfterReturnType: None  # Ensures return type stays on the same line.
+BreakBeforeBraces: Attach  # Google style attaches braces after function signatures.
+AlignAfterOpenBracket: BlockIndent

@@ -10,61 +10,49 @@
 
 #include <memory>
 
-#include "rise_origin/core/rs_simulation_callback.h"
-#include "rise_origin/core/rs_simulation_handle.h"
-#include "rise_origin/rsc/rs_config.h"
+#include "rise_origin/core/rs_world_callback.h"
+#include "rise_origin/core/rs_world_handle.h"
+#include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_device.h"
+#include "rise_origin/utils/memory/rs_device.h"
 
 using namespace rise;
 
 class RiseOriginImpl;
 
 /**
- * @brief The RiseOrigin simulator
+ * @brief The RiseOrigin.
+ *
+ * Usage:
+ * @code
+ *   rise::rsc::RSC_World world({"config.xml"});
+ *   RiseOrigin r;
+ *   auto handle = r.hello(world);
+ *   // World is yours
+ * @endcode
  */
 class RiseOrigin {
    public:
     /**
-     * @brief Constructs a local RiseOrigin simulator instance with the specified device.
+     * @brief Construct a local RiseOrigin instance on the specified device.
      *
-     * @param device Device identifiers used by this simulator process.
+     * @param device Device identifiers used by this process.
      */
     explicit RiseOrigin(const RS_DeviceLocation &device = {RSE_DEVICE_TYPE_CPU, 0});
 
     /**
-     * @brief Runs a simulation using a configuration provided as a vector of strings.
+     * @brief Say hello to the world.
      *
-     * Execution settings (update intervals, record buffer size, max time, save flag,
-     * compute/memory accuracy, log level) are read from the configuration's
-     * @ref RS_SimulationConfig `runtime_*` fields.
-     *
-     * @param config Vector of strings representing the simulation configuration.
-     * @param id Unique unsigned integer id of the kernel.
-     * @param callback Simulation callback for control & modification of the simulation.
-     * @return Shared pointer to the simulation handle.
+     * @param world Root world config describing all entities, essences, resources,
+     *              etc that should exist before time starts.
+     * @param callback Optional callback for control & modification of the world.
+     * @return Shared pointer to the world handle.
      */
-    std::shared_ptr<RS_SimulationHandle> runSim(
-        std::vector<std::string> config, RIndex id, RS_SimulationCallback callback = {}
-    );
-
-    /**
-     * @brief Runs a simulation using a configuration provided as an RS_Config object.
-     *
-     * Execution settings are read from the configuration's @ref RS_SimulationConfig
-     * `runtime_*` fields.
-     *
-     * @param config RS_Config object representing the simulation configuration.
-     * @param id Unique unsigned integer id of the kernel.
-     * @param callback Simulation callback for control & modification of the simulation.
-     * @return Shared pointer to the simulation handle.
-     */
-    std::shared_ptr<RS_SimulationHandle> runSim(
-        RS_Config config, RIndex id, RS_SimulationCallback callback = {}
-    );
+    std::shared_ptr<RS_WorldHandle>
+    hello(const rsc::RSC_World &world, RS_WorldCallback callback = {});
 
    private:
     std::shared_ptr<RiseOriginImpl> _rise_impl = nullptr;
 };
 
-#endif
+#endif  // RISE_ORIGIN_H

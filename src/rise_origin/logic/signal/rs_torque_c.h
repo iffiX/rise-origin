@@ -61,8 +61,8 @@ class RS_TorqueCompute {
             if (k != nullptr && rigid_body != RS_NULL_HANDLE) {
                 auto &ctx = k->ctx;
 
-                // Fixed rigid body is an immovable anchor, skip
-                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_fixed) return;
+                // Immobile body from fixed material or freeze takes no applied torque, skip
+                if (RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_static) return;
 
                 RBigFloat current_time = k->getDeviceTime();
 
@@ -82,18 +82,14 @@ class RS_TorqueCompute {
                         RBigFloat dt = current_time - torque_mem.last_torque_signal_apply_time;
                         if (dt <= 0.0) continue;  // Skip if already applied at this time
 
-                        // Read torque signal (3 RFloat values: x, y, z)
+                        // Read torque signal (one 3D vector entry).
                         RHandle signal_handle = torque_mem.torque_signal;
-                        FloatC torque_x =
-                            static_cast<FloatC>(ctx.torque_signals[signal_handle * 3 + 0]);
-                        FloatC torque_y =
-                            static_cast<FloatC>(ctx.torque_signals[signal_handle * 3 + 1]);
-                        FloatC torque_z =
-                            static_cast<FloatC>(ctx.torque_signals[signal_handle * 3 + 2]);
+                        Vec3C torque =
+                            Vec3C(ctx.torque_signals[signal_handle].torque_signals.torque[0]);
 
                         // Compute angular impulse = torque * dt
                         FloatC dt_f = static_cast<FloatC>(dt);
-                        Vec3C angular_impulse = Vec3C(torque_x, torque_y, torque_z) * dt_f;
+                        Vec3C angular_impulse = torque * dt_f;
 
                         // Apply angular impulse to angular momentum
                         Vec3C angular_momentum = RB_G(angular_momentum);

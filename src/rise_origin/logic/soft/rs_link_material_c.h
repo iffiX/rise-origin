@@ -25,6 +25,8 @@ class RS_LinkMaterialCompute : public RS_VoxelMaterialCompute<FloatComputeAccura
         LinkMaterialMem &material,
         VoxelMaterialMem &voxel_neg_material,
         VoxelMaterialMem &voxel_pos_material,
+        bool is_neg_rigid_or_fixed,
+        bool is_pos_rigid_or_fixed,
         FloatC grav_acc
     ) {
         auto &m = material;
@@ -35,11 +37,20 @@ class RS_LinkMaterialCompute : public RS_VoxelMaterialCompute<FloatComputeAccura
         m.voxel_neg_internal_damping_c = voxel_neg_material.internal_damping_c;
         m.voxel_pos_internal_damping_c = voxel_pos_material.internal_damping_c;
 
+        // a link is two half links in series, one per end voxel. a rigid or fixed
+        // voxel does not deform and is the infinitely stiff limit, so it contributes
+        // zero compliance and the soft side governs the coupling. a link always has at
+        // least one soft end, so the summed compliance is never zero.
+        FloatC neg_compliance = is_neg_rigid_or_fixed ? FloatC(0) : FloatC(1) / voxel_neg_material.E;
+        FloatC pos_compliance = is_pos_rigid_or_fixed ? FloatC(0) : FloatC(1) / voxel_pos_material.E;
+
         // linear, E, nu, and fail_stress are computed later
-        m.strain_ratio = voxel_pos_material.E / voxel_neg_material.E;
+        // strain partitions to the softer half, so a rigid or fixed half takes none
+        // and the soft half carries the full link strain
+        m.strain_ratio = (is_neg_rigid_or_fixed || is_pos_rigid_or_fixed)
+                             ? FloatC(0)
+                             : voxel_pos_material.E / voxel_neg_material.E;
         m.rho = 0.5 * (voxel_neg_material.rho + voxel_pos_material.rho);
-        m.u_static = 0.5 * (voxel_neg_material.u_static + voxel_pos_material.u_static);
-        m.u_dynamic = 0.5 * (voxel_neg_material.u_dynamic + voxel_pos_material.u_dynamic);
         m.zeta_internal =
             0.5 * (voxel_neg_material.zeta_internal + voxel_pos_material.zeta_internal);
         m.zeta_global = 0.5 * (voxel_neg_material.zeta_global + voxel_pos_material.zeta_global);
@@ -56,12 +67,18 @@ class RS_LinkMaterialCompute : public RS_VoxelMaterialCompute<FloatComputeAccura
         else
             m.fail_stress = f1 < f2 ? f1 : f2;  // the lesser stress denotes failure
 
-        m.E = 2.0 * voxel_neg_material.E * voxel_pos_material.E /
-              (voxel_neg_material.E + voxel_pos_material.E);
+        // series of the two half link compliances, equal to the harmonic mean of E
+        // for a soft to soft link and to twice the soft E at a rigid or fixed interface
+        m.E = FloatC(2) / (neg_compliance + pos_compliance);
 
-        // poissons ratio: choose such that Ehat ends up according to
-        // spring in series of Ehat1 and EHat2
-        if (voxel_neg_material.nu == 0 && voxel_pos_material.nu == 0)
+        // poissons ratio: a rigid or fixed half does not contract, so the soft side
+        // governs. otherwise choose such that Ehat ends up according to spring in
+        // series of Ehat1 and EHat2
+        if (is_neg_rigid_or_fixed)
+            m.nu = voxel_pos_material.nu;
+        else if (is_pos_rigid_or_fixed)
+            m.nu = voxel_neg_material.nu;
+        else if (voxel_neg_material.nu == 0 && voxel_pos_material.nu == 0)
             m.nu = 0;
         else {
             FloatC tmp_E_hat = 2 * voxel_neg_material.E_hat * voxel_pos_material.E_hat /
@@ -75,8 +92,9 @@ class RS_LinkMaterialCompute : public RS_VoxelMaterialCompute<FloatComputeAccura
             m.nu = sqrt(c2) - 0.25;  // from solving above
         }
 
-        // Initialize base RS_Material class derived variables
-        RS_VoxelMaterialCompute<FloatComputeAccuracy>::initMaterial(m, grav_acc);
+        // Initialize base RS_Material class derived variables. A link bond always
+        // deforms, so it is never rigid.
+        RS_VoxelMaterialCompute<FloatComputeAccuracy>::initMaterial(m, false, grav_acc);
 
         // Update derived attributes
         // stiffnesses terms for links

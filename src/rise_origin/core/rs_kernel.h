@@ -8,11 +8,9 @@
 #include <unordered_map>
 
 #include "rise_origin/device/data/rs_value.h"
-#include "rise_origin/rsc/rs_floor_config.h"
-#include "rise_origin/rsc/rs_simulation_config.h"
-#include "rise_origin/rsc/rs_world_config.h"
-#include "rise_origin/utils/rs_json.h"
-#include "rise_origin/utils/rs_math_expr.h"
+#include "rise_origin/logic/vision/rs_vision_denoise_m.h"
+#include "rise_origin/utils/interchange/rs_json.h"
+#include "rise_origin/utils/math/rs_math_expr.h"
 #include "rs_context.h"
 
 namespace rise {
@@ -34,9 +32,7 @@ RS_ENUM(
  * Runtime states are maintained by host and device separately
  */
 struct RS_KernelRuntimeStates {
-    RBigFloat time_step = 0;
-
-    RBigFloat dt = 0;  // time_step * integration_dt_frac, actual time step
+    RBigFloat dt = 0;  // actual time step
 
     RBigFloat time = 0;  // current time of the simulation in seconds
 
@@ -57,9 +53,6 @@ struct RS_KernelHostData {
 
     // Metrics
     RS_JSON metrics;
-
-    // Synchronization mutex
-    std::recursive_mutex sync_mutex;
 
     // Event time marker
     std::unordered_map<std::string, RBigFloat> event_time;
@@ -95,10 +88,7 @@ struct alignas(8) RS_KernelBase {
         host_data->runtime_states.time += host_data->runtime_states.dt;
     }
 
-    void updateTimeStepOnHost(RFloat time_step) const {
-        host_data->runtime_states.time_step = time_step;
-        host_data->runtime_states.dt = integration_dt_frac * time_step;
-    }
+    void updateDtOnHost(RFloat dt) const { host_data->runtime_states.dt = dt; }
 
     void updateOperationTimeOnHost(RSE_KernelUpdateOperation operation) const {
         auto& states = host_data->runtime_states;
@@ -119,9 +109,8 @@ struct alignas(8) RS_KernelBase {
         runtime_states.get().time += runtime_states.get().dt;
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER void updateTimeStepOnDevice(RFloat time_step) {
-        runtime_states.get().time_step = time_step;
-        runtime_states.get().dt = integration_dt_frac * time_step;
+    HOST_DEVICE_INLINE_QUALIFIER void updateDtOnDevice(RFloat dt) {
+        runtime_states.get().dt = dt;
     }
 
     HOST_DEVICE_INLINE_QUALIFIER void updateOperationTimeOnDevice(
@@ -143,8 +132,11 @@ struct alignas(8) RS_KernelBase {
     [[nodiscard]] bool isStopConditionMet() const {
         // An unset/empty stop_condition means "never stop on condition"
         if (host_data->stop_condition.empty()) return false;
-        if (host_data->stop_condition[0].op == meEND) return false;
-        auto variables = host_data->metrics;
+        if (host_data->stop_condition[0].op == RSE_ME_END) return false;
+        std::unordered_map<std::string, RFloat> variables;
+        for (auto &[key, value] : host_data->metrics.items()) {
+            variables[key] = value.template get<RFloat>();
+        }
         variables["t"] = host_data->runtime_states.time;
         return RS_MathExprExecutor::eval(variables, host_data->stop_condition) > 0;
     }
@@ -154,8 +146,6 @@ struct alignas(8) RS_KernelBase {
     [[nodiscard]] RBigIndex getHostStep() const { return host_data->runtime_states.step; }
 
     [[nodiscard]] RBigFloat getHostDt() const { return host_data->runtime_states.dt; }
-
-    [[nodiscard]] RBigFloat getHostTimeStep() const { return host_data->runtime_states.time_step; }
 
     [[nodiscard]] RBigFloat getHostTimeSinceLastOperation(
         RSE_KernelUpdateOperation operation
@@ -173,10 +163,6 @@ struct alignas(8) RS_KernelBase {
 
     [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER RBigFloat getDeviceDt() const {
         return runtime_states.get().dt;
-    }
-
-    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER RBigFloat getDeviceTimeStep() const {
-        return runtime_states.get().time_step;
     }
 
     [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER RBigFloat
@@ -215,24 +201,6 @@ struct alignas(8) RS_KernelBase {
 
     [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER bool isPaused() const { return is_paused; }
 
-    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER bool isModified() const { return is_modified; }
-
-    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER bool isAutoTimeStep() const {
-        return integration_time_step == 0;
-    }
-
-    [[nodiscard]] std::recursive_mutex& getSyncMutex() const { return host_data->sync_mutex; }
-
-    void lockSyncMutex() const { host_data->sync_mutex.lock(); }
-
-    [[nodiscard]] bool tryLockSyncMutex() const { return host_data->sync_mutex.try_lock(); }
-
-    void unlockSyncMutex() const { host_data->sync_mutex.unlock(); }
-
-    void markModified() { is_modified = true; }
-
-    void clearModified() { is_modified = false; }
-
     template <typename NewContext>
     RS_KernelBase<NewContext>& castAsContextType() {
         return *reinterpret_cast<RS_KernelBase<NewContext>*>(this);
@@ -241,36 +209,30 @@ struct alignas(8) RS_KernelBase {
     /**
      * Runtime data (constant data, set by host, kernel read only)
      */
-    // Unique id assigned by user
-    RIndex id = RS_NULL_INDEX;
-
     bool is_terminated = false;
     bool is_paused = false;
-    bool is_modified = false;
 
-    // Simulation config.
+    // Simulation characterization.
     uint64_t seed = 0x123456789abcdef;
-
-    RFloat integration_time_step = 0;
-    RFloat integration_dt_frac = 0;
 
     RFloat softbody_internal_damping_z = 0;
     RFloat softbody_contact_damping_z = 0;
     RFloat softbody_global_damping_z = 0;
+    RFloat softbody_integration_frequency_multiplier = 3.5;
+    RFloat softbody_link_max_compression = 0.8;
 
     RSize rigidbody_constraint_iterations = 0;
     RFloat rigidbody_constraint_position_correction_ratio = 0;
     RFloat rigidbody_constraint_warm_start_damping_z = 1;
-    RFloat rigidbody_constraint_compliance_initial = 1;
-    RFloat rigidbody_constraint_compliance_min_threshold = 0;
-    RFloat rigidbody_constraint_compliance_max_threshold = 1;
-    RFloat rigidbody_constraint_compliance_auto_adjust_watt_threshold = 0;
-    RFloat rigidbody_constraint_compliance_auto_adjust_step = 0;
+    RFloat rigidbody_constraint_stiffness_initial = 1;
+    RFloat rigidbody_constraint_stiffness_min_threshold = 0;
+    RFloat rigidbody_constraint_stiffness_max_threshold = 1;
+    RFloat rigidbody_constraint_stiffness_auto_adjust_watt_threshold = 0;
+    RFloat rigidbody_constraint_stiffness_auto_adjust_step = 0;
     RSize rigidbody_contact_iterations = 0;
     RSize rigidbody_contact_position_correction_iterations = 0;
     RFloat rigidbody_contact_position_correction_ratio = 0;
     RFloat rigidbody_contact_warm_start_damping_z = 0;
-    RFloat rigidbody_contact_restitution = 0;
     RFloat rigidbody_contact_slop = 0;
     RFloat rigidbody_linear_damping_z = 0;
     RFloat rigidbody_angular_damping_z = 0;
@@ -304,30 +266,13 @@ struct alignas(8) RS_KernelBase {
     RFloat control_frequency = 0;
     RFloat record_frequency = 0;
 
-    // World config.
     RFloat world_grav_acc = 0;
-    RSE_WorldRenderType world_render_type = RSE_WORLD_RENDER_CONSTANT_COLOR;
-    RColor3f world_color = RColor3f::zero();
-    RColor3f world_horizon_color = RColor3f::zero();
-    RVec3f world_sun_direction = RVec3f(0, 0, 1);
-    RColor3f world_sun_color = RColor3f::zero();
-    RFloat world_sun_angular_radius = 0;
-    RFloat world_sky_intensity = 0;
-    // Hosek-Wilkie cooked state: 3 channels x 9 coefficients per channel.
-    RFloat world_hw_config[27] = {0};
-    RFloat world_hw_radiance[3] = {0, 0, 0};
 
-    // Floor config.
-    RSE_FloorRenderType floor_render_type = RSE_FLOOR_RENDER_OPAQUE;
-    RSE_FloorDataType floor_data_type = RSE_FLOOR_DATA_NONE;
-    RColor3f floor_color = RColor3f::zero();
-    RColor3f floor_line_color = RColor3f::zero();
-    RFloat floor_grid_x_spacing = 1;
-    RFloat floor_grid_y_spacing = 1;
-    RFloat floor_grid_line_width = 0.05;
-    RFloat floor_roughness = 1;
-    RFloat floor_metalness = 0;
-    RFloat floor_ior = 1.5;
+    // Simulation flags
+    // True when the emissive light set changed and the previous reservoirs may index a removed
+    // light. The ReSTIR resample skips temporal and spatial reuse for one frame so a stale
+    // reservoir light index is never dereferenced.
+    bool vision_is_restir_reservoir_stale = false;
 
     /**
      * Runtime states

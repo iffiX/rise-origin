@@ -8,7 +8,9 @@
 #include <spdlog/spdlog.h>
 
 namespace rise {
+
 namespace logging = spdlog;
+
 }
 
 #endif  // RS_LOGGING_H

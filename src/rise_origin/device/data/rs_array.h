@@ -6,7 +6,6 @@
 
 #include <array>
 #include <cassert>
-#include <execution>
 
 #include "rise_origin/device/platform/rs_platform.h"
 #include "rise_origin/device/rs_compute.h"
@@ -57,7 +56,7 @@ class RS_Array {
      *     For column major array with shape = {2, 3, 4}, the divisors are {2, 6}.
      *                                          ^  ^   (Divisors)
      */
-    RS_DivMod<RSize> layer_dm[Dimension - 1];
+    rs_device_std::array<RS_DivMod<RSize>, Dimension - 1> layer_dm;
 
     /*****************************************************************
      * Methods

@@ -1,57 +1,103 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Muhan Li (iffi/iffiX)
 
-#include <cmath>
+#include <algorithm>
 #include <set>
 
 #include "rise_origin/device/platform/rs_platform.h"
+#include "rise_origin/device/rs_constant_memory.h"
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/rs_iterators.h"
-#include "rise_origin/utils/rs_timer.h"
+#include "rise_origin/utils/string/rs_string.h"
+#include "rise_origin/utils/time/rs_timer.h"
 #include "rs_kernel_manager.h"
 
 using namespace std;
+using namespace rise::rsc;
 using namespace rise::logic;
 using namespace rise::device;
 
 namespace rise {
+
 RS_KernelManager::RS_KernelManager() {
     // Initialize the method lookup table
     _methods = {
-        {"pauseKernel", [this](RS_Any arg) { _pauseKernel(); }},
-        {"resumeKernel", [this](RS_Any arg) { _resumeKernel(); }},
-        {"terminateKernel", [this](RS_Any arg) { _terminateKernel(); }},
-        {"beginModificationTransaction", [this](RS_Any arg) { _beginModificationTransaction(); }},
-        {"endModificationTransaction", [this](RS_Any arg) { _endModificationTransaction(); }},
-        {"setSimulationConfig",
-         [this](RS_Any arg) { _setSimulationConfig(arg.as<RS_SimulationConfig>()); }},
-        {"setFloor", [this](RS_Any arg) { _setFloor(arg.as<RS_FloorConfig>()); }},
-        {"setWorld", [this](RS_Any arg) { _setWorld(arg.as<RS_WorldConfig>()); }},
-        {"addMaterial", [this](RS_Any arg) { _addMaterial(arg.as<RS_MaterialConfig>()); }},
-        {"addRecord", [this](RS_Any arg) { _addRecord(arg.as<RS_RecordConfig>()); }},
-        {"addSignal", [this](RS_Any arg) { _addSignal(arg.as<RS_SignalConfig>()); }},
-        {"addStructure", [this](RS_Any arg) { _addStructure(arg.as<RS_StructureConfig>()); }},
-        {"addCamera", [this](RS_Any arg) { _addCamera(arg.as<RS_CameraConfig>()); }},
-        {"updateMaterial", [this](RS_Any arg) { _updateMaterial(arg.as<RS_MaterialConfig>()); }},
-        {"deleteFloor", [this](RS_Any arg) { _deleteFloor(); }},
-        {"deleteMaterial", [this](RS_Any arg) { _deleteMaterial(arg.as<RIndex>()); }},
-        {"deleteRecord", [this](RS_Any arg) { _deleteRecord(arg.as<RIndex>()); }},
-        {"deleteSignal", [this](RS_Any arg) { _deleteSignal(arg.as<RIndex>()); }},
-        {"deleteStructure", [this](RS_Any arg) { _deleteStructure(arg.as<RIndex>()); }},
-        {"deleteCamera", [this](RS_Any arg) { _deleteCamera(arg.as<RIndex>()); }},
+        {"pauseKernel", [this](RS_Any arg, RIndex message_id) { _pauseKernel(); }},
+        {"resumeKernel", [this](RS_Any arg, RIndex message_id) { _resumeKernel(); }},
+        {"terminateKernel", [this](RS_Any arg, RIndex message_id) { _terminateKernel(); }},
+        {"beginModificationTransaction",
+         [this](RS_Any arg, RIndex message_id) { _beginModificationTransaction(); }},
+        {"endModificationTransaction",
+         [this](RS_Any arg, RIndex message_id) { _endModificationTransaction(); }},
+
+        {"setSimulationRSC",
+         [this](RS_Any arg, RIndex message_id) {
+             _setSimulationRSC(arg.as<RSC_Simulation>(), message_id);
+         }},
+
+        {"addResource",
+         [this](RS_Any arg, RIndex message_id) {
+             _addResource(arg.as<RSC_ResourceVariant>(), message_id);
+         }},
+        {"updateResource",
+         [this](RS_Any arg, RIndex message_id) {
+             auto& p = arg.as<std::pair<std::string, RSC_ResourceVariant>>();
+             _updateResource(p.first, p.second, message_id);
+         }},
+        {"removeResource",
+         [this](RS_Any arg, RIndex message_id) { _removeResource(arg.as<std::string>(), message_id); }},
+
+        {"addEssence",
+         [this](RS_Any arg, RIndex message_id) {
+             _addEssence(arg.as<RSC_EssenceVariant>(), message_id);
+         }},
+        {"updateEssence",
+         [this](RS_Any arg, RIndex message_id) {
+             auto& p = arg.as<std::pair<std::string, RSC_EssenceVariant>>();
+             _updateEssence(p.first, p.second, message_id);
+         }},
+        {"removeEssence",
+         [this](RS_Any arg, RIndex message_id) { _removeEssence(arg.as<std::string>(), message_id); }},
+
+        {"addEntity",
+         [this](RS_Any arg, RIndex message_id) {
+             _addEntity(arg.as<RSC_EntityVariant>(), message_id);
+         }},
+        {"removeEntity",
+         [this](RS_Any arg, RIndex message_id) { _removeEntity(arg.as<std::string>(), message_id); }},
+        {"freezeEntity",
+         [this](RS_Any arg, RIndex message_id) { _freezeEntity(arg.as<std::string>(), message_id); }},
+        {"unfreezeEntity",
+         [this](RS_Any arg, RIndex message_id) { _unfreezeEntity(arg.as<std::string>(), message_id); }},
+
+        {"addRecord",
+         [this](RS_Any arg, RIndex message_id) {
+             _addRecord(arg.as<RSC_RecordVariant>(), message_id);
+         }},
+        {"removeRecord",
+         [this](RS_Any arg, RIndex message_id) { _removeRecord(arg.as<std::string>(), message_id); }},
+
+        {"addSignal",
+         [this](RS_Any arg, RIndex message_id) {
+             _addSignal(arg.as<RSC_SignalVariant>(), message_id);
+         }},
+        {"removeSignal",
+         [this](RS_Any arg, RIndex message_id) { _removeSignal(arg.as<std::string>(), message_id); }},
     };
 }
 
 void RS_KernelManager::init(
     RS_MemoryProvider* host_provider,
     RS_MemoryProvider* device_provider,
-    RSize record_buffer_frame_num
+    RSize record_buffer_frame_num,
+    std::function<void(const RS_WorldMessage&)> message_sink
 ) {
     if (logging::get("root")) _logger = logging::get("root")->clone("kernel manager");
     _thread_pool = make_shared<RS_ThreadPool>();
     _host_provider = host_provider;
     _device_provider = device_provider;
     _kernel_record_buffer_frame_num = record_buffer_frame_num;
+    _message_sink = std::move(message_sink);
     _kernel_synchronization_thread =
         make_unique<thread>(&RS_KernelManager::_kernelSynchronizationThreadFunc, this);
 }
@@ -66,27 +112,20 @@ void RS_KernelManager::free() {
     _command_queue_cv.notify_one();
     _kernel_synchronization_thread->join();
     _kernel_synchronization_thread = nullptr;
-
-    _material_name_to_gid.clear();
-    _record_name_to_gid.clear();
-    _signal_name_to_gid.clear();
-    _structure_name_to_gid.clear();
-    _camera_name_to_gid.clear();
-
-    _record_gid_to_record_type.clear();
-    _structure_gid_to_structure_record_gid.clear();
-    _structure_gid_to_rigid_body_camera_gids.clear();
 }
 
-void RS_KernelManager::initKernel(RIndex kernel_id, RSE_FloatType context_mem_accuracy) {
+void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
     RS_Timer timer;
 
-    kernel.markModified();
-    kernel.id = kernel_id;
+    markKernelModified();
     kernel.host_data = new RS_KernelHostData();
     kernel.ctx_accuracy = context_mem_accuracy;
 
     _kernel_spatial_manager.init(this);
+    _kernel_texture_manager.init(this);
+    _kernel_material_manager.init(this);
+    // Cosmic background manager is initialised lazily when an
+    // RSC_CosmicBackground entity is added through the handle.
 
     castKernelPtrAndCall(&kernel, [&](auto k_ptr) {
         auto& k = *k_ptr;
@@ -120,13 +159,14 @@ void RS_KernelManager::initKernel(RIndex kernel_id, RSE_FloatType context_mem_ac
 
         k.ctx.structure_emissive_voxel_handles.init(0, _device_provider);
 
-        k.ctx.structure_voxel_bvh_flags.init(0, _device_provider);
-        k.ctx.structure_voxel_bvh_prefix_sums.init(0, _device_provider);
-        k.ctx.structure_voxel_bvh_active_handles.init(0, _device_provider);
+        k.ctx.structure_voxel_dynamic_flags.init(0, _device_provider);
+        k.ctx.structure_voxel_dynamic_prefix_sums.init(0, _device_provider);
+        k.ctx.structure_voxel_bvh_dynamic_flags.init(0, _device_provider);
+        k.ctx.structure_voxel_bvh_dynamic_prefix_sums.init(0, _device_provider);
+        k.ctx.structure_voxel_static_flags.init(0, _device_provider);
+        k.ctx.structure_voxel_static_prefix_sums.init(0, _device_provider);
 
-        k.ctx.structure_expansion_signals.init(0, _device_provider);
-        k.ctx.structure_hinge_signals.init(0, _device_provider);
-        k.ctx.structure_prismatic_signals.init(0, _device_provider);
+        k.ctx.structure_signals.init(0, _device_provider);
 
         k.ctx.structure_link_material_layout.init(_device_provider);
         k.ctx.structure_voxel_material_layout.init(_device_provider);
@@ -138,9 +178,7 @@ void RS_KernelManager::initKernel(RIndex kernel_id, RSE_FloatType context_mem_ac
 
         k.ctx.structure_constraint_joint_block_range_layout.init(_device_provider);
 
-        k.ctx.structure_expansion_signal_layout.init(_device_provider);
-        k.ctx.structure_hinge_signal_layout.init(_device_provider);
-        k.ctx.structure_prismatic_signal_layout.init(_device_provider);
+        k.ctx.structure_signal_layout.init(_device_provider);
 
         k.ctx.structure_records.init(0, _device_provider);
         k.ctx.structure_recorder_buffers.init(0, _device_provider);
@@ -185,7 +223,7 @@ void RS_KernelManager::initKernel(RIndex kernel_id, RSE_FloatType context_mem_ac
         k.ctx.camera_aux_endpoint_material_type.init(0, _device_provider);
         k.ctx.camera_aux_endpoint_screen_motion.init(0, _device_provider);
         k.ctx.camera_aux_chain_throughput.init(0, _device_provider);
-        k.ctx.camera_aux_chain_terminal_kind.init(0, _device_provider);
+        k.ctx.camera_aux_chain_terminal_type.init(0, _device_provider);
         k.ctx.camera_prev_reservoir_di.init(0, _device_provider);
         k.ctx.camera_current_reservoir_di.init(0, _device_provider);
         k.ctx.camera_prev_reservoir_gi.init(0, _device_provider);
@@ -203,7 +241,7 @@ void RS_KernelManager::initKernel(RIndex kernel_id, RSE_FloatType context_mem_ac
         k.ctx.camera_prev_denoiser_moment_history.init(0, _device_provider);
         k.ctx.camera_prev_denoiser_history_length.init(0, _device_provider);
 
-        k.ctx.camera_control_signals.init(0, _device_provider);
+        k.ctx.camera_signals.init(0, _device_provider);
 
         k.ctx.camera_layout.init(_device_provider);
         k.ctx.camera_info_ray_layout.init(_device_provider);
@@ -212,7 +250,25 @@ void RS_KernelManager::initKernel(RIndex kernel_id, RSE_FloatType context_mem_ac
         k.ctx.camera_pixel_record_layout.init(_device_provider);
         k.ctx.camera_state_record_layout.init(_device_provider);
 
-        k.ctx.camera_control_signal_layout.init(_device_provider);
+        k.ctx.camera_signal_layout.init(_device_provider);
+
+        k.ctx.vision_materials.init(0, _device_provider);
+        k.ctx.vision_material_layout.init(_device_provider);
+
+        k.ctx.light_weight.init(0, _device_provider);
+        k.ctx.light_cdf.init(0, _device_provider);
+
+        k.ctx.intersect_regions.init(0, _device_provider);
+        k.ctx.intersect_region_counts.init(0, _device_provider);
+        k.ctx.intersect_region_offsets.init(0, _device_provider);
+        k.ctx.intersect_region_pairs.init(0, _device_provider);
+        k.ctx.intersect_region_unique_pairs.init(0, _device_provider);
+        k.ctx.intersect_region_keys.init(0, _device_provider);
+        k.ctx.intersect_region_sorted_keys.init(0, _device_provider);
+        k.ctx.intersect_region_indices.init(0, _device_provider);
+        k.ctx.intersect_region_sorted_indices.init(0, _device_provider);
+        k.ctx.intersect_region_flags.init(0, _device_provider);
+        k.ctx.intersect_region_prefix_sums.init(0, _device_provider);
 
         k.ctx.force_signals.init(0, _device_provider);
         k.ctx.force_signal_layout.init(_device_provider);
@@ -222,12 +278,6 @@ void RS_KernelManager::initKernel(RIndex kernel_id, RSE_FloatType context_mem_ac
         k.ctx.torque_signals.init(0, _device_provider);
         k.ctx.torque_signal_layout.init(_device_provider);
         k.ctx.torque_rigid.init(0, _device_provider);
-
-        k.ctx.vision_materials.init(0, _device_provider);
-        k.ctx.vision_material_layout.init(_device_provider);
-
-        k.ctx.light_weight.init(0, _device_provider);
-        k.ctx.light_cdf.init(0, _device_provider);
 
         k.ctx.host_data = new RS_ContextHostData();
 
@@ -250,16 +300,23 @@ void RS_KernelManager::freeKernel() {
 
     is_kernel_inited.store(false, std::memory_order_release);
 
-    // Free kernel data managers
-    _deleteFloor();
-    _deleteWorld();
-    for (auto& manager : _kernel_material_managers) manager.second.free();
-    for (auto& manager : _kernel_structure_record_managers) manager.second.free();
-    for (auto& manager : _kernel_force_managers) manager.second.free();
-    for (auto& manager : _kernel_torque_managers) manager.second.free();
-    for (auto& manager : _kernel_structure_managers) manager.second.free();
-    for (auto& manager : _kernel_camera_managers) manager.second.free();
+    // Coarse teardown: destroy the kernel data managers. Their destructors release local memory
+    // and references without touching the context, which is freed raw below.
+    _kernel_force_managers.clear();
+    _kernel_torque_managers.clear();
+    _kernel_intersect_region_managers.clear();
+    _kernel_structure_voxel_managers.clear();
+    _kernel_camera_perspective_managers.clear();
+    _kernel_floor_manager.reset();
+
+    // Cosmic background must release before the texture manager for texture dependencies.
+    _kernel_cosmic_background_manager.reset();
+
+    // Material manager frees before texture manager for texture references.
+    _kernel_material_manager.free();
+
     _kernel_spatial_manager.free();
+    _kernel_texture_manager.free();
 
     castKernelPtrAndCall(&kernel, [&](auto k_ptr) {
         auto& k = *k_ptr;
@@ -293,13 +350,14 @@ void RS_KernelManager::freeKernel() {
 
         k.ctx.structure_emissive_voxel_handles.free();
 
-        k.ctx.structure_voxel_bvh_flags.free();
-        k.ctx.structure_voxel_bvh_prefix_sums.free();
-        k.ctx.structure_voxel_bvh_active_handles.free();
+        k.ctx.structure_voxel_dynamic_flags.free();
+        k.ctx.structure_voxel_dynamic_prefix_sums.free();
+        k.ctx.structure_voxel_bvh_dynamic_flags.free();
+        k.ctx.structure_voxel_bvh_dynamic_prefix_sums.free();
+        k.ctx.structure_voxel_static_flags.free();
+        k.ctx.structure_voxel_static_prefix_sums.free();
 
-        k.ctx.structure_expansion_signals.free();
-        k.ctx.structure_hinge_signals.free();
-        k.ctx.structure_prismatic_signals.free();
+        k.ctx.structure_signals.free();
 
         k.ctx.structure_link_material_layout.free();
         k.ctx.structure_voxel_material_layout.free();
@@ -311,9 +369,7 @@ void RS_KernelManager::freeKernel() {
 
         k.ctx.structure_constraint_joint_block_range_layout.free();
 
-        k.ctx.structure_expansion_signal_layout.free();
-        k.ctx.structure_hinge_signal_layout.free();
-        k.ctx.structure_prismatic_signal_layout.free();
+        k.ctx.structure_signal_layout.free();
 
         k.ctx.structure_records.free();
         k.ctx.structure_recorder_buffers.free();
@@ -354,7 +410,7 @@ void RS_KernelManager::freeKernel() {
         k.ctx.camera_aux_endpoint_material_type.free();
         k.ctx.camera_aux_endpoint_screen_motion.free();
         k.ctx.camera_aux_chain_throughput.free();
-        k.ctx.camera_aux_chain_terminal_kind.free();
+        k.ctx.camera_aux_chain_terminal_type.free();
         k.ctx.camera_prev_reservoir_di.free();
         k.ctx.camera_current_reservoir_di.free();
         k.ctx.camera_prev_reservoir_gi.free();
@@ -372,7 +428,7 @@ void RS_KernelManager::freeKernel() {
         k.ctx.camera_prev_denoiser_moment_history.free();
         k.ctx.camera_prev_denoiser_history_length.free();
 
-        k.ctx.camera_control_signals.free();
+        k.ctx.camera_signals.free();
 
         k.ctx.camera_layout.free();
         k.ctx.camera_info_ray_layout.free();
@@ -381,7 +437,25 @@ void RS_KernelManager::freeKernel() {
         k.ctx.camera_pixel_record_layout.free();
         k.ctx.camera_state_record_layout.free();
 
-        k.ctx.camera_control_signal_layout.free();
+        k.ctx.camera_signal_layout.free();
+
+        k.ctx.vision_materials.free();
+        k.ctx.vision_material_layout.free();
+
+        k.ctx.light_weight.free();
+        k.ctx.light_cdf.free();
+
+        k.ctx.intersect_regions.free();
+        k.ctx.intersect_region_counts.free();
+        k.ctx.intersect_region_offsets.free();
+        k.ctx.intersect_region_pairs.free();
+        k.ctx.intersect_region_unique_pairs.free();
+        k.ctx.intersect_region_keys.free();
+        k.ctx.intersect_region_sorted_keys.free();
+        k.ctx.intersect_region_indices.free();
+        k.ctx.intersect_region_sorted_indices.free();
+        k.ctx.intersect_region_flags.free();
+        k.ctx.intersect_region_prefix_sums.free();
 
         k.ctx.force_signals.free();
         k.ctx.force_signal_layout.free();
@@ -392,12 +466,6 @@ void RS_KernelManager::freeKernel() {
         k.ctx.torque_signal_layout.free();
         k.ctx.torque_rigid.free();
 
-        k.ctx.vision_materials.free();
-        k.ctx.vision_material_layout.free();
-
-        k.ctx.light_weight.free();
-        k.ctx.light_cdf.free();
-
         delete k.ctx.host_data;
     });
     delete kernel.host_data;
@@ -405,210 +473,358 @@ void RS_KernelManager::freeKernel() {
     RS_LOG(_logger, debug, "freeKernel takes {}", timer.elapsedTimeString());
 }
 
-void RS_KernelManager::pauseCommandExecution() {
-    // Increase the pause count
-    _command_exec_pause_count.fetch_add(1, std::memory_order_acq_rel);
+void RS_KernelManager::pauseCommandExecution() { _command_execution_mutex.lock(); }
 
-    // wait until manager is no longer in the middle of a command
-    // Busy-wait or sleep until the manager has finished its current command
-    // i.e. _command_exec_lock == 0
-    while (_command_exec_lock.load(std::memory_order_acquire) == 1) {
-        // Avoid pure spin if commands can be long; short sleep is typically fine
-        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-    }
+void RS_KernelManager::resumeCommandExecution() { _command_execution_mutex.unlock(); }
+
+void RS_KernelManager::acquireCriticalDataAccess() { _kernel_data_mutex.lock(); }
+
+void RS_KernelManager::releaseCriticalDataAccess() { _kernel_data_mutex.unlock(); }
+
+/*****************************************************************
+ * Kernel Management APIs
+ *****************************************************************/
+void RS_KernelManager::markKernelModified() { _is_kernel_modified = true; }
+
+bool RS_KernelManager::isKernelModified() const { return _is_kernel_modified; }
+
+void RS_KernelManager::syncKernelIfNeeded() {
+    // Nothing to push
+    if (!_is_kernel_modified) return;
+    // Drain the stream first so the constant-memory write cannot race in-flight launches or pending
+    // device mutations.
+    _device_provider->sync();
+    device::RS_ConstantMemory::write(&kernel, _device_provider->device, sizeof(RS_Kernel));
+    // The device now mirrors the host kernel.
+    _is_kernel_modified = false;
 }
 
-void RS_KernelManager::resumeCommandExecution() {
-    // Decrease the pause count
-    _command_exec_pause_count.fetch_sub(1, std::memory_order_acq_rel);
-    // No special wait needed. If the count hits 0, the manager can proceed.
-}
-
+/*****************************************************************
+ * Simulation execution APIs
+ *****************************************************************/
 void RS_KernelManager::syncRecorderRecords() {
-    RS_KernelManagerGuard guard(this);
-    for (auto& manager : _kernel_structure_record_managers) {
-        if (manager.second.hasRecorderRecords()) manager.second.syncRecorderRecords();
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    for (auto& manager : _kernel_structure_voxel_managers) {
+        manager.second->syncRecorderRecords();
     }
-    for (auto& manager : _kernel_camera_managers) {
-        if (manager.second.hasRecorderRecords()) manager.second.syncRecorderRecords();
+    for (auto& manager : _kernel_camera_perspective_managers) {
+        manager.second->syncRecorderRecords();
+    }
+    for (auto& manager : _kernel_intersect_region_managers) {
+        manager.second->syncRecorderRecords();
     }
 }
 
 void RS_KernelManager::waitForRecorderRecordsSync() {
-    RS_KernelManagerGuard guard(this);
-    for (auto& manager : _kernel_structure_record_managers) {
-        if (manager.second.hasRecorderRecords()) manager.second.waitForRecorderRecordsSync();
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    for (auto& manager : _kernel_structure_voxel_managers) {
+        manager.second->waitForRecorderRecordsSync();
     }
-    for (auto& manager : _kernel_camera_managers) {
-        if (manager.second.hasRecorderRecords()) manager.second.waitForRecorderRecordsSync();
+    for (auto& manager : _kernel_camera_perspective_managers) {
+        manager.second->waitForRecorderRecordsSync();
+    }
+    for (auto& manager : _kernel_intersect_region_managers) {
+        manager.second->waitForRecorderRecordsSync();
     }
 }
-vector<pair<string, vector<RS_SimulationStructureRecord>>>
-RS_KernelManager::getRecorderStructureRecords() {
-    RS_KernelManagerGuard guard(this);
-    vector<pair<string, vector<RS_SimulationStructureRecord>>> structure_records;
 
-    structure_records.reserve(_kernel_structure_record_managers.size());
-    for (auto& pair : _kernel_structure_record_managers) {
-        if (!pair.second.hasRecorderRecords()) continue;
-        structure_records.emplace_back(
-            pair.second.getStructureName(), pair.second.getRecorderRecords()
-        );
+unordered_map<string, RS_KernelRecorderStructureVoxelBundle>
+RS_KernelManager::getRecorderStructureVoxelRecords() {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    unordered_map<string, RS_KernelRecorderStructureVoxelBundle> result;
+
+    for (auto& [st_name, st_manager] : _kernel_structure_voxel_managers) {
+        string recorder_name = st_manager->getRecordRecorderName();
+        if (recorder_name.empty()) continue;
+        result[recorder_name].structure_records[st_manager->getEntityName()] =
+            st_manager->getRecorderRecords();
     }
-    return move(structure_records);
+    return result;
 }
 
-vector<pair<string, vector<RS_SimulationCameraRecord>>>
-RS_KernelManager::getRecorderCameraRecords() {
-    RS_KernelManagerGuard guard(this);
-    vector<pair<string, vector<RS_SimulationCameraRecord>>> camera_records;
+unordered_map<string, RS_KernelRecorderCameraPerspectiveBundle>
+RS_KernelManager::getRecorderCameraPerspectiveRecords() {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    unordered_map<string, RS_KernelRecorderCameraPerspectiveBundle> result;
 
-    camera_records.reserve(_kernel_camera_managers.size());
-    for (auto& pair : _kernel_camera_managers) {
-        if (!pair.second.hasRecorderRecords()) continue;
-        camera_records.emplace_back(pair.second.getName(), pair.second.getRecorderRecords());
+    for (auto& [cam_name, cam_manager] : _kernel_camera_perspective_managers) {
+        string recorder_name = cam_manager->getRecordRecorderName();
+        if (recorder_name.empty()) continue;
+        result[recorder_name].camera_records[cam_manager->getEntityName()] =
+            cam_manager->getRecorderRecords();
     }
-    return move(camera_records);
+    return result;
+}
+
+unordered_map<string, RS_KernelRecorderIntersectRegionBundle>
+RS_KernelManager::getRecorderIntersectRegionRecords() {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    unordered_map<string, RS_KernelRecorderIntersectRegionBundle> result;
+
+    for (auto& [region_name, region_manager] : _kernel_intersect_region_managers) {
+        string recorder_name = region_manager->getRecordRecorderName();
+        if (recorder_name.empty()) continue;
+        result[recorder_name].intersect_region_records[region_manager->getRecordName()] =
+            region_manager->getRecorderRecords();
+    }
+    return result;
 }
 
 void RS_KernelManager::syncControllerRecords() {
-    RS_KernelManagerGuard guard(this);
-    for (auto& manager : _kernel_structure_record_managers) {
-        if (manager.second.hasControllerRecord()) {
-            manager.second.syncControllerRecord();
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    for (auto& manager : _kernel_structure_voxel_managers) {
+        if (manager.second->hasControllerRecord()) {
+            manager.second->syncControllerRecord();
         }
     }
-    for (auto& manager : _kernel_camera_managers) {
-        if (manager.second.hasControllerRecord()) {
-            manager.second.syncControllerRecord();
+    for (auto& manager : _kernel_camera_perspective_managers) {
+        if (manager.second->hasControllerRecord()) {
+            manager.second->syncControllerRecord();
+        }
+    }
+    for (auto& manager : _kernel_intersect_region_managers) {
+        if (manager.second->hasControllerRecord()) {
+            manager.second->syncControllerRecord();
         }
     }
 }
 
 void RS_KernelManager::syncControllerSignals() {
-    RS_KernelManagerGuard guard(this);
-    for (auto& manager : _kernel_structure_managers) {
-        if (manager.second.hasControllerSignal()) {
-            manager.second.syncControllerSignal();
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    for (auto& manager : _kernel_structure_voxel_managers) {
+        if (manager.second->hasControllerSignal()) {
+            manager.second->syncControllerSignal();
         }
     }
-    for (auto& manager : _kernel_camera_managers) {
-        if (manager.second.hasControllerSignal()) {
-            manager.second.syncControllerSignal();
+    for (auto& manager : _kernel_camera_perspective_managers) {
+        if (manager.second->hasControllerSignal()) {
+            manager.second->syncControllerSignal();
         }
     }
     for (auto& manager : _kernel_force_managers) {
-        if (manager.second.hasControllerSignal()) {
-            manager.second.syncControllerSignal();
+        if (manager.second->hasControllerSignal()) {
+            manager.second->syncControllerSignal();
         }
     }
     for (auto& manager : _kernel_torque_managers) {
-        if (manager.second.hasControllerSignal()) {
-            manager.second.syncControllerSignal();
+        if (manager.second->hasControllerSignal()) {
+            manager.second->syncControllerSignal();
         }
     }
 }
 
-vector<RS_SimulationStructureController> RS_KernelManager::getStructureControllers() {
-    RS_KernelManagerGuard guard(this);
-    vector<RS_SimulationStructureController> structure_controllers;
+unordered_map<string, RS_KernelControllerBundle> RS_KernelManager::getControllerSignalsAndRecords(
+    const unordered_set<string>& controller_names
+) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    unordered_map<string, RS_KernelControllerBundle> result;
 
-    for (auto& st_manager : _kernel_structure_managers) {
-        RIndex gid = st_manager.first;
+    // Seed registered-but-idle controllers so they still surface.
+    for (auto& name : controller_names) result[name];
 
-        bool has_record =
-            _structure_gid_to_structure_record_gid.find(gid) !=
-                _structure_gid_to_structure_record_gid.end() &&
-            _kernel_structure_record_managers.at(_structure_gid_to_structure_record_gid.at(gid))
-                .hasControllerRecord();
-        bool has_cameras = _structure_gid_to_rigid_body_camera_gids.find(gid) !=
-                           _structure_gid_to_rigid_body_camera_gids.end();
-
-        if (!st_manager.second.hasControllerSignal() && !has_record && !has_cameras) continue;
-
-        RS_SimulationStructureController controller;
-        controller.name = st_manager.second.getName();
-        if (has_record) {
-            controller.structure_record =
-                _kernel_structure_record_managers.at(_structure_gid_to_structure_record_gid.at(gid))
-                    .getControllerRecord();
+    // Structure voxel: signal -> its source controller; record -> its target controller.
+    for (auto& [st_name, st_manager] : _kernel_structure_voxel_managers) {
+        if (st_manager->hasControllerSignal()) {
+            const string& cn = st_manager->getSignalControllerName();
+            if (!cn.empty()) result[cn].signals.emplace_back(st_manager->getControllerSignal());
         }
-        if (has_cameras) {
-            for (auto& camera_gid : _structure_gid_to_rigid_body_camera_gids.at(gid)) {
-                auto& camera_manager = _kernel_camera_managers.at(camera_gid);
-                if (camera_manager.hasControllerRecord()) {
-                    controller.camera_records.push_back(camera_manager.getControllerRecord());
-                }
-            }
-        }
-        controller.signal = st_manager.second.getControllerSignal();
-        structure_controllers.emplace_back(controller);
-    }
-
-    return move(structure_controllers);
-}
-
-vector<RS_SimulationCameraController> RS_KernelManager::getCameraControllers() {
-    RS_KernelManagerGuard guard(this);
-    vector<RS_SimulationCameraController> camera_controllers;
-
-    camera_controllers.reserve(_kernel_camera_managers.size());
-    for (auto& cam_manager : _kernel_camera_managers) {
-        // Only free perspective cameras gets controller, rigid body linked
-        // perspective cameras' outputs are redirected to structure.
-        if (cam_manager.second.hasControllerSignal()) {
-            RS_SimulationCameraController controller;
-            controller.name = cam_manager.second.getName();
-            controller.camera_record = cam_manager.second.getControllerRecord();
-            controller.signal = cam_manager.second.getControllerSignal();
-            camera_controllers.emplace_back(controller);
+        if (st_manager->hasControllerRecord()) {
+            const string& cn = st_manager->getRecordControllerName();
+            if (!cn.empty()) result[cn].records.emplace_back(st_manager->getControllerRecord());
         }
     }
-    return move(camera_controllers);
-}
 
-vector<RS_SimulationForceController> RS_KernelManager::getForceControllers() {
-    RS_KernelManagerGuard guard(this);
-    vector<RS_SimulationForceController> force_controllers;
-
-    force_controllers.reserve(_kernel_force_managers.size());
-    for (auto& force_manager : _kernel_force_managers) {
-        // Always true for force managers.
-        if (force_manager.second.hasControllerSignal()) {
-            RS_SimulationForceController controller;
-            controller.name = force_manager.second.getName();
-            controller.signal = force_manager.second.getControllerSignal();
-            force_controllers.emplace_back(controller);
+    // Camera perspective: free cameras carry a signal; all cameras may emit a record.
+    for (auto& [cam_name, cam_manager] : _kernel_camera_perspective_managers) {
+        if (cam_manager->hasControllerSignal()) {
+            const string& cn = cam_manager->getSignalControllerName();
+            if (!cn.empty()) result[cn].signals.emplace_back(cam_manager->getControllerSignal());
+        }
+        if (cam_manager->hasControllerRecord()) {
+            const string& cn = cam_manager->getRecordControllerName();
+            if (!cn.empty()) result[cn].records.emplace_back(cam_manager->getControllerRecord());
         }
     }
-    return move(force_controllers);
-}
 
-vector<RS_SimulationTorqueController> RS_KernelManager::getTorqueControllers() {
-    RS_KernelManagerGuard guard(this);
-    vector<RS_SimulationTorqueController> torque_controllers;
-
-    torque_controllers.reserve(_kernel_torque_managers.size());
-    for (auto& torque_manager : _kernel_torque_managers) {
-        // Always true for torque managers.
-        if (torque_manager.second.hasControllerSignal()) {
-            RS_SimulationTorqueController controller;
-            controller.name = torque_manager.second.getName();
-            controller.signal = torque_manager.second.getControllerSignal();
-            torque_controllers.emplace_back(controller);
+    // Force / torque: signal -> its source controller.
+    for (auto& [_, fm] : _kernel_force_managers) {
+        if (fm->hasControllerSignal()) {
+            const string& cn = fm->getRSC().as<RSC_Force>().source_controller_name;
+            if (!cn.empty()) result[cn].signals.emplace_back(fm->getControllerSignal());
         }
     }
-    return move(torque_controllers);
+    for (auto& [_, tm] : _kernel_torque_managers) {
+        if (tm->hasControllerSignal()) {
+            const string& cn = tm->getRSC().as<RSC_Torque>().source_controller_name;
+            if (!cn.empty()) result[cn].signals.emplace_back(tm->getControllerSignal());
+        }
+    }
+
+    // Intersect region: record -> its target controller.
+    for (auto& [region_name, region_manager] : _kernel_intersect_region_managers) {
+        if (region_manager->hasControllerRecord()) {
+            const string& cn = region_manager->getRecordControllerName();
+            if (!cn.empty()) result[cn].records.emplace_back(region_manager->getControllerRecord());
+        }
+    }
+
+    return result;
 }
 
+void RS_KernelManager::setIntersectRegionRecords(
+    const std::vector<logic::RS_IntersectRegionPair>& pairs
+) {
+    // Critical data access, not command execution: this writes manager-owned record buffers and is
+    // called from the executor while it already holds critical data access. Taking the command
+    // execution guard here would acquire it under the data guard and deadlock a concurrent command.
+    RS_KernelManagerCriticalDataAccessGuard guard(this);
+
+    unordered_map<RIndex, RS_KernelIntersectRegionManager*> manager_by_gid;
+    for (auto& [_, rm] : _kernel_intersect_region_managers) {
+        manager_by_gid[rm->getRecordGid()] = rm.get();
+    }
+
+    // Walk the record-gid-major pairs once; each contiguous run is one record's membership set.
+    unordered_set<RIndex> filled;
+    RSize n = pairs.size();
+    RSize i = 0;
+    while (i < n) {
+        RIndex gid = pairs[i].record_gid;
+        RSize start = i;
+        while (i < n && pairs[i].record_gid == gid) i++;
+        if (auto it = manager_by_gid.find(gid); it != manager_by_gid.end()) {
+            it->second->setIntersectRegionRecord(pairs, start, i - start);
+            filled.insert(gid);
+        }
+    }
+
+    // Records with no membership this step get an empty set.
+    for (auto& [gid, manager] : manager_by_gid) {
+        if (filled.find(gid) == filled.end()) {
+            manager->setIntersectRegionRecord(pairs, 0, 0);
+        }
+    }
+}
+
+std::string RS_KernelManager::purgeStructure(RIndex structure_gid) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+
+    // Resolve the structure name from its gid.
+    std::string name;
+    for (auto& [structure_name, mgr] : _kernel_structure_voxel_managers) {
+        if (mgr->getEntityGid() == structure_gid) {
+            name = structure_name;
+            break;
+        }
+    }
+    if (name.empty())
+        RS_THROW(RS_NotFoundException("Structure with gid {} not found", structure_gid));
+
+    // Gather the dependents that hold a reference on this structure.
+    std::vector<std::string> dependent_signals;
+    std::vector<std::string> dependent_cameras;
+    std::vector<std::string> dependent_records;
+
+    for (auto& [key, mgr] : _kernel_force_managers) {
+        if (mgr->getStructureGid() == structure_gid)
+            dependent_signals.push_back(mgr->getSignalName());
+    }
+    for (auto& [key, mgr] : _kernel_torque_managers) {
+        if (mgr->getStructureGid() == structure_gid)
+            dependent_signals.push_back(mgr->getSignalName());
+    }
+    for (auto& [key, mgr] : _kernel_camera_perspective_managers) {
+        if (mgr->getStructureGid() == structure_gid)
+            dependent_cameras.push_back(mgr->getEntityName());
+    }
+    for (auto& [key, mgr] : _kernel_intersect_region_managers) {
+        if (mgr->getStructureGid() == structure_gid)
+            dependent_records.push_back(mgr->getRecordName());
+    }
+
+    RS_LOG(
+        _logger,
+        warn,
+        "Purging structure name: {}, gid: {}, dependent signals: [{}], cameras: [{}], records: "
+        "[{}]",
+        name,
+        structure_gid,
+        join(", ", dependent_signals),
+        join(", ", dependent_cameras),
+        join(", ", dependent_records)
+    );
+
+    // Tear down the dependents, then the structure itself.
+    for (auto& signal_name : dependent_signals) {
+        _removeSignal(signal_name, RS_NULL_INDEX);
+        RS_LOG(_logger, warn, "Removed signal: {}", signal_name);
+    }
+    for (auto& camera_name : dependent_cameras) {
+        _removeEntity(camera_name, RS_NULL_INDEX);
+        RS_LOG(_logger, warn, "Removed camera: {}", camera_name);
+    }
+    for (auto& record_name : dependent_records) {
+        _removeRecord(record_name, RS_NULL_INDEX);
+        RS_LOG(_logger, warn, "Removed record: {}", record_name);
+    }
+    _removeEntity(name, RS_NULL_INDEX);
+    RS_LOG(_logger, warn, "Removed structure: {}", name);
+
+    // Flush the pending changes to the kernel data.
+    _flushPendingCommits();
+
+    return name;
+}
+
+void RS_KernelManager::markVisionRestirReservoirStale() {
+    kernel.vision_is_restir_reservoir_stale = true;
+    markKernelModified();
+}
+
+bool RS_KernelManager::isVisionRestirReservoirStale() const {
+    return kernel.vision_is_restir_reservoir_stale;
+}
+
+void RS_KernelManager::clearVisionRestirReservoirStale() {
+    kernel.vision_is_restir_reservoir_stale = false;
+    markKernelModified();
+}
+
+void RS_KernelManager::markVoxelPartitionModified() {
+    _kernel_spatial_manager.markVoxelPartitionModified();
+}
+
+bool RS_KernelManager::isVoxelPartitionModified() const {
+    return _kernel_spatial_manager.isVoxelPartitionModified();
+}
+
+void RS_KernelManager::clearVoxelPartitionModified() {
+    _kernel_spatial_manager.clearVoxelPartitionModified();
+}
+
+void RS_KernelManager::markFloorTriangleModified() {
+    _kernel_spatial_manager.markFloorTriangleModified();
+}
+
+bool RS_KernelManager::isFloorTriangleModified() const {
+    return _kernel_spatial_manager.isFloorTriangleModified();
+}
+
+void RS_KernelManager::clearFloorTriangleModified() {
+    _kernel_spatial_manager.clearFloorTriangleModified();
+}
+
+/*****************************************************************
+ * Handle APIs
+ *****************************************************************/
 void RS_KernelManager::pauseKernel(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("pauseKernel", 0);
+        _command_queue.emplace(RS_NULL_INDEX, "pauseKernel", 0);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
+        RS_KernelManagerCommandExecutionGuard guard(this);
         _pauseKernel();
     }
 }
@@ -617,10 +833,10 @@ void RS_KernelManager::resumeKernel(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("resumeKernel", 0);
+        _command_queue.emplace(RS_NULL_INDEX, "resumeKernel", 0);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
+        RS_KernelManagerCommandExecutionGuard guard(this);
         _resumeKernel();
     }
 }
@@ -629,12 +845,11 @@ void RS_KernelManager::terminateKernel(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("terminateKernel", 0);
+        _command_queue.emplace(RS_NULL_INDEX, "terminateKernel", 0);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
+        RS_KernelManagerCommandExecutionGuard guard(this);
         _terminateKernel();
-        _command_queue_cv.notify_one();
     }
 }
 
@@ -642,10 +857,10 @@ void RS_KernelManager::beginModificationTransaction(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("beginModificationTransaction", 0);
+        _command_queue.emplace(RS_NULL_INDEX, "beginModificationTransaction", 0);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
+        RS_KernelManagerCommandExecutionGuard guard(this);
         _beginModificationTransaction();
     }
 }
@@ -654,328 +869,371 @@ void RS_KernelManager::endModificationTransaction(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("endModificationTransaction", 0);
+        _command_queue.emplace(RS_NULL_INDEX, "endModificationTransaction", 0);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
+        RS_KernelManagerCommandExecutionGuard guard(this);
         _endModificationTransaction();
     }
 }
 
-void RS_KernelManager::setSimulationConfig(const RS_SimulationConfig& config, bool sync) {
+void RS_KernelManager::setSimulationRSC(
+    const RSC_Simulation& simulation,
+    RIndex message_id,
+    bool sync
+) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("setSimulationConfig", config);
+        _command_queue.emplace(message_id, "setSimulationRSC", simulation);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _setSimulationConfig(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _setSimulationRSC(simulation, message_id);
     }
 }
 
-void RS_KernelManager::setFloor(const RS_FloorConfig& config, bool sync) {
+const RSC_Simulation& RS_KernelManager::getSimulationRSC() const { return _simulation_rsc; }
+
+void RS_KernelManager::addResource(
+    const RSC_ResourceVariant& resource,
+    RIndex message_id,
+    bool sync
+) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("setFloor", config);
+        _command_queue.emplace(message_id, "addResource", resource);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _setFloor(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _addResource(resource, message_id);
     }
 }
 
-void RS_KernelManager::setWorld(const RS_WorldConfig& config, bool sync) {
+void RS_KernelManager::updateResource(
+    const std::string& name,
+    const RSC_ResourceVariant& resource,
+    RIndex message_id,
+    bool sync
+) {
+    if (kernel.isTerminated()) return;
+    auto payload = std::make_pair(name, resource);
+    if (!sync) {
+        lock_guard lock(_command_queue_mutex);
+        _command_queue.emplace(message_id, "updateResource", payload);
+        _command_queue_cv.notify_one();
+    } else {
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _updateResource(name, resource, message_id);
+    }
+}
+
+void RS_KernelManager::removeResource(const std::string& name, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("setWorld", config);
+        _command_queue.emplace(message_id, "removeResource", name);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _setWorld(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _removeResource(name, message_id);
     }
 }
 
-void RS_KernelManager::addMaterial(const RS_MaterialConfig& config, bool sync) {
+RSC_ResourceVariant RS_KernelManager::findResource(const std::string& name) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    auto cfg = _kernel_texture_manager.findTextureRSC(name);
+    return cfg.visit([](auto& c) { return RSC_ResourceVariant(c); });
+}
+
+void RS_KernelManager::addEssence(const RSC_EssenceVariant& essence, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("addMaterial", config);
+        _command_queue.emplace(message_id, "addEssence", essence);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _addMaterial(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _addEssence(essence, message_id);
     }
 }
 
-void RS_KernelManager::addRecord(const RS_RecordConfig& config, bool sync) {
+void RS_KernelManager::updateEssence(
+    const std::string& name,
+    const RSC_EssenceVariant& essence,
+    RIndex message_id,
+    bool sync
+) {
+    if (kernel.isTerminated()) return;
+    auto payload = std::make_pair(name, essence);
+    if (!sync) {
+        lock_guard lock(_command_queue_mutex);
+        _command_queue.emplace(message_id, "updateEssence", payload);
+        _command_queue_cv.notify_one();
+    } else {
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _updateEssence(name, essence, message_id);
+    }
+}
+
+void RS_KernelManager::removeEssence(const std::string& name, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("addRecord", config);
+        _command_queue.emplace(message_id, "removeEssence", name);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _addRecord(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _removeEssence(name, message_id);
     }
 }
 
-void RS_KernelManager::addSignal(const RS_SignalConfig& config, bool sync) {
+RSC_EssenceVariant RS_KernelManager::findEssence(const std::string& name) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    // Material essence is the only kind of essence currently materialised on
+    // the kernel; the material manager owns the name->data lookup.
+    if (_kernel_material_manager.findMaterial(name) != RS_NULL_INDEX) {
+        const auto* mat = _kernel_material_manager.getMaterialByName(name);
+        if (mat != nullptr) return RSC_EssenceVariant(*mat);
+    }
+    RS_THROW(RS_NotFoundException("Essence '{}' not found", name));
+}
+
+void RS_KernelManager::addEntity(const RSC_EntityVariant& entity, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("addSignal", config);
+        _command_queue.emplace(message_id, "addEntity", entity);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _addSignal(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _addEntity(entity, message_id);
     }
 }
 
-void RS_KernelManager::addStructure(const RS_StructureConfig& config, bool sync) {
+void RS_KernelManager::removeEntity(const std::string& name, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("addStructure", config);
+        _command_queue.emplace(message_id, "removeEntity", name);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _addStructure(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _removeEntity(name, message_id);
     }
 }
 
-void RS_KernelManager::addCamera(const RS_CameraConfig& config, bool sync) {
+void RS_KernelManager::freezeEntity(const std::string& name, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("addCamera", config);
+        _command_queue.emplace(message_id, "freezeEntity", name);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _addCamera(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _freezeEntity(name, message_id);
     }
 }
 
-void RS_KernelManager::updateMaterial(const RS_MaterialConfig& config, bool sync) {
+void RS_KernelManager::unfreezeEntity(const std::string& name, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("updateMaterial", config);
+        _command_queue.emplace(message_id, "unfreezeEntity", name);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _updateMaterial(config);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _unfreezeEntity(name, message_id);
     }
 }
 
-void RS_KernelManager::deleteFloor(bool sync) {
+bool RS_KernelManager::isEntityFrozen(const std::string& name) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    if (auto it = _kernel_structure_voxel_managers.find(name);
+        it != _kernel_structure_voxel_managers.end())
+        return it->second->isFrozen();
+    if (auto it = _kernel_camera_perspective_managers.find(name);
+        it != _kernel_camera_perspective_managers.end())
+        return it->second->isFrozen();
+    if (_kernel_floor_manager) {
+        bool matched = false;
+        _kernel_floor_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) return _kernel_floor_manager->isFrozen();
+    }
+    if (_kernel_cosmic_background_manager) {
+        bool matched = false;
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) return _kernel_cosmic_background_manager->isFrozen();
+    }
+    RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
+}
+
+RSC_EntityVariant RS_KernelManager::findEntity(const std::string& name) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    if (auto it = _kernel_structure_voxel_managers.find(name);
+        it != _kernel_structure_voxel_managers.end())
+        return RSC_EntityVariant(it->second->getRSC());
+    if (auto it = _kernel_camera_perspective_managers.find(name);
+        it != _kernel_camera_perspective_managers.end()) {
+        return it->second->getRSC().visit([](auto& c) { return RSC_EntityVariant(c); });
+    }
+    if (_kernel_floor_manager) {
+        RSC_EntityVariant result;
+        bool found = false;
+        _kernel_floor_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) {
+                result = RSC_EntityVariant(c);
+                found = true;
+            }
+        });
+        if (found) return result;
+    }
+    if (_kernel_cosmic_background_manager) {
+        RSC_EntityVariant result;
+        bool found = false;
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) {
+                result = RSC_EntityVariant(c);
+                found = true;
+            }
+        });
+        if (found) return result;
+    }
+    RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
+}
+
+void RS_KernelManager::addRecord(const RSC_RecordVariant& record, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("deleteFloor", 0);
+        _command_queue.emplace(message_id, "addRecord", record);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _deleteFloor();
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _addRecord(record, message_id);
     }
 }
 
-void RS_KernelManager::deleteMaterial(RIndex id, bool sync) {
+void RS_KernelManager::removeRecord(const std::string& name, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("deleteMaterial", id);
+        _command_queue.emplace(message_id, "removeRecord", name);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _deleteMaterial(id);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _removeRecord(name, message_id);
     }
 }
 
-void RS_KernelManager::deleteRecord(RIndex id, bool sync) {
+RSC_RecordVariant RS_KernelManager::findRecord(const std::string& name) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    for (auto& [_, rm] : _kernel_intersect_region_managers) {
+        if (rm->getRecordName() == name) {
+            return rm->getRSC().visit([](auto& c) { return RSC_RecordVariant(c); });
+        }
+    }
+    RS_THROW(RS_NotFoundException("Record '{}' not found", name));
+}
+
+void RS_KernelManager::addSignal(const RSC_SignalVariant& signal, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("deleteRecord", id);
+        _command_queue.emplace(message_id, "addSignal", signal);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _deleteRecord(id);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _addSignal(signal, message_id);
     }
 }
 
-void RS_KernelManager::deleteSignal(RIndex id, bool sync) {
+void RS_KernelManager::removeSignal(const std::string& name, RIndex message_id, bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("deleteSignal", id);
+        _command_queue.emplace(message_id, "removeSignal", name);
         _command_queue_cv.notify_one();
     } else {
-        RS_KernelManagerGuard guard(this);
-        _deleteSignal(id);
+        RS_KernelManagerCommandExecutionGuard guard(this);
+        _removeSignal(name, message_id);
     }
 }
 
-void RS_KernelManager::deleteStructure(RIndex id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("deleteStructure", id);
-        _command_queue_cv.notify_one();
-    } else {
-        RS_KernelManagerGuard guard(this);
-        _deleteStructure(id);
+RSC_SignalVariant RS_KernelManager::findSignal(const std::string& name) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    for (auto& [_, fm] : _kernel_force_managers) {
+        if (fm->getSignalName() == name) {
+            return RSC_SignalVariant(fm->getRSC().as<RSC_Force>());
+        }
     }
-}
-
-void RS_KernelManager::deleteCamera(RIndex id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace("deleteCamera", id);
-        _command_queue_cv.notify_one();
-    } else {
-        RS_KernelManagerGuard guard(this);
-        _deleteCamera(id);
+    for (auto& [_, tm] : _kernel_torque_managers) {
+        if (tm->getSignalName() == name) {
+            return RSC_SignalVariant(tm->getRSC().as<RSC_Torque>());
+        }
     }
+    RS_THROW(RS_NotFoundException("Signal '{}' not found", name));
 }
 
-RIndex RS_KernelManager::findMaterial(const string& name) {
-    if (kernel.isTerminated()) return RS_NULL_INDEX;
-    RS_KernelManagerGuard guard(this);
-    auto it = _material_name_to_gid.find(name);
-    return it == _material_name_to_gid.end() ? RS_NULL_INDEX : it->second;
-}
-
-RIndex RS_KernelManager::findRecord(const string& name) {
-    if (kernel.isTerminated()) return RS_NULL_INDEX;
-    RS_KernelManagerGuard guard(this);
-    auto it = _record_name_to_gid.find(name);
-    return it == _record_name_to_gid.end() ? RS_NULL_INDEX : it->second;
-}
-
-RIndex RS_KernelManager::findSignal(const string& name) {
-    if (kernel.isTerminated()) return RS_NULL_INDEX;
-    RS_KernelManagerGuard guard(this);
-    auto it = _signal_name_to_gid.find(name);
-    return it == _signal_name_to_gid.end() ? RS_NULL_INDEX : it->second;
-}
-
-RIndex RS_KernelManager::findStructure(const string& name) {
-    if (kernel.isTerminated()) return RS_NULL_INDEX;
-    RS_KernelManagerGuard guard(this);
-    auto it = _structure_name_to_gid.find(name);
-    return it == _structure_name_to_gid.end() ? RS_NULL_INDEX : it->second;
-}
-
-RIndex RS_KernelManager::findCamera(const string& name) {
-    if (kernel.isTerminated()) return RS_NULL_INDEX;
-    RS_KernelManagerGuard guard(this);
-    auto it = _camera_name_to_gid.find(name);
-    return it == _camera_name_to_gid.end() ? RS_NULL_INDEX : it->second;
-}
-
-RS_Config RS_KernelManager::getConfig() {
+RSC_World RS_KernelManager::getWorld() {
     if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    RS_Config config;
+    RS_KernelManagerCommandExecutionGuard guard(this);
 
-    // Call each data manager's getConfig method instead of using stored configs
-    config.simulation_config = getSimulationConfig();
-    config.floor_config = getFloorConfig();
-    config.material_configs = getMaterialConfigs();
-    config.record_configs = getRecordConfigs();
-    config.signal_configs = getSignalConfigs();
-    config.structure_configs = getStructureConfigs();
-    config.camera_configs = getCameraConfigs();
+    RSC_World world;
+    world.simulation = _simulation_rsc;
 
-    return config;
-}
-
-RS_SimulationConfig RS_KernelManager::getSimulationConfig() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    return _simulation_config;
-}
-
-RS_WorldConfig RS_KernelManager::getWorldConfig() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    return _kernel_world_manager ? _kernel_world_manager->getConfig() : RS_WorldConfig{};
-}
-
-RS_FloorConfig RS_KernelManager::getFloorConfig() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    return _kernel_floor_manager->getConfig();
-}
-
-vector<RS_MaterialConfig> RS_KernelManager::getMaterialConfigs() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    vector<RS_MaterialConfig> material_configs;
-
-    // Iterate through each material manager and collect their configurations
-    for (const auto& pair : _kernel_material_managers) {
-        material_configs.push_back(pair.second.getConfig());
+    // Entities
+    for (auto& [_, sm] : _kernel_structure_voxel_managers) {
+        world.entities.emplace_back(sm->getRSC());
     }
-    return material_configs;
+    for (auto& [_, cm] : _kernel_camera_perspective_managers) {
+        cm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
+    }
+    if (_kernel_floor_manager) {
+        _kernel_floor_manager->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
+    }
+    if (_kernel_cosmic_background_manager) {
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) {
+            world.entities.emplace_back(c);
+        });
+    }
+
+    // Essences (materials + unary properties + pair properties).
+    for (auto& m : _kernel_material_manager.getMaterialRSCs()) {
+        world.essences.emplace_back(m);
+    }
+    for (auto& p : _kernel_material_manager.getMaterialUnaryPropertyRSCs()) {
+        p.visit([&](auto& c) { world.essences.emplace_back(c); });
+    }
+    for (auto& p : _kernel_material_manager.getMaterialPairPropertyRSCs()) {
+        p.visit([&](auto& c) { world.essences.emplace_back(c); });
+    }
+
+    // Resources (textures).
+    for (auto& r : _kernel_texture_manager.getTextureRSCs()) {
+        r.visit([&](auto& c) { world.resources.emplace_back(c); });
+    }
+
+    // Signals (free-standing force / torque). Controllers and recorders live on
+    // RS_Simulation and are merged in by the handle's getWorld().
+    for (auto& [_, fm] : _kernel_force_managers) {
+        world.signals.emplace_back(fm->getRSC().as<RSC_Force>());
+    }
+    for (auto& [_, tm] : _kernel_torque_managers) {
+        world.signals.emplace_back(tm->getRSC().as<RSC_Torque>());
+    }
+
+    return world;
 }
 
-vector<RS_RecordConfig> RS_KernelManager::getRecordConfigs() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    vector<RS_RecordConfig> record_configs;
-
-    // Iterate through each record manager and collect their configurations
-    for (const auto& pair : _kernel_structure_record_managers) {
-        record_configs.push_back(pair.second.getConfig());
-    }
-    return record_configs;
-}
-
-vector<RS_SignalConfig> RS_KernelManager::getSignalConfigs() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    vector<RS_SignalConfig> signal_configs;
-
-    // Iterate through each force manager and collect their configurations
-    for (const auto& pair : _kernel_force_managers) {
-        signal_configs.push_back(pair.second.getConfig());
-    }
-    // Iterate through each torque manager and collect their configurations
-    for (const auto& pair : _kernel_torque_managers) {
-        signal_configs.push_back(pair.second.getConfig());
-    }
-    return signal_configs;
-}
-
-std::vector<RS_StructureConfig> RS_KernelManager::getStructureConfigs() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    vector<RS_StructureConfig> structure_configs;
-
-    // Iterate through each structure manager and collect their configurations
-    for (const auto& pair : _kernel_structure_managers) {
-        structure_configs.push_back(pair.second.getConfig());
-    }
-    return structure_configs;
-}
-
-vector<RS_CameraConfig> RS_KernelManager::getCameraConfigs() {
-    if (kernel.isTerminated()) return {};
-    RS_KernelManagerGuard guard(this);
-    vector<RS_CameraConfig> camera_configs;
-
-    // Iterate through each camera manager and collect their configurations
-    for (const auto& pair : _kernel_camera_managers) {
-        camera_configs.push_back(pair.second.getConfig());  // Assuming getConfig() exists
-    }
-    return camera_configs;
-}
-
+/****************************************************************
+ * Data manager APIs
+ ****************************************************************/
 RS_MemoryProvider* RS_KernelManager::getHostProvider() const { return _host_provider; }
 
 RS_MemoryProvider* RS_KernelManager::getDeviceProvider() const { return _device_provider; }
@@ -988,80 +1246,142 @@ RSize RS_KernelManager::getKernelRecordBufferFrameNum() const {
     return _kernel_record_buffer_frame_num;
 }
 
-// Counters
-RIndex RS_KernelManager::getMaterialCounter() const { return _material_counter; }
-
+RIndex RS_KernelManager::getEntityCounter() const { return _entity_counter; }
+RIndex RS_KernelManager::getEssenceCounter() const { return _essence_counter; }
+RIndex RS_KernelManager::getResourceCounter() const { return _resource_counter; }
 RIndex RS_KernelManager::getRecordCounter() const { return _record_counter; }
-
 RIndex RS_KernelManager::getSignalCounter() const { return _signal_counter; }
 
-RIndex RS_KernelManager::getStructureCounter() const { return _structure_counter; }
-
-RIndex RS_KernelManager::getCameraCounter() const { return _camera_counter; }
-
-// Name maps
-const unordered_map<string, RIndex>& RS_KernelManager::getMaterialNameToGid() const {
-    return _material_name_to_gid;
+namespace {
+RIndex registerByName(
+    std::unordered_map<std::string, RIndex>& map,
+    RIndex& counter,
+    const std::string& name,
+    const char* kind
+) {
+    auto [it, inserted] = map.emplace(name, counter);
+    if (!inserted) {
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Duplicate {} name '{}' (already registered with gid {})", kind, name, it->second
+        ));
+    }
+    return counter++;
 }
 
-const unordered_map<string, RIndex>& RS_KernelManager::getRecordNameToGid() const {
-    return _record_name_to_gid;
+void deregisterByName(
+    std::unordered_map<std::string, RIndex>& map,
+    const std::string& name,
+    const char* kind
+) {
+    auto it = map.find(name);
+    if (it == map.end()) {
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Cannot deregister {} '{}': not registered", kind, name
+        ));
+    }
+    map.erase(it);
+}
+}  // namespace
+
+RIndex RS_KernelManager::registerEntity(const string& name) {
+    return registerByName(_entity_gids, _entity_counter, name, "entity");
+}
+RIndex RS_KernelManager::registerEssence(const string& name) {
+    return registerByName(_essence_gids, _essence_counter, name, "essence");
+}
+RIndex RS_KernelManager::registerResource(const string& name) {
+    return registerByName(_resource_gids, _resource_counter, name, "resource");
+}
+RIndex RS_KernelManager::registerRecord(const string& name) {
+    return registerByName(_record_gids, _record_counter, name, "record");
+}
+RIndex RS_KernelManager::registerSignal(const string& name) {
+    return registerByName(_signal_gids, _signal_counter, name, "signal");
 }
 
-const unordered_map<string, RIndex>& RS_KernelManager::getSignalNameToGid() const {
-    return _signal_name_to_gid;
+void RS_KernelManager::deregisterEntity(const string& name) {
+    deregisterByName(_entity_gids, name, "entity");
+}
+void RS_KernelManager::deregisterEssence(const string& name) {
+    deregisterByName(_essence_gids, name, "essence");
+}
+void RS_KernelManager::deregisterResource(const string& name) {
+    deregisterByName(_resource_gids, name, "resource");
+}
+void RS_KernelManager::deregisterRecord(const string& name) {
+    deregisterByName(_record_gids, name, "record");
+}
+void RS_KernelManager::deregisterSignal(const string& name) {
+    deregisterByName(_signal_gids, name, "signal");
 }
 
-const unordered_map<string, RIndex>& RS_KernelManager::getStructureNameToGid() const {
-    return _structure_name_to_gid;
-}
-
-const unordered_map<string, RIndex>& RS_KernelManager::getCameraNameToGid() const {
-    return _camera_name_to_gid;
-}
-
-// Kernel data managers
+// Kernel data managers — singletons
 RS_KernelSpatialManager& RS_KernelManager::getKernelSpatialManager() {
     return _kernel_spatial_manager;
+}
+
+RS_KernelTextureManager& RS_KernelManager::getKernelTextureManager() {
+    return _kernel_texture_manager;
+}
+
+RS_KernelMaterialManager& RS_KernelManager::getKernelMaterialManager() {
+    return _kernel_material_manager;
+}
+
+const std::unique_ptr<RS_KernelCosmicBackgroundManager>&
+RS_KernelManager::getKernelCosmicBackgroundManager() const {
+    return _kernel_cosmic_background_manager;
 }
 
 const unique_ptr<RS_KernelFloorManager>& RS_KernelManager::getKernelFloorManager() const {
     return _kernel_floor_manager;
 }
 
-const unordered_map<RIndex, RS_KernelMaterialManager>&
-RS_KernelManager::getKernelMaterialManagers() const {
-    return _kernel_material_managers;
+// Kernel data managers — name-keyed
+unordered_map<string, unique_ptr<RS_KernelStructureVoxelManager>>&
+RS_KernelManager::getKernelStructureVoxelManagers() {
+    return _kernel_structure_voxel_managers;
 }
 
-const unordered_map<RIndex, RS_KernelStructureRecordManager>&
-RS_KernelManager::getKernelStructureRecordManagers() const {
-    return _kernel_structure_record_managers;
+unordered_map<string, unique_ptr<RS_KernelCameraPerspectiveManager>>&
+RS_KernelManager::getKernelCameraPerspectiveManagers() {
+    return _kernel_camera_perspective_managers;
 }
 
-const unordered_map<RIndex, RS_KernelForceManager>&
-RS_KernelManager::getKernelForceManagers() const {
+unordered_map<string, unique_ptr<RS_KernelForceManager>>&
+RS_KernelManager::getKernelForceManagers() {
     return _kernel_force_managers;
 }
 
-const unordered_map<RIndex, RS_KernelTorqueManager>&
-RS_KernelManager::getKernelTorqueManagers() const {
+unordered_map<string, unique_ptr<RS_KernelTorqueManager>>&
+RS_KernelManager::getKernelTorqueManagers() {
     return _kernel_torque_managers;
 }
 
-const unordered_map<RIndex, RS_KernelStructureManager>&
-RS_KernelManager::getKernelStructureManagers() const {
-    return _kernel_structure_managers;
+unordered_map<string, unique_ptr<RS_KernelIntersectRegionManager>>&
+RS_KernelManager::getKernelIntersectRegionManagers() {
+    return _kernel_intersect_region_managers;
 }
 
-const unordered_map<RIndex, RS_KernelCameraManager>&
-RS_KernelManager::getKernelCameraManagers() const {
-    return _kernel_camera_managers;
+bool RS_KernelManager::isInKernelDataCriticalZone() const {
+    return _kernel_data_critical_zone_depth > 0;
+}
+
+void RS_KernelManager::enterKernelDataCriticalZone() {
+    _kernel_data_mutex.lock();
+    _kernel_data_critical_zone_depth += 1;
+    // Sync to make sure all operations in memory provider stream are finished.
+    if (_kernel_data_critical_zone_depth == 1) _device_provider->sync();
+}
+
+void RS_KernelManager::exitKernelDataCriticalZone() {
+    _kernel_data_critical_zone_depth -= 1;
+    _kernel_data_mutex.unlock();
 }
 
 void RS_KernelManager::_kernelSynchronizationThreadFunc() {
     while (!is_kernel_inited.load(std::memory_order_acquire)) std::this_thread::yield();
-    RS_LOG(_logger, debug, "kernel manager sync thread running");
+    RS_LOG(_logger, debug, "Kernel manager sync thread running.");
     while (true) {
         unique_lock lock(_command_queue_mutex);
         _command_queue_cv.wait(lock, [this]() {
@@ -1070,16 +1390,16 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
 
         if (kernel.isTerminated()) {
             // Termination case 1: synchronized termination
-            RS_LOG(_logger, debug, "kernel manager sync thread entering termination");
+            RS_LOG(_logger, debug, "Kernel manager sync thread entering termination.");
             while (!_command_queue.empty()) {
                 _command_queue.pop();
             }
-            RS_LOG(_logger, debug, "kernel manager sync thread terminated");
+            RS_LOG(_logger, debug, "Kernel manager sync thread terminated.");
             break;
         }
 
-        RS_LOG(_logger, debug, "kernel manager sync thread start fetch command");
-        auto [function_name, arg] = _command_queue.front();
+        RS_LOG(_logger, debug, "Kernel manager sync thread start fetch command.");
+        auto [message_id, function_name, arg] = _command_queue.front();
         _command_queue.pop();
 
         lock.unlock();
@@ -1087,674 +1407,725 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
         RS_LOG(
             _logger,
             debug,
-            "kernel manager sync thread fetched command: {}, "
-            "entering execution barrier",
+            "Kernel manager sync thread fetched command: {}, entering execution barrier.",
             function_name
         );
 
-        // Critical region
-        while (true) {
-            // Tell the world we *intend* to execute
-            _command_exec_lock.store(1, std::memory_order_release);
+        // Hold command execution (Guard A) for the whole command: build and commit. Finders and the
+        // callback take the same mutex, so none of them runs while a command executes.
+        std::lock_guard execution_lock(_command_execution_mutex);
 
-            // We wish the synchronization thread to only execute when it's free
-            // And when no higher-priority pause command is issued. If we detect
-            // a pause command, release the execution lock, backup and restart
-            if (_command_exec_pause_count.load(std::memory_order_acquire) > 0) {
-                _command_exec_lock.store(0, std::memory_order_release);
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            } else {
-                // We are ready to execute
-                break;
-            }
-        }
+        RS_LOG(_logger, debug, "Kernel manager sync thread start execution.");
 
-        RS_LOG(_logger, debug, "kernel manager sync thread start execution");
+        // Reset before dispatch; a sub-manager that enters a kernel-data critical zone and throws
+        // before exiting leaves this nonzero, marking an unrecoverable failure.
+        _kernel_data_critical_zone_depth = 0;
 
         auto it = _methods.find(function_name);
-        if (it != _methods.end()) {
-            try {
-                it->second(arg);
-            } catch (const RS_InvalidConfigurationException& e) {
-                RS_LOG(
-                    _logger,
-                    error,
-                    "While executing command: {}, "
-                    "invalid configuration exception occurred: {}",
-                    function_name,
-                    e.what()
-                );
-            }
+        if (it == _methods.end()) {
+            RS_LOG(_logger, warn, "Unknown command in queue: {}.", function_name);
         } else {
-            RS_LOG(_logger, warn, "Unknown command in queue: {}", function_name);
+            try {
+                it->second(arg, message_id);
+                if (!_is_transaction_open) {
+                    for (auto& message : _pending_messages)
+                        if (message.id != RS_NULL_INDEX && _message_sink) _message_sink(message);
+                    _pending_messages.clear();
+                }
+            } catch (const std::exception& e) {
+                RS_LOG(_logger, error, "While executing command {}: {}.", function_name, e.what());
+                if (message_id != RS_NULL_INDEX && _message_sink) {
+                    _message_sink(
+                        {message_id,
+                         RSE_WORLD_MESSAGE_ERROR,
+                         RS_WorldMessageData{RS_WorldMessageText{e.what()}}}
+                    );
+                }
+                for (auto& message : _pending_messages)
+                    if (message.id != RS_NULL_INDEX && _message_sink)
+                        _message_sink(
+                            {message.id,
+                             RSE_WORLD_MESSAGE_ERROR,
+                             RS_WorldMessageData{
+                                 RS_WorldMessageText{"Aborted because of previous unsuccessful task"}
+                             }}
+                        );
+                _pending_messages.clear();
+                // A failure before the kernel-data critical zone is a recoverable characterization error. A
+                // failure inside it leaves the context half-mutated and tainted; unwind the zone,
+                // mark the kernel terminated, and return so freeKernel does the coarse teardown.
+                if (isInKernelDataCriticalZone()) {
+                    RS_LOG(
+                        _logger,
+                        error,
+                        "Command {} failed inside kernel-data critical zone; terminating.",
+                        function_name
+                    );
+                    // Mark terminated before releasing the zone so the executor cannot grab the
+                    // data mutex and touch the tainted context before it sees the termination.
+                    kernel.terminate();
+                    while (isInKernelDataCriticalZone()) exitKernelDataCriticalZone();
+                    return;
+                }
+            }
         }
 
-        RS_LOG(_logger, debug, "kernel manager sync thread end execution");
-
-        // Finished executing
-        _command_exec_lock.store(0, std::memory_order_release);
+        RS_LOG(_logger, debug, "Kernel manager sync thread end execution.");
 
         if (function_name == "terminateKernel") {
             // Termination case 2: unsynchronized termination from command queue
-            RS_LOG(_logger, debug, "kernel manager sync thread terminated");
+            RS_LOG(_logger, debug, "Kernel manager sync thread terminated.");
             break;
         }
     }
 }
 
 void RS_KernelManager::_pauseKernel() {
-    lock_guard lock(kernel.getSyncMutex());
-    kernel.markModified();
+    RS_KernelManagerCriticalDataAccessGuard guard(this);
+    markKernelModified();
     kernel.pause();
-    RS_LOG(_logger, debug, "Pause kernel");
+    RS_LOG(_logger, debug, "Pause kernel.");
 }
 
 void RS_KernelManager::_resumeKernel() {
-    lock_guard lock(kernel.getSyncMutex());
-    kernel.markModified();
+    RS_KernelManagerCriticalDataAccessGuard guard(this);
+    markKernelModified();
     kernel.resume();
-    RS_LOG(_logger, debug, "Resume kernel");
+    RS_LOG(_logger, debug, "Resume kernel.");
 }
 
 void RS_KernelManager::_terminateKernel() {
     if (is_kernel_inited.load(std::memory_order_acquire)) {
-        lock_guard lock(kernel.getSyncMutex());
-        kernel.markModified();
+        RS_KernelManagerCriticalDataAccessGuard guard(this);
+        markKernelModified();
         kernel.terminate();
     } else {
         // The kernel initialization is not completed, just mark it as terminated
         kernel.terminate();
     }
-    RS_LOG(_logger, debug, "Terminate kernel");
+    RS_LOG(_logger, debug, "Terminate kernel.");
 }
 
 void RS_KernelManager::_beginModificationTransaction() {
-    kernel.lockSyncMutex();
-    RS_LOG(_logger, debug, "Begin modification transaction");
+    // Hold command execution across the whole transaction so the uncommitted managers built inside
+    // it stay invisible to finders and the callback until the flush.
+    _command_execution_mutex.lock();
+    _is_transaction_open = true;
+    RS_LOG(_logger, debug, "Begin modification transaction.");
 }
 
 void RS_KernelManager::_endModificationTransaction() {
-    kernel.unlockSyncMutex();
-    RS_LOG(_logger, debug, "End modification transaction");
+    try {
+        _flushPendingCommits();
+    } catch (...) {
+        _is_transaction_open = false;
+        _command_execution_mutex.unlock();
+        throw;
+    }
+    _is_transaction_open = false;
+    _command_execution_mutex.unlock();
+    RS_LOG(_logger, debug, "End modification transaction.");
 }
 
-void RS_KernelManager::_setSimulationConfig(const RS_SimulationConfig& config) {
-    lock_guard lock(kernel.getSyncMutex());
-
+void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, RIndex message_id) {
+    RS_KernelManagerCriticalDataAccessGuard guard(this);
     RS_Timer timer;
 
     // Sync to make sure all operations in memory provider stream are finished
     _device_provider->sync();
 
-    // Kernel settings is modified, needs to update kernel
-    kernel.markModified();
+    // Kernel settings are modified, needs to update kernel
+    markKernelModified();
 
-    kernel.seed = config.seed;
+    _simulation_rsc = simulation;
 
-    // Integration
-    kernel.integration_time_step = config.integration_time_step;
-    kernel.integration_dt_frac = config.integration_dt_frac;
+    // Seed
+    kernel.seed = simulation.seed;
 
-    if (config.integration_time_step > 0) {
-        kernel.host_data->runtime_states.time_step = config.integration_time_step;
-        kernel.host_data->runtime_states.dt =
-            config.integration_dt_frac * config.integration_time_step;
-        kernel.runtime_states.write(&kernel.host_data->runtime_states);
-    }
+    // Environment
+    kernel.world_grav_acc = simulation.environment.gravity_acceleration;
 
     // Soft body
-    kernel.softbody_internal_damping_z = config.softbody_internal_damping_z;
-    kernel.softbody_contact_damping_z = config.softbody_contact_damping_z;
-    kernel.softbody_global_damping_z = config.softbody_global_damping_z;
+    kernel.softbody_internal_damping_z = simulation.soft_body.internal_damping_z;
+    kernel.softbody_contact_damping_z = simulation.soft_body.contact_damping_z;
+    kernel.softbody_global_damping_z = simulation.soft_body.global_damping_z;
+    kernel.softbody_integration_frequency_multiplier =
+        simulation.soft_body.integration_frequency_multiplier;
+    kernel.softbody_link_max_compression = simulation.soft_body.link_max_compression;
 
     // Rigid body constraint solver
-    kernel.rigidbody_constraint_iterations = config.rigidbody_constraint_iterations;
+    kernel.rigidbody_constraint_iterations = simulation.rigid_body.constraint_iterations;
     kernel.rigidbody_constraint_position_correction_ratio =
-        config.rigidbody_constraint_position_correction_ratio;
+        simulation.rigid_body.constraint_position_correction_ratio;
     kernel.rigidbody_constraint_warm_start_damping_z =
-        config.rigidbody_constraint_warm_start_damping_z;
-    kernel.rigidbody_constraint_compliance_initial = config.rigidbody_constraint_compliance_initial;
-    kernel.rigidbody_constraint_compliance_min_threshold =
-        config.rigidbody_constraint_compliance_min_threshold;
-    kernel.rigidbody_constraint_compliance_max_threshold =
-        config.rigidbody_constraint_compliance_max_threshold;
-    kernel.rigidbody_constraint_compliance_auto_adjust_watt_threshold =
-        config.rigidbody_constraint_compliance_auto_adjust_watt_threshold;
-    kernel.rigidbody_constraint_compliance_auto_adjust_step =
-        config.rigidbody_constraint_compliance_auto_adjust_step;
+        simulation.rigid_body.constraint_warm_start_damping_z;
+    kernel.rigidbody_constraint_stiffness_initial =
+        simulation.rigid_body.constraint_stiffness_initial;
+    kernel.rigidbody_constraint_stiffness_min_threshold =
+        simulation.rigid_body.constraint_stiffness_min_threshold;
+    kernel.rigidbody_constraint_stiffness_max_threshold =
+        simulation.rigid_body.constraint_stiffness_max_threshold;
+    kernel.rigidbody_constraint_stiffness_auto_adjust_watt_threshold =
+        simulation.rigid_body.constraint_stiffness_auto_adjust_watt_threshold;
+    kernel.rigidbody_constraint_stiffness_auto_adjust_step =
+        simulation.rigid_body.constraint_stiffness_auto_adjust_step;
 
     // Rigid body contact solver
-    kernel.rigidbody_contact_iterations = config.rigidbody_contact_iterations;
+    kernel.rigidbody_contact_iterations = simulation.rigid_body.contact_iterations;
     kernel.rigidbody_contact_position_correction_iterations =
-        config.rigidbody_contact_position_correction_iterations;
+        simulation.rigid_body.contact_position_correction_iterations;
     kernel.rigidbody_contact_position_correction_ratio =
-        config.rigidbody_contact_position_correction_ratio;
-    kernel.rigidbody_contact_warm_start_damping_z = config.rigidbody_contact_warm_start_damping_z;
-    kernel.rigidbody_contact_restitution = config.rigidbody_contact_restitution;
-    kernel.rigidbody_contact_slop = config.rigidbody_contact_slop;
+        simulation.rigid_body.contact_position_correction_ratio;
+    kernel.rigidbody_contact_warm_start_damping_z =
+        simulation.rigid_body.contact_warm_start_damping_z;
+    kernel.rigidbody_contact_slop = simulation.rigid_body.contact_slop;
 
     // Rigid body damping
-    kernel.rigidbody_linear_damping_z = config.rigidbody_linear_damping_z;
-    kernel.rigidbody_angular_damping_z = config.rigidbody_angular_damping_z;
+    kernel.rigidbody_linear_damping_z = simulation.rigid_body.linear_damping_z;
+    kernel.rigidbody_angular_damping_z = simulation.rigid_body.angular_damping_z;
 
     // Vision trace
-    kernel.vision_trace_firefly_cap = config.vision_trace_firefly_cap;
+    kernel.vision_trace_firefly_cap = simulation.vision.trace.firefly_cap;
     kernel.vision_trace_russian_roulette_start_depth =
-        config.vision_trace_russian_roulette_start_depth;
+        simulation.vision.trace.russian_roulette_start_depth;
 
     // Vision ReSTIR DI / GI
-    kernel.vision_is_restir_enabled = config.vision_is_restir_enabled;
+    kernel.vision_is_restir_enabled = simulation.vision.restir.is_enabled;
     kernel.vision_restir_disocclusion_position_threshold =
-        config.vision_restir_disocclusion_position_threshold;
+        simulation.vision.restir.disocclusion_position_threshold;
     kernel.vision_restir_disocclusion_normal_threshold =
-        config.vision_restir_disocclusion_normal_threshold;
-    kernel.vision_restir_max_specular_chain = config.vision_restir_max_specular_chain;
-    kernel.vision_restir_di_m_cap = config.vision_restir_di_m_cap;
-    kernel.vision_restir_di_spatial_neighbors = config.vision_restir_di_spatial_neighbors;
-    kernel.vision_restir_di_spatial_radius = config.vision_restir_di_spatial_radius;
+        simulation.vision.restir.disocclusion_normal_threshold;
+    kernel.vision_restir_max_specular_chain = simulation.vision.restir.max_specular_chain;
+    kernel.vision_restir_di_m_cap = simulation.vision.restir.di_m_cap;
+    kernel.vision_restir_di_spatial_neighbors = simulation.vision.restir.di_spatial_neighbors;
+    kernel.vision_restir_di_spatial_radius = simulation.vision.restir.di_spatial_radius;
     kernel.vision_restir_gi_is_bounce_nee_enabled =
-        config.vision_restir_gi_is_bounce_nee_enabled;
-    kernel.vision_restir_gi_m_cap = config.vision_restir_gi_m_cap;
-    kernel.vision_restir_gi_spatial_neighbors = config.vision_restir_gi_spatial_neighbors;
-    kernel.vision_restir_gi_spatial_radius = config.vision_restir_gi_spatial_radius;
-    kernel.vision_restir_gi_validation_period = config.vision_restir_gi_validation_period;
+        simulation.vision.restir.is_gi_bounce_nee_enabled;
+    kernel.vision_restir_gi_m_cap = simulation.vision.restir.gi_m_cap;
+    kernel.vision_restir_gi_spatial_neighbors = simulation.vision.restir.gi_spatial_neighbors;
+    kernel.vision_restir_gi_spatial_radius = simulation.vision.restir.gi_spatial_radius;
+    kernel.vision_restir_gi_validation_period = simulation.vision.restir.gi_validation_period;
 
     // Vision denoise
-    kernel.vision_denoise_type = config.vision_denoise_type;
-    kernel.vision_denoise_atrous_iterations = config.vision_denoise_atrous_iterations;
-    kernel.vision_denoise_atrous_min_passes = config.vision_denoise_atrous_min_passes;
-    kernel.vision_denoise_sigma_color = config.vision_denoise_sigma_color;
-    kernel.vision_denoise_sigma_normal = config.vision_denoise_sigma_normal;
-    kernel.vision_denoise_sigma_depth = config.vision_denoise_sigma_depth;
-    kernel.vision_denoise_temporal_alpha = config.vision_denoise_temporal_alpha;
-    kernel.vision_denoise_temporal_alpha_moments =
-        config.vision_denoise_temporal_alpha_moments;
-    kernel.vision_denoise_temporal_min_history =
-        config.vision_denoise_temporal_min_history;
+    kernel.vision_denoise_atrous_iterations = 0;
+    kernel.vision_denoise_atrous_min_passes = 0;
+    kernel.vision_denoise_sigma_color = 0;
+    kernel.vision_denoise_sigma_normal = 0;
+    kernel.vision_denoise_sigma_depth = 0;
+    kernel.vision_denoise_temporal_alpha = 0;
+    kernel.vision_denoise_temporal_alpha_moments = 0;
+    kernel.vision_denoise_temporal_min_history = 0;
+    simulation.vision.denoise.visit([&](auto& d) {
+        using T = std::decay_t<decltype(d)>;
+        if constexpr (std::is_same_v<T, RSC_SimulationVisionDenoiseNone>) {
+            kernel.vision_denoise_type = RSE_VISION_DENOISE_NONE;
+        } else if constexpr (std::is_same_v<T, RSC_SimulationVisionDenoiseAtrous>) {
+            kernel.vision_denoise_type = RSE_VISION_DENOISE_ATROUS;
+            kernel.vision_denoise_atrous_iterations = d.atrous_iterations;
+            kernel.vision_denoise_atrous_min_passes = d.atrous_min_passes;
+            kernel.vision_denoise_sigma_color = d.sigma_color;
+            kernel.vision_denoise_sigma_normal = d.sigma_normal;
+            kernel.vision_denoise_sigma_depth = d.sigma_depth;
+        } else if constexpr (std::is_same_v<T, RSC_SimulationVisionDenoiseSVGF>) {
+            kernel.vision_denoise_type = RSE_VISION_DENOISE_SVGF;
+            kernel.vision_denoise_atrous_iterations = d.atrous_iterations;
+            kernel.vision_denoise_atrous_min_passes = d.atrous_min_passes;
+            kernel.vision_denoise_sigma_color = d.sigma_color;
+            kernel.vision_denoise_sigma_normal = d.sigma_normal;
+            kernel.vision_denoise_sigma_depth = d.sigma_depth;
+            kernel.vision_denoise_temporal_alpha = d.temporal_alpha;
+            kernel.vision_denoise_temporal_alpha_moments = d.temporal_alpha_moments;
+            kernel.vision_denoise_temporal_min_history = d.temporal_min_history;
+        }
+    });
 
-    // Control
-    kernel.control_frequency = config.control_frequency;
-    kernel.record_frequency = config.record_frequency;
+    // Control / record frequencies
+    kernel.control_frequency = simulation.control.frequency;
+    kernel.record_frequency = simulation.record.frequency;
 
     // Stop condition
-    kernel.host_data->stop_condition = config.stop_condition;
+    kernel.host_data->stop_condition = simulation.stop_condition;
 
-    _simulation_config = config;
-
-    RS_LOG(_logger, debug, "setSimulationConfig takes {}", timer.elapsedTimeString());
+    RS_LOG(_logger, debug, "setSimulationRSC takes {}.", timer.elapsedTimeString());
+    _queueInfo(message_id, RS_WorldMessageText{"setSimulationRSC succeeded"});
 }
 
-void RS_KernelManager::_setWorld(const RS_WorldConfig& config) {
-    lock_guard lock(kernel.getSyncMutex());
-
-    RS_Timer timer;
-
-    // Sync to make sure all operations in memory provider stream are finished
-    _device_provider->sync();
-
-    // Kernel settings is modified, needs to update kernel
-    kernel.markModified();
-
-    if (kernel.world_grav_acc != config.grav_acc) {
-        kernel.world_grav_acc = config.grav_acc;
-
-        for (auto& material_manager : _kernel_material_managers) {
-            _updateMaterial(material_manager.second.getConfig());
+/*****************************************************************
+ * Resource
+ *****************************************************************/
+void RS_KernelManager::_addResource(const RSC_ResourceVariant& resource, RIndex message_id) {
+    std::string name;
+    resource.visit([&](auto& r) {
+        using T = std::decay_t<decltype(r)>;
+        name = r.name;
+        if constexpr (std::is_same_v<T, RSC_TextureConstant> ||
+                      std::is_same_v<T, RSC_TextureGrid>) {
+            _kernel_texture_manager.addTexture(RS_KernelTextureManager::SupportedRSC(r));
         }
-    }
-
-    // Delegate world-render setup to the world manager, which owns the
-    // ArHosekSkyModelState lifetime when running the Hosek-Wilkie sky.
-    if (_kernel_world_manager == nullptr) {
-        _kernel_world_manager = make_unique<RS_KernelWorldManager>();
-        _kernel_world_manager->init(this, config);
-    } else {
-        _kernel_world_manager->setWorld(config);
-    }
-
-    RS_LOG(_logger, debug, "setWorld takes {}", timer.elapsedTimeString());
+    });
+    RIndex gid = RS_NULL_INDEX;
+    if (auto it = _resource_gids.find(name); it != _resource_gids.end()) gid = it->second;
+    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE, gid, name});
 }
 
-void RS_KernelManager::_setFloor(const RS_FloorConfig& config) {
-    RS_Timer timer;
-
-    _deleteFloor();
-
-    _kernel_floor_manager = make_unique<RS_KernelFloorManager>();
-    _kernel_floor_manager->init(this, config);
-
-    RS_LOG(_logger, debug, "setFloor takes {}", timer.elapsedTimeString());
+void RS_KernelManager::_updateResource(
+    const std::string& name,
+    const RSC_ResourceVariant& resource,
+    RIndex message_id
+) {
+    _removeResource(name, RS_NULL_INDEX);
+    _addResource(resource, message_id);
 }
 
-RIndex RS_KernelManager::_allocateMaterialGid() {
-    for (RIndex tried = 0; tried < RS_SIMULATION_MAX_MATERIAL_NUM; ++tried) {
-        if (_material_counter >= RS_SIMULATION_MAX_MATERIAL_NUM) {
-            // Reached the upper bound, wrap around and reuse freed gids
-            RS_LOG(
-                _logger,
-                warn,
-                "Material gid counter reached upper bound {}, wrapping to reuse freed gids",
-                RS_SIMULATION_MAX_MATERIAL_NUM
+void RS_KernelManager::_removeResource(const std::string& name, RIndex message_id) {
+    // Texture is the only resource kind today; new kinds get added here.
+    _kernel_texture_manager.removeTexture(name);
+    _queueInfo(message_id, RS_WorldMessageText{format("removeResource {} succeeded", name)});
+}
+
+/*****************************************************************
+ * Essence
+ *****************************************************************/
+void RS_KernelManager::_addEssence(const RSC_EssenceVariant& essence, RIndex message_id) {
+    std::string name;
+    essence.visit([&](auto& c) {
+        using T = std::decay_t<decltype(c)>;
+        name = c.name;
+        if constexpr (std::is_same_v<T, RSC_Material>) {
+            _kernel_material_manager.addMaterial(c);
+        } else if constexpr (std::is_same_v<T, RSC_MaterialPairPropertyCoulombFriction> ||
+                             std::is_same_v<T, RSC_MaterialPairPropertyRestitution>) {
+            _kernel_material_manager.addMaterialProperty(
+                RS_KernelMaterialManager::PairPropertyVariant(c)
             );
-            _material_counter = 0;
-        }
-        RIndex gid = _material_counter++;
-        if (_kernel_material_managers.find(gid) == _kernel_material_managers.end()) return gid;
-    }
-    RS_THROW(RS_InvalidConfigurationException(
-        "Reached the maximum live material count {}", RS_SIMULATION_MAX_MATERIAL_NUM
-    ));
-}
-
-RIndex RS_KernelManager::_allocateRecordGid() {
-    for (RIndex tried = 0; tried < RS_SIMULATION_MAX_RECORD_NUM; ++tried) {
-        if (_record_counter >= RS_SIMULATION_MAX_RECORD_NUM) {
-            // Reached the upper bound, wrap around and reuse freed gids
-            RS_LOG(
-                _logger,
-                warn,
-                "Record gid counter reached upper bound {}, wrapping to reuse freed gids",
-                RS_SIMULATION_MAX_RECORD_NUM
+        } else {
+            _kernel_material_manager.addMaterialProperty(
+                RS_KernelMaterialManager::UnaryPropertyVariant(c)
             );
-            _record_counter = 0;
         }
-        RIndex gid = _record_counter++;
-        if (_record_gid_to_record_type.find(gid) == _record_gid_to_record_type.end()) return gid;
-    }
-    RS_THROW(RS_InvalidConfigurationException(
-        "Reached the maximum live record count {}", RS_SIMULATION_MAX_RECORD_NUM
-    ));
+    });
+    RIndex gid = RS_NULL_INDEX;
+    if (auto it = _essence_gids.find(name); it != _essence_gids.end()) gid = it->second;
+    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE, gid, name});
 }
 
-RIndex RS_KernelManager::_allocateSignalGid() {
-    // Force and torque signals share the signal gid space
-    for (RIndex tried = 0; tried < RS_SIMULATION_MAX_SIGNAL_NUM; ++tried) {
-        if (_signal_counter >= RS_SIMULATION_MAX_SIGNAL_NUM) {
-            // Reached the upper bound, wrap around and reuse freed gids
-            RS_LOG(
-                _logger,
-                warn,
-                "Signal gid counter reached upper bound {}, wrapping to reuse freed gids",
-                RS_SIMULATION_MAX_SIGNAL_NUM
+void RS_KernelManager::_updateEssence(
+    const std::string& name,
+    const RSC_EssenceVariant& essence,
+    RIndex message_id
+) {
+    _removeEssence(name, RS_NULL_INDEX);
+    _addEssence(essence, message_id);
+}
+
+void RS_KernelManager::_removeEssence(const std::string& name, RIndex message_id) {
+    if (_kernel_material_manager.findMaterial(name) != RS_NULL_INDEX) {
+        _kernel_material_manager.removeMaterial(name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeEssence {} succeeded", name)});
+        return;
+    }
+    if (_kernel_material_manager.hasMaterialProperty(name)) {
+        _kernel_material_manager.removeMaterialProperty(name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeEssence {} succeeded", name)});
+        return;
+    }
+    RS_THROW(RS_NotFoundException("Essence '{}' not found", name));
+}
+
+/*****************************************************************
+ * Entity
+ *****************************************************************/
+void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, RIndex message_id) {
+    std::string name;
+    entity.visit([&](auto& c) {
+        using T = std::decay_t<decltype(c)>;
+        name = c.name;
+        if constexpr (std::is_same_v<T, RSC_StructureVoxel>) {
+            auto mgr = std::make_unique<RS_KernelStructureVoxelManager>(this, c);
+            _kernel_structure_voxel_managers[c.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_STRUCTURE_VOXEL, c.name);
+        } else if constexpr (std::is_same_v<T, RSC_CameraPerspectiveFree> ||
+                             std::is_same_v<T, RSC_CameraPerspectiveRigidBodyLinked>) {
+            auto mgr = std::make_unique<RS_KernelCameraPerspectiveManager>(
+                this, RS_KernelCameraPerspectiveManager::SupportedRSC(c)
             );
-            _signal_counter = 0;
-        }
-        RIndex gid = _signal_counter++;
-        if (_kernel_force_managers.find(gid) == _kernel_force_managers.end() &&
-            _kernel_torque_managers.find(gid) == _kernel_torque_managers.end())
-            return gid;
-    }
-    RS_THROW(RS_InvalidConfigurationException(
-        "Reached the maximum live signal count {}", RS_SIMULATION_MAX_SIGNAL_NUM
-    ));
-}
-
-RIndex RS_KernelManager::_allocateStructureGid() {
-    for (RIndex tried = 0; tried < RS_SIMULATION_MAX_STRUCTURE_NUM; ++tried) {
-        if (_structure_counter >= RS_SIMULATION_MAX_STRUCTURE_NUM) {
-            // Reached the upper bound, wrap around and reuse freed gids
-            RS_LOG(
-                _logger,
-                warn,
-                "Structure gid counter reached upper bound {}, wrapping to reuse freed gids",
-                RS_SIMULATION_MAX_STRUCTURE_NUM
+            _kernel_camera_perspective_managers[c.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE, c.name);
+        } else if constexpr (std::is_same_v<T, RSC_FloorFlat> ||
+                             std::is_same_v<T, RSC_FloorArray>) {
+            if (_kernel_floor_manager) {
+                RS_THROW(RS_DuplicateException("Floor entity already exists"));
+            }
+            _kernel_floor_manager = std::make_unique<RS_KernelFloorManager>(
+                this, RS_KernelFloorManager::SupportedRSC(c)
             );
-            _structure_counter = 0;
-        }
-        RIndex gid = _structure_counter++;
-        if (_kernel_structure_managers.find(gid) == _kernel_structure_managers.end()) return gid;
-    }
-    RS_THROW(RS_InvalidConfigurationException(
-        "Reached the maximum live structure count {}", RS_SIMULATION_MAX_STRUCTURE_NUM
-    ));
-}
-
-RIndex RS_KernelManager::_allocateCameraGid() {
-    for (RIndex tried = 0; tried < RS_SIMULATION_MAX_CAMERA_NUM; ++tried) {
-        if (_camera_counter >= RS_SIMULATION_MAX_CAMERA_NUM) {
-            // Reached the upper bound, wrap around and reuse freed gids
-            RS_LOG(
-                _logger,
-                warn,
-                "Camera gid counter reached upper bound {}, wrapping to reuse freed gids",
-                RS_SIMULATION_MAX_CAMERA_NUM
+            _stageCommit(RSE_KERNEL_MANAGER_FLOOR, c.name);
+        } else if constexpr (std::is_same_v<T, RSC_CosmicBackgroundUniform> ||
+                             std::is_same_v<T, RSC_CosmicBackgroundGradient> ||
+                             std::is_same_v<T, RSC_CosmicBackgroundHosekWilkie>) {
+            if (_kernel_cosmic_background_manager) {
+                RS_THROW(RS_DuplicateException("Cosmic background entity already exists"));
+            }
+            _kernel_cosmic_background_manager = std::make_unique<RS_KernelCosmicBackgroundManager>(
+                this, RS_KernelCosmicBackgroundManager::SupportedRSC(c)
             );
-            _camera_counter = 0;
+            _stageCommit(RSE_KERNEL_MANAGER_COSMIC_BACKGROUND, c.name);
         }
-        RIndex gid = _camera_counter++;
-        if (_kernel_camera_managers.find(gid) == _kernel_camera_managers.end()) return gid;
-    }
-    RS_THROW(RS_InvalidConfigurationException(
-        "Reached the maximum live camera count {}", RS_SIMULATION_MAX_CAMERA_NUM
-    ));
+    });
+    RIndex gid = RS_NULL_INDEX;
+    if (auto it = _entity_gids.find(name); it != _entity_gids.end()) gid = it->second;
+    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY, gid, name});
 }
 
-void RS_KernelManager::_addMaterial(const RS_MaterialConfig& config) {
-    if (_material_name_to_gid.find(config.name) != _material_name_to_gid.end()) {
-        RS_THROW(RS_InvalidConfigurationException(
-            "Added material has duplicate material name {}", config.name
-        ));
-    }
-
-    RS_Timer timer;
-
-    RIndex gid = _allocateMaterialGid();
-    _material_name_to_gid[config.name] = gid;
-
-    auto& manager = _kernel_material_managers[gid];
-
-    try {
-        manager.init(this, config);
-    } catch (const RS_InvalidConfigurationException& e) {
-        // Clean up the material manager
-        _material_name_to_gid.erase(config.name);
-        _kernel_material_managers.erase(gid);
-        throw e;
-    }
-
-    RS_LOG(_logger, debug, "addMaterial takes {}", timer.elapsedTimeString());
-}
-
-void RS_KernelManager::_addRecord(const RS_RecordConfig& config) {
-    if (_record_name_to_gid.find(config.name) != _record_name_to_gid.end()) {
-        RS_THROW(RS_InvalidConfigurationException(
-            "Added record has duplicate record name {}", config.name
-        ));
-    }
-
-    RS_Timer timer;
-
-    if (config.type == RSE_RECORD_STRUCTURE) {
-        RIndex gid = _allocateRecordGid();
-
-        _record_gid_to_record_type[gid] = RSE_RECORD_STRUCTURE;
-        _record_name_to_gid[config.name] = gid;
-
-        auto& manager = _kernel_structure_record_managers[gid];
-
-        try {
-            manager.init(this, config);
-        } catch (const RS_InvalidConfigurationException& e) {
-            // Clean up the record manager
-            _record_gid_to_record_type.erase(gid);
-            _record_name_to_gid.erase(config.name);
-            manager.free();
-            _kernel_structure_record_managers.erase(gid);
-            throw e;
-        }
-
-        _structure_gid_to_structure_record_gid[manager.getStructureGid()] = gid;
-    }
-
-    RS_LOG(_logger, debug, "addRecord takes {}", timer.elapsedTimeString());
-}
-
-void RS_KernelManager::_addSignal(const RS_SignalConfig& config) {
-    if (_signal_name_to_gid.find(config.name) != _signal_name_to_gid.end()) {
-        RS_THROW(RS_InvalidConfigurationException(
-            "Added signal has duplicate signal name {}", config.name
-        ));
-    }
-
-    RS_Timer timer;
-
-    if (config.type == RSE_SIGNAL_FORCE) {
-        RIndex gid = _allocateSignalGid();
-
-        _signal_name_to_gid[config.name] = gid;
-
-        auto& manager = _kernel_force_managers[gid];
-
-        try {
-            manager.init(this, config);
-        } catch (const RS_InvalidConfigurationException& e) {
-            // Clean up the signal manager
-            _signal_name_to_gid.erase(config.name);
-            manager.free();
-            _kernel_force_managers.erase(gid);
-            throw e;
-        }
-    } else if (config.type == RSE_SIGNAL_TORQUE) {
-        RIndex gid = _allocateSignalGid();
-
-        _signal_name_to_gid[config.name] = gid;
-
-        auto& manager = _kernel_torque_managers[gid];
-
-        try {
-            manager.init(this, config);
-        } catch (const RS_InvalidConfigurationException& e) {
-            // Clean up the signal manager
-            _signal_name_to_gid.erase(config.name);
-            manager.free();
-            _kernel_torque_managers.erase(gid);
-            throw e;
-        }
-    }
-
-    RS_LOG(_logger, debug, "addSignal takes {}", timer.elapsedTimeString());
-}
-
-void RS_KernelManager::_addStructure(const RS_StructureConfig& config) {
-    if (_structure_name_to_gid.find(config.name) != _structure_name_to_gid.end()) {
-        RS_THROW(RS_InvalidConfigurationException(
-            "Added structure has duplicate structure name {}", config.name
-        ));
-    }
-    RS_Timer timer;
-
-    RIndex gid = _allocateStructureGid();
-    _structure_name_to_gid[config.name] = gid;
-
-    auto& manager = _kernel_structure_managers[gid];
-
-    try {
-        manager.init(this, config);
-    } catch (const RS_InvalidConfigurationException& e) {
-        // Clean up the structure manager
-        _structure_name_to_gid.erase(config.name);
-        _kernel_structure_managers.erase(gid);
-        throw e;
-    }
-
-    RS_LOG(_logger, debug, "addStructure takes {}", timer.elapsedTimeString());
-}
-
-void RS_KernelManager::_addCamera(const RS_CameraConfig& config) {
-    if (_camera_name_to_gid.find(config.name) != _camera_name_to_gid.end()) {
-        RS_THROW(RS_InvalidConfigurationException(
-            "Added camera has duplicate camera name {}", config.name
-        ));
-    }
-    RS_Timer timer;
-
-    RIndex gid = _allocateCameraGid();
-    _camera_name_to_gid[config.name] = gid;
-
-    auto& manager = _kernel_camera_managers[gid];
-    try {
-        manager.init(this, config);
-    } catch (const RS_InvalidConfigurationException& e) {
-        // Clean up the camera manager
-        _camera_name_to_gid.erase(config.name);
-        _kernel_camera_managers.erase(gid);
-        throw e;
-    }
-
-    if (config.type == RSE_CAMERA_RIGID_BODY_LINKED_PERSPECTIVE)
-        _structure_gid_to_rigid_body_camera_gids[manager.getStructureGid()].emplace_back(gid);
-
-    RS_LOG(_logger, debug, "addCamera takes {}", timer.elapsedTimeString());
-}
-
-void RS_KernelManager::_updateMaterial(const RS_MaterialConfig& config) {
-    if (_material_name_to_gid.find(config.name) == _material_name_to_gid.end()) {
-        RS_THROW(RS_InvalidConfigurationException(
-            "The name of the updated material is not found: {}", config.name
-        ));
-    }
-    RS_Timer timer;
-    RIndex material_gid = _material_name_to_gid.at(config.name);
-    auto& manager = _kernel_material_managers.at(material_gid);
-    manager.update(config);
-
-    for (auto& st_manager : _kernel_structure_managers) {
-        /// Find dependent structures, and update materials
-        if (st_manager.second.getDependentMaterialGID().count(material_gid) > 0) {
-            st_manager.second.updateMaterials();
-        }
-    }
-    RS_LOG(_logger, debug, "updateMaterial takes {}", timer.elapsedTimeString());
-}
-
-void RS_KernelManager::_deleteFloor() {
-    RS_Timer timer;
-
-    // Reset floor config
-    if (_kernel_floor_manager != nullptr) {
-        _kernel_floor_manager->free();
-        _kernel_floor_manager = nullptr;
-        RS_LOG(_logger, debug, "deleteFloor takes {}", timer.elapsedTimeString());
-    }
-}
-
-void RS_KernelManager::_deleteWorld() {
-    RS_Timer timer;
-
-    if (_kernel_world_manager != nullptr) {
-        _kernel_world_manager->free();
-        _kernel_world_manager = nullptr;
-        RS_LOG(_logger, debug, "deleteWorld takes {}", timer.elapsedTimeString());
-    }
-}
-
-void RS_KernelManager::_deleteMaterial(RIndex id) {
-    if (_kernel_material_managers.find(id) == _kernel_material_managers.end()) {
-        RS_THROW(
-            RS_InvalidConfigurationException("Cannot delete material with invalid gid {}", id)
-        );
-    }
-
-    RS_Timer timer;
-    auto& manager = _kernel_material_managers.at(id);
-
-    vector<string> dependent_structures;
-    for (auto& p : _kernel_structure_managers) {
-        if (p.second.getDependentMaterialGID().count(id) > 0) {
-            dependent_structures.push_back(p.second.getConfig().name);
-        }
-    }
-    if (!dependent_structures.empty())
-        RS_THROW(RS_InvalidConfigurationException(
-            "Material {} cannot be deleted because it is used by structures: {}",
-            id,
-            fmt::join(dependent_structures, ", ")
-        ));
-
-    manager.free();
-
-    string name = manager.getName();
-    _material_name_to_gid.erase(name);
-    _kernel_material_managers.erase(id);
-
-    RS_LOG(_logger, debug, "deleteMaterial takes {}", timer.elapsedTimeString());
-}
-
-void RS_KernelManager::_deleteRecord(RIndex id) {
-    if (_record_gid_to_record_type.find(id) == _record_gid_to_record_type.end()) {
-        RS_THROW(RS_InvalidConfigurationException("Cannot delete record with invalid gid {}", id));
-    }
-
-    RS_Timer timer;
-    if (_record_gid_to_record_type.at(id) == RSE_RECORD_STRUCTURE) {
-        if (_kernel_structure_record_managers.find(id) == _kernel_structure_record_managers.end()) {
-            RS_THROW(RS_InvalidConfigurationException(
-                "Cannot delete structure record with invalid gid {}", id
+void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id) {
+    if (auto it = _kernel_structure_voxel_managers.find(name);
+        it != _kernel_structure_voxel_managers.end()) {
+        if (it->second->getUseCount() > 0) {
+            RS_THROW(RS_SimulationException(
+                "Cannot remove structure '{}': still in use ({} reference(s))",
+                name,
+                it->second->getUseCount()
             ));
         }
-
-        auto& manager = _kernel_structure_record_managers.at(id);
-
-        string name = manager.getName();
-        RIndex structure_gid = manager.getStructureGid();
-        manager.free();
-
-        _record_name_to_gid.erase(name);
-        _kernel_structure_record_managers.erase(id);
-        _structure_gid_to_structure_record_gid.erase(structure_gid);
+        it->second->decommit();
+        _kernel_structure_voxel_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_STRUCTURE_VOXEL, name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+        return;
     }
-
-    RS_LOG(_logger, debug, "deleteRecord takes {}", timer.elapsedTimeString());
+    if (auto it = _kernel_camera_perspective_managers.find(name);
+        it != _kernel_camera_perspective_managers.end()) {
+        if (it->second->getUseCount() > 0) {
+            RS_THROW(RS_SimulationException(
+                "Cannot remove camera '{}': still in use ({} reference(s))",
+                name,
+                it->second->getUseCount()
+            ));
+        }
+        it->second->decommit();
+        _kernel_camera_perspective_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE, name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+        return;
+    }
+    if (_kernel_floor_manager) {
+        bool matched = false;
+        _kernel_floor_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) {
+            if (_kernel_floor_manager->getUseCount() > 0) {
+                RS_THROW(RS_SimulationException(
+                    "Cannot remove floor '{}': still in use ({} reference(s))",
+                    name,
+                    _kernel_floor_manager->getUseCount()
+                ));
+            }
+            _kernel_floor_manager->decommit();
+            _kernel_floor_manager.reset();
+            _retractPendingCommit(RSE_KERNEL_MANAGER_FLOOR, name);
+            _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+            return;
+        }
+    }
+    if (_kernel_cosmic_background_manager) {
+        bool matched = false;
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) {
+            if (_kernel_cosmic_background_manager->getUseCount() > 0) {
+                RS_THROW(RS_SimulationException(
+                    "Cannot remove cosmic_background '{}': still in use ({} reference(s))",
+                    name,
+                    _kernel_cosmic_background_manager->getUseCount()
+                ));
+            }
+            _kernel_cosmic_background_manager->decommit();
+            _kernel_cosmic_background_manager.reset();
+            _retractPendingCommit(RSE_KERNEL_MANAGER_COSMIC_BACKGROUND, name);
+            _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+            return;
+        }
+    }
+    RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
 }
 
-void RS_KernelManager::_deleteSignal(RIndex id) {
-    RS_Timer timer;
-
-    if (_kernel_force_managers.find(id) != _kernel_force_managers.end()) {
-        auto& manager = _kernel_force_managers.at(id);
-        string name = manager.getName();
-        manager.free();
-
-        _signal_name_to_gid.erase(name);
-        _kernel_force_managers.erase(id);
-    } else if (_kernel_torque_managers.find(id) != _kernel_torque_managers.end()) {
-        auto& manager = _kernel_torque_managers.at(id);
-        string name = manager.getName();
-        manager.free();
-
-        _signal_name_to_gid.erase(name);
-        _kernel_torque_managers.erase(id);
-    } else {
-        RS_THROW(RS_InvalidConfigurationException("Cannot delete signal with invalid gid {}", id));
+void RS_KernelManager::_freezeEntity(const std::string& name, RIndex message_id) {
+    if (auto it = _kernel_structure_voxel_managers.find(name);
+        it != _kernel_structure_voxel_managers.end()) {
+        it->second->freeze();
+        _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+        return;
     }
-
-    RS_LOG(_logger, debug, "deleteSignal takes {}", timer.elapsedTimeString());
+    if (auto it = _kernel_camera_perspective_managers.find(name);
+        it != _kernel_camera_perspective_managers.end()) {
+        it->second->freeze();
+        _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+        return;
+    }
+    if (_kernel_floor_manager) {
+        bool matched = false;
+        _kernel_floor_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) {
+            _kernel_floor_manager->freeze();
+            _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+            return;
+        }
+    }
+    if (_kernel_cosmic_background_manager) {
+        bool matched = false;
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) {
+            _kernel_cosmic_background_manager->freeze();
+            _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+            return;
+        }
+    }
+    RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
 }
 
-void RS_KernelManager::_deleteStructure(RIndex id) {
-    if (_kernel_structure_managers.find(id) == _kernel_structure_managers.end()) {
-        RS_THROW(
-            RS_InvalidConfigurationException("Cannot delete structure with invalid gid {}", id)
-        );
+void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_id) {
+    if (auto it = _kernel_structure_voxel_managers.find(name);
+        it != _kernel_structure_voxel_managers.end()) {
+        it->second->unfreeze();
+        _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+        return;
     }
-
-    RS_Timer timer;
-
-    auto& manager = _kernel_structure_managers.at(id);
-
-    string name = manager.getName();
-    manager.free();
-
-    _structure_name_to_gid.erase(name);
-    _kernel_structure_managers.erase(id);
-
-    RS_LOG(_logger, debug, "deleteStructure takes {}", timer.elapsedTimeString());
+    if (auto it = _kernel_camera_perspective_managers.find(name);
+        it != _kernel_camera_perspective_managers.end()) {
+        it->second->unfreeze();
+        _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+        return;
+    }
+    if (_kernel_floor_manager) {
+        bool matched = false;
+        _kernel_floor_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) {
+            _kernel_floor_manager->unfreeze();
+            _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+            return;
+        }
+    }
+    if (_kernel_cosmic_background_manager) {
+        bool matched = false;
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) {
+            _kernel_cosmic_background_manager->unfreeze();
+            _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+            return;
+        }
+    }
+    RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
 }
 
-void RS_KernelManager::_deleteCamera(RIndex id) {
-    if (_kernel_camera_managers.find(id) == _kernel_camera_managers.end()) {
-        RS_THROW(RS_InvalidConfigurationException("Cannot delete camera with invalid gid {}", id));
+/*****************************************************************
+ * Record
+ *****************************************************************/
+void RS_KernelManager::_addRecord(const RSC_RecordVariant& record, RIndex message_id) {
+    std::string name;
+    record.visit([&](auto& r) {
+        using T = std::decay_t<decltype(r)>;
+        name = r.name;
+        if constexpr (std::is_same_v<T, RSC_IntersectRegionCuboid> ||
+                      std::is_same_v<T, RSC_IntersectRegionCuboidRigidBodyLinked> ||
+                      std::is_same_v<T, RSC_IntersectRegionSphere>) {
+            auto mgr = std::make_unique<RS_KernelIntersectRegionManager>(
+                this, RS_KernelIntersectRegionManager::SupportedRSC(r)
+            );
+            _kernel_intersect_region_managers[r.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_INTERSECT_REGION, r.name);
+        }
+    });
+    RIndex gid = RS_NULL_INDEX;
+    if (auto it = _record_gids.find(name); it != _record_gids.end()) gid = it->second;
+    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD, gid, name});
+}
+
+void RS_KernelManager::_removeRecord(const std::string& name, RIndex message_id) {
+    if (auto it = _kernel_intersect_region_managers.find(name);
+        it != _kernel_intersect_region_managers.end()) {
+        it->second->decommit();
+        _kernel_intersect_region_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_INTERSECT_REGION, name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeRecord {} succeeded", name)});
+        return;
     }
+    RS_THROW(RS_NotFoundException("Record '{}' not found", name));
+}
 
-    RS_Timer timer;
+/*****************************************************************
+ * Signal
+ *****************************************************************/
+void RS_KernelManager::_addSignal(const RSC_SignalVariant& signal, RIndex message_id) {
+    std::string name;
+    signal.visit([&](auto& s) {
+        using T = std::decay_t<decltype(s)>;
+        name = s.name;
+        if constexpr (std::is_same_v<T, RSC_Force>) {
+            auto mgr = std::make_unique<RS_KernelForceManager>(this, s);
+            _kernel_force_managers[s.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_FORCE, s.name);
+        } else if constexpr (std::is_same_v<T, RSC_Torque>) {
+            auto mgr = std::make_unique<RS_KernelTorqueManager>(this, s);
+            _kernel_torque_managers[s.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_TORQUE, s.name);
+        }
+    });
+    RIndex gid = RS_NULL_INDEX;
+    if (auto it = _signal_gids.find(name); it != _signal_gids.end()) gid = it->second;
+    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL, gid, name});
+}
 
-    auto& manager = _kernel_camera_managers.at(id);
-
-    if (manager.getConfig().type == RSE_CAMERA_RIGID_BODY_LINKED_PERSPECTIVE) {
-        auto& current_associated_gids =
-            _structure_gid_to_rigid_body_camera_gids[manager.getStructureGid()];
-        current_associated_gids.erase(
-            std::find(current_associated_gids.begin(), current_associated_gids.end(), id)
-        );
+void RS_KernelManager::_removeSignal(const std::string& name, RIndex message_id) {
+    if (auto it = _kernel_force_managers.find(name); it != _kernel_force_managers.end()) {
+        it->second->decommit();
+        _kernel_force_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_FORCE, name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeSignal {} succeeded", name)});
+        return;
     }
+    if (auto it = _kernel_torque_managers.find(name); it != _kernel_torque_managers.end()) {
+        it->second->decommit();
+        _kernel_torque_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_TORQUE, name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeSignal {} succeeded", name)});
+        return;
+    }
+    RS_THROW(RS_NotFoundException("Signal '{}' not found", name));
+}
 
-    string name = manager.getName();
-    manager.free();
+/*****************************************************************
+ * Pending commit staging and flush
+ *****************************************************************/
+void RS_KernelManager::_stageCommit(RSE_KernelManagerType type, const std::string& name) {
+    _pending_commits.push_back({type, name});
+    if (!_is_transaction_open) _flushPendingCommits();
+}
 
-    _camera_name_to_gid.erase(name);
-    _kernel_camera_managers.erase(id);
+void RS_KernelManager::_retractPendingCommit(RSE_KernelManagerType type, const std::string& name) {
+    _pending_commits.erase(
+        std::remove_if(
+            _pending_commits.begin(),
+            _pending_commits.end(),
+            [&](const RS_KernelPendingCommit& pc) { return pc.type == type && pc.name == name; }
+        ),
+        _pending_commits.end()
+    );
+}
 
-    RS_LOG(_logger, debug, "deleteCamera takes {}", timer.elapsedTimeString());
+void RS_KernelManager::_flushPendingCommits() {
+    // Textures and materials commit first so structures and floors can resolve their grid handles
+    // and vision material slots.
+    _kernel_texture_manager.commit();
+    _kernel_material_manager.commit();
+    for (const auto& pc : _pending_commits) {
+        _flushOneCommit(pc.type, pc.name);
+    }
+    _pending_commits.clear();
+}
+
+void RS_KernelManager::_flushOneCommit(RSE_KernelManagerType type, const std::string& name) {
+    switch (type) {
+        case RSE_KERNEL_MANAGER_STRUCTURE_VOXEL:
+            if (auto it = _kernel_structure_voxel_managers.find(name);
+                it != _kernel_structure_voxel_managers.end())
+                it->second->commit();
+            break;
+        case RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE:
+            if (auto it = _kernel_camera_perspective_managers.find(name);
+                it != _kernel_camera_perspective_managers.end())
+                it->second->commit();
+            break;
+        case RSE_KERNEL_MANAGER_FLOOR:
+            if (_kernel_floor_manager) _kernel_floor_manager->commit();
+            break;
+        case RSE_KERNEL_MANAGER_COSMIC_BACKGROUND:
+            if (_kernel_cosmic_background_manager) _kernel_cosmic_background_manager->commit();
+            break;
+        case RSE_KERNEL_MANAGER_FORCE:
+            if (auto it = _kernel_force_managers.find(name); it != _kernel_force_managers.end())
+                it->second->commit();
+            break;
+        case RSE_KERNEL_MANAGER_TORQUE:
+            if (auto it = _kernel_torque_managers.find(name); it != _kernel_torque_managers.end())
+                it->second->commit();
+            break;
+        case RSE_KERNEL_MANAGER_INTERSECT_REGION:
+            if (auto it = _kernel_intersect_region_managers.find(name);
+                it != _kernel_intersect_region_managers.end())
+                it->second->commit();
+            break;
+    }
+}
+
+void RS_KernelManager::_queueInfo(RIndex message_id, RS_WorldMessageData data) {
+    if (message_id == RS_NULL_INDEX) return;
+    _pending_messages.push_back({message_id, RSE_WORLD_MESSAGE_INFO, std::move(data)});
+}
+
+/*****************************************************************
+ * RS_KernelGidRegistration
+ *****************************************************************/
+RS_KernelGidRegistration::RS_KernelGidRegistration(
+    RS_KernelManager* kernel_manager,
+    RSE_KernelGidType type,
+    std::string name
+)
+    : _kernel_manager(kernel_manager), _type(type), _name(std::move(name)) {
+    switch (_type) {
+        case RSE_KERNEL_GID_ENTITY: _gid = _kernel_manager->registerEntity(_name); break;
+        case RSE_KERNEL_GID_ESSENCE: _gid = _kernel_manager->registerEssence(_name); break;
+        case RSE_KERNEL_GID_RESOURCE: _gid = _kernel_manager->registerResource(_name); break;
+        case RSE_KERNEL_GID_RECORD: _gid = _kernel_manager->registerRecord(_name); break;
+        case RSE_KERNEL_GID_SIGNAL: _gid = _kernel_manager->registerSignal(_name); break;
+    }
+}
+
+RS_KernelGidRegistration::~RS_KernelGidRegistration() { _release(); }
+
+RS_KernelGidRegistration::RS_KernelGidRegistration(RS_KernelGidRegistration&& other) noexcept
+    : _kernel_manager(other._kernel_manager),
+      _type(other._type),
+      _name(std::move(other._name)),
+      _gid(other._gid) {
+    other._kernel_manager = nullptr;
+    other._gid = RS_NULL_INDEX;
+}
+
+RS_KernelGidRegistration& RS_KernelGidRegistration::operator=(RS_KernelGidRegistration&& other
+) noexcept {
+    if (this != &other) {
+        _release();
+        _kernel_manager = other._kernel_manager;
+        _type = other._type;
+        _name = std::move(other._name);
+        _gid = other._gid;
+        other._kernel_manager = nullptr;
+        other._gid = RS_NULL_INDEX;
+    }
+    return *this;
+}
+
+void RS_KernelGidRegistration::_release() {
+    if (_kernel_manager == nullptr || _gid == RS_NULL_INDEX) return;
+    switch (_type) {
+        case RSE_KERNEL_GID_ENTITY: _kernel_manager->deregisterEntity(_name); break;
+        case RSE_KERNEL_GID_ESSENCE: _kernel_manager->deregisterEssence(_name); break;
+        case RSE_KERNEL_GID_RESOURCE: _kernel_manager->deregisterResource(_name); break;
+        case RSE_KERNEL_GID_RECORD: _kernel_manager->deregisterRecord(_name); break;
+        case RSE_KERNEL_GID_SIGNAL: _kernel_manager->deregisterSignal(_name); break;
+    }
+    _kernel_manager = nullptr;
+    _gid = RS_NULL_INDEX;
 }
 
 }  // namespace rise

@@ -4,7 +4,7 @@
 #ifndef RS_COUPLING_M_H
 #define RS_COUPLING_M_H
 
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 

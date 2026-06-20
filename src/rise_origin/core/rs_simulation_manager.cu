@@ -1,23 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Muhan Li (iffi/iffiX)
 
-#include <execution>
-#include <filesystem>
 #include <memory>
 #include <thread>
 #include <utility>
 
-#include "rise_origin/core/recorder/rs_simulation_hdf5_recorder.h"
 #include "rise_origin/core/rs_kernel_manager.h"
 #include "rise_origin/core/rs_simulation_executor.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/rs_format.h"
+#include "rise_origin/utils/string/rs_format.h"
 #include "rise_origin/utils/rs_iterators.h"
 #include "rs_simulation_manager.h"
 
 using namespace std;
 using namespace rise::device;
-namespace fs = std::filesystem;
+using namespace rise::rsc;
 
 namespace rise {
 
@@ -32,7 +29,8 @@ void RS_SimulationManager::init() {
     if (logging::get("root")) _sm_logger = logging::get("root")->clone("simulation manager");
     host_provider = getMemoryProvider({RSE_DEVICE_TYPE_CPU, 0});
     device_provider = getMemoryProvider(device);
-    if (_sm_logger) _sm_logger->info(_getLogFormatter(), format("simulation manager initialized."));
+    if (_sm_logger) 
+        RS_LOG(_sm_logger, info, "Simulation manager initialized.");
 }
 
 void RS_SimulationManager::free() {
@@ -41,163 +39,159 @@ void RS_SimulationManager::free() {
         simulation = nullptr;
         host_provider = nullptr;
         device_provider = nullptr;
-        RS_LOG(_sm_logger, info, _getLogFormatter(), format("simulation manager freed."));
+        RS_LOG(_sm_logger, info, "Simulation manager freed.");
     }
 }
 
-RS_SimulationLocalHandle
-RS_SimulationManager::runSim(RS_Config config, RIndex id, RS_SimulationCallback callback) {
+RS_WorldLocalHandle RS_SimulationManager::run(RSC_World world, RS_WorldCallback callback) {
     if (executor_thread)
         RS_THROW(
             RS_HostExecutionException("A simulation is already run by the simulation manager.")
         );
 
-    // Execution settings live in the config's runtime_* fields. The executor caches
-    // the per-step ones in its init(); here we only need the manager-level ones.
-    const auto &sim_config = config.simulation_config;
-    RFloat max_time = sim_config.runtime_max_time;
+    // Execution settings live in the world's simulation sub-characterization. The executor caches the
+    // per-step ones in its init(); here we only need the manager-level ones.
+    const auto &sim_rsc = world.simulation;
+    RFloat max_time = sim_rsc.runtime.max_time;
 
     simulation = make_shared<RS_Simulation>();
     simulation->kernel_manager = make_shared<RS_KernelManager>();
-    simulation->setStatusAndStatusInfo(RSE_SIMULATION_UNINITIALIZED, "");
-    simulation->simulation_memory_accuracy = sim_config.runtime_simulation_memory_accuracy;
-    simulation->id = id;
+    simulation->setStatusAndStatusInfo(RSE_WORLD_UNINITIALIZED, "");
+    simulation->name = world.name;
+    simulation->simulation_memory_accuracy = sim_rsc.runtime.memory_accuracy;
 
     this->record_buffer_size =
-        sim_config.runtime_save_record ? RS_MAX(1, sim_config.runtime_record_buffer_size) : 0;
+        sim_rsc.runtime.is_save_record ? RS_MAX(1, sim_rsc.runtime.record_buffer_size) : 0;
 
     RS_LOG(
         _sm_logger,
         debug,
-        _getLogFormatter(),
+        _getLogFormatter(world.name),
         format(
-            "Runtime configs:\n"
-            "dt_update_interval: {}\n"
-            "rigidbody_update_interval: {}\n"
-            "contact_update_interval: {}\n"
-            "mechanical_signal_update_interval: {}\n"
-            "divergence_check_interval: {}\n"
+            "Runtime settings:\n"
             "record_buffer_size: {}\n"
             "max_time: {}\n"
-            "save_record: {}\n"
-            "simulation_compute_accuracy: {}\n"
-            "simulation_memory_accuracy: {}",
-            sim_config.runtime_dt_update_interval,
-            sim_config.runtime_rigidbody_update_interval,
-            sim_config.runtime_contact_update_interval,
-            sim_config.runtime_mechanical_signal_update_interval,
-            sim_config.runtime_divergence_check_interval,
+            "is_save_record: {}\n"
+            "compute_accuracy: {}\n"
+            "memory_accuracy: {}",
             this->record_buffer_size,
             max_time,
-            sim_config.runtime_save_record,
-            enumToString(sim_config.runtime_simulation_compute_accuracy),
-            enumToString(sim_config.runtime_simulation_memory_accuracy)
+            sim_rsc.runtime.is_save_record,
+            enumToString(sim_rsc.runtime.compute_accuracy),
+            enumToString(sim_rsc.runtime.memory_accuracy)
         )
     );
 
-    RS_SimulationLocalHandle handle(simulation);
+    RS_WorldLocalHandle handle(simulation);
 
     executor_thread = make_unique<thread>(
-        [this, config = std::move(config), callback = std::move(callback), max_time]() {
+        [this, world = std::move(world), callback = std::move(callback), max_time]() {
             auto exec = RS_SimulationExecutor(device_provider.get(), host_provider.get(), callback);
-            _runSim(config, exec, max_time);
+            _runSim(world, exec, max_time);
         }
     );
 
     return handle;
 }
 
-string RS_SimulationManager::_getLogFormatter(RIndex simulation_id) {
-    if (simulation_id != RS_NULL_INDEX) {
-        return format("(SimManager) Simulation {} {{}}", simulation_id);
+string RS_SimulationManager::_getLogFormatter(const std::string &world_name) {
+    if (!world_name.empty()) {
+        return format("World {} {{}}", world_name);
     } else
-        return format("(SimManager) {{}}");
+        return format("World {{}}");
 }
 
 bool RS_SimulationManager::_initSim(
     const std::shared_ptr<RS_Simulation> &sim,
-    const RS_Config &config
+    const RSC_World &world
 ) {
-    sim->setStatusAndStatusInfo(RSE_SIMULATION_INITIALIZING, "");
+    sim->setStatusAndStatusInfo(RSE_WORLD_INITIALIZING, "");
 
-    if (config.is_valid) {
-        try {
-            sim->kernel_manager->init(
-                host_provider.get(), device_provider.get(), this->record_buffer_size
-            );
-
-            // Pause command execution until we have fully pre-initialized with provided RS_Config
-            sim->kernel_manager->pauseCommandExecution();
-
-            sim->kernel_manager->initKernel(sim->id, sim->simulation_memory_accuracy);
-            sim->kernel_manager->setSimulationConfig(config.simulation_config, true);
-            sim->kernel_manager->setWorld(config.world_config, true);
-            sim->kernel_manager->setFloor(config.floor_config, true);
-            for (auto &material_config : config.material_configs)
-                sim->kernel_manager->addMaterial(material_config, true);
-            for (auto &structure_config : config.structure_configs)
-                sim->kernel_manager->addStructure(structure_config, true);
-
-            // Records depend on structures, so add them after structures.
-            for (auto &record_config : config.record_configs)
-                sim->kernel_manager->addRecord(record_config, true);
-
-            // Cameras may depend on structures, so add them after structures.
-            for (auto &camera_config : config.camera_configs)
-                sim->kernel_manager->addCamera(camera_config, true);
-
-            // Signals depend on structures, so add them after structures.
-            for (auto &signal_config : config.signal_configs)
-                sim->kernel_manager->addSignal(signal_config, true);
-
-            sim->kernel_manager->resumeCommandExecution();
-        } catch (RS_BaseException &e) {
-            sim->setStatusAndStatusInfo(RSE_SIMULATION_END_FAILED_WITH_INVALID_CONFIG, e.what());
-            sim->kernel_manager->terminateKernel(true);
-            sim->kernel_manager->freeKernel();
-            sim->kernel_manager->free();
-            return false;
-        } catch (...) {
-            sim->setStatusAndStatusInfo(
-                RSE_SIMULATION_END_FAILED_WITH_SIMULATION_MANAGER_EXCEPTION, "unknown error"
-            );
-            sim->kernel_manager->terminateKernel(true);
-            sim->kernel_manager->freeKernel();
-            sim->kernel_manager->free();
-            return false;
-        }
-    } else {
-        sim->setStatusAndStatusInfo(
-            RSE_SIMULATION_END_FAILED_WITH_INVALID_CONFIG, config.invalid_reason
-        );
+    if (!world.is_valid) {
+        sim->setStatusAndStatusInfo(RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG, world.invalid_reason);
         return false;
     }
-    if (sim->getStatusAndStatusInfo().first != RSE_SIMULATION_END_FAILED_WITH_INVALID_CONFIG) {
-        if (record_buffer_size != 0) {
-            for (auto &recorder_config : config.recorder_configs)
-                _addSimRecorder(sim, recorder_config);
+
+    try {
+        sim->kernel_manager->init(
+            host_provider.get(),
+            device_provider.get(),
+            this->record_buffer_size,
+            [sim_ptr = sim.get()](const RS_WorldMessage &message) { sim_ptr->postMessage(message); }
+        );
+
+        // Pause command execution until we have fully pre-loaded with the world.
+        sim->kernel_manager->pauseCommandExecution();
+
+        sim->kernel_manager->initKernel(sim->simulation_memory_accuracy);
+        sim->kernel_manager->setSimulationRSC(world.simulation, RS_NULL_INDEX, true);
+
+        // Order matters — providers before consumers:
+        //   resources (textures) -> essences (materials reference textures)
+        //   essences -> entities (structures/floor reference materials)
+        //   entities -> records / controllers / signals (which reference entities)
+        for (auto &resource : world.resources) {
+            sim->kernel_manager->addResource(resource, RS_NULL_INDEX, true);
+        }
+        for (auto &essence : world.essences) {
+            sim->kernel_manager->addEssence(essence, RS_NULL_INDEX, true);
+        }
+        for (auto &entity : world.entities) {
+            sim->kernel_manager->addEntity(entity, RS_NULL_INDEX, true);
+        }
+        for (auto &record : world.records) {
+            sim->kernel_manager->addRecord(record, RS_NULL_INDEX, true);
+        }
+        for (auto &signal : world.signals) {
+            sim->kernel_manager->addSignal(signal, RS_NULL_INDEX, true);
+        }
+
+        sim->kernel_manager->resumeCommandExecution();
+    } catch (RS_BaseException &e) {
+        sim->setStatusAndStatusInfo(RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG, e.what());
+        sim->kernel_manager->terminateKernel(true);
+        sim->kernel_manager->freeKernel();
+        sim->kernel_manager->free();
+        return false;
+    } catch (...) {
+        sim->setStatusAndStatusInfo(
+            RSE_WORLD_END_FAILED_WITH_SIMULATION_MANAGER_EXCEPTION, "unknown error"
+        );
+        sim->kernel_manager->terminateKernel(true);
+        sim->kernel_manager->freeKernel();
+        sim->kernel_manager->free();
+        return false;
+    }
+
+    for (auto &controller : world.controllers) {
+        sim->addController(controller);
+    }
+
+    if (record_buffer_size != 0) {
+        for (auto &recorder : world.recorders) {
+            sim->addRecorder(recorder);
         }
     }
     return true;
 }
 
 void RS_SimulationManager::_runSim(
-    const RS_Config &config,
+    const RSC_World &world,
     RS_SimulationExecutor &exec,
     RFloat max_time
 ) {
     auto &sim = simulation;
 
-    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "begin simulation initialization");
-    bool is_inited = _initSim(sim, config);
-    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "end simulation initialization");
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "begin simulation initialization.");
+    bool is_inited = _initSim(sim, world);
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "end simulation initialization.");
 
     if (!is_inited) {
         auto [status, status_info] = sim->getStatusAndStatusInfo();
         RS_LOG(
             _sm_logger,
             error,
-            _getLogFormatter(sim->id),
+            _getLogFormatter(sim->name),
             format(
                 "produced following error during initialization. "
                 "The simulation will be skipped. \nError: {}.",
@@ -208,35 +202,35 @@ void RS_SimulationManager::_runSim(
     }
 
     auto &kernel = sim->kernel_manager->kernel;
-    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "begin executor initialization.");
-    exec.init(sim->id, &kernel, sim->kernel_manager.get());
-    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "end executor initialization.");
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "begin executor initialization.");
+    exec.init(sim.get());
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "end executor initialization.");
 
-    sim->setStatusAndStatusInfo(RSE_SIMULATION_RUNNING, "");
+    sim->setStatusAndStatusInfo(RSE_WORLD_RUNNING, "");
 
-    RSE_SimulationStatus end_status = RSE_SIMULATION_END_SUCCESS;
+    RSE_WorldStatus end_status = RSE_WORLD_END_SUCCESS;
     while (kernel.getHostTime() < max_time) {
         if (kernel.isPaused()) {
-            if (sim->status != RSE_SIMULATION_PAUSED) {
-                sim->setStatusAndStatusInfo(RSE_SIMULATION_PAUSED, "");
-                RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "paused.");
+            if (sim->status != RSE_WORLD_PAUSED) {
+                sim->setStatusAndStatusInfo(RSE_WORLD_PAUSED, "");
+                RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "paused.");
             }
             this_thread::sleep_for(chrono::milliseconds(10));
             continue;
         }
         if (kernel.isStopConditionMet() || kernel.isTerminated()) {
-            sim->setStatusAndStatusInfo(RSE_SIMULATION_TERMINATING, "");
+            sim->setStatusAndStatusInfo(RSE_WORLD_TERMINATING, "");
             RS_LOG(
                 _sm_logger,
                 info,
-                _getLogFormatter(sim->id),
+                _getLogFormatter(sim->name),
                 format("ended at {}s.", kernel.getHostTime())
             );
 
             if (!kernel.isStopConditionMet()) {
-                end_status = RSE_SIMULATION_END_TERMINATED;
+                end_status = RSE_WORLD_END_TERMINATED;
             } else {
-                end_status = RSE_SIMULATION_END_SUCCESS;
+                end_status = RSE_WORLD_END_SUCCESS;
             }
 
             _flushSimRecorders(sim);
@@ -244,15 +238,14 @@ void RS_SimulationManager::_runSim(
         }
 
         if (!exec.step()) {
-            end_status = RSE_SIMULATION_END_FAILED_WITH_SIMULATION_EXCEPTION;
-            sim->setStatusAndStatusInfo(RSE_SIMULATION_TERMINATING, "");
-            RS_LOG(_sm_logger, warn, _getLogFormatter(sim->id), "has invalid solution.");
+            end_status = RSE_WORLD_END_FAILED_WITH_SIMULATION_EXCEPTION;
+            sim->setStatusAndStatusInfo(RSE_WORLD_TERMINATING, "");
+            RS_LOG(_sm_logger, warn, _getLogFormatter(sim->name), "has invalid solution.");
 
             _flushSimRecorders(sim);
             break;
         }
 
-        // Save records
         if (record_buffer_size != 0 &&
             kernel.getExecutionCountOfEvent("record") == record_buffer_size) {
             kernel.clearExecutionCountOfEvent("record");
@@ -260,84 +253,107 @@ void RS_SimulationManager::_runSim(
         }
     }
     sim->kernel_manager->terminateKernel(true);
-    if (!sim->recorders.empty()) {
-        if (sim->recorder_sync_future.valid()) sim->recorder_sync_future.wait();
-        RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "finishing recorders");
-        _finishSimRecorders(sim);
-        sim->recorders.clear();
-        RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "recorders finished");
-    }
+
+    sim->waitForRecorderSync();
+    _finishSimRecorders(sim);
 
     exec.free();
-    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "executor freed\n");
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "executor freed.");
     sim->kernel_manager->freeKernel();
     sim->kernel_manager->free();
-    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "kernel freed");
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "kernel manager freed.");
     sim->setStatusAndStatusInfo(end_status, "");
 }
 
-void RS_SimulationManager::_addSimRecorder(
-    const std::shared_ptr<RS_Simulation> &sim,
-    const RS_RecorderConfig &recorder_config
-) {
-    if (recorder_config.type == RSE_RECORDER_HDF5) {
-        auto &config = recorder_config.config.as<RS_HDF5RecorderConfig>();
-        auto parent_dir = fs::path(config.path).parent_path();
-        if (!parent_dir.empty() && !fs::exists(parent_dir)) fs::create_directories(parent_dir);
-        sim->recorders.push_back(std::move(make_shared<RS_SimulationHDF5Recorder>(config.path)));
-    }
-}
-
 void RS_SimulationManager::_syncSimRecorders(const std::shared_ptr<RS_Simulation> &sim) {
-    // Wait for remaining recorder finish their work
     sim->waitForRecorderSync();
 
-    // Copy records from device to host
-    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "record sync begin");
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "record sync begin.");
     sim->kernel_manager->syncRecorderRecords();
 
-    // Put records into recorders
-    sim->setRecorderSyncFuture(thread_pool.submitTask([&]() {
-        RS_KernelManagerGuard guard(sim->kernel_manager.get());
-
+    sim->setRecorderSyncFuture(thread_pool.submitTask([this, sim]() {
+        RS_KernelManagerCommandExecutionGuard guard(sim->kernel_manager.get());
         sim->kernel_manager->waitForRecorderRecordsSync();
 
-        auto structure_records = sim->kernel_manager->getRecorderStructureRecords();
-        std::for_each(
-            std::execution::par,
-            sim->recorders.begin(),
-            sim->recorders.end(),
-            [&](const auto &recorder) {
-                for (auto &&[name, records] : structure_records)
-                    recorder->syncStructureRecords(name, records);
-            }
-        );
+        // Snapshot recorder shared_ptrs under lock so the parallel loop can run without holding
+        // the mutex (recorder lifetime kept alive by the snapshot).
+        std::vector<std::shared_ptr<RS_SimulationRecorder>> recorders;
+        {
+            std::lock_guard lock(sim->recorders_mutex);
+            recorders.reserve(sim->recorders.size());
+            for (auto &[_, entry] : sim->recorders) recorders.push_back(entry.second);
+        }
+        if (recorders.empty()) return;
 
-        auto camera_records = sim->kernel_manager->getRecorderCameraRecords();
-        std::for_each(
-            std::execution::par,
-            sim->recorders.begin(),
-            sim->recorders.end(),
-            [&](const auto &recorder) {
-                for (auto &&[name, records] : camera_records)
-                    recorder->syncCameraRecords(name, records);
-            }
-        );
-        RS_LOG(_sm_logger, debug, _getLogFormatter(sim->id), "record sync is finished");
+        auto structure_voxel_records = sim->kernel_manager->getRecorderStructureVoxelRecords();
+        thread_pool
+            .submitLoop(
+                0,
+                recorders.size(),
+                [&](RIndex i) {
+                    const auto &recorder = recorders[i];
+                    auto it = structure_voxel_records.find(recorder->getName());
+                    if (it == structure_voxel_records.end()) return;
+                    for (auto &&[structure_name, records] : it->second.structure_records)
+                        recorder->syncStructureVoxelRecords(structure_name, records);
+                }
+            )
+            .wait();
+
+        auto camera_perspective_records =
+            sim->kernel_manager->getRecorderCameraPerspectiveRecords();
+        thread_pool
+            .submitLoop(
+                0,
+                recorders.size(),
+                [&](RIndex i) {
+                    const auto &recorder = recorders[i];
+                    auto it = camera_perspective_records.find(recorder->getName());
+                    if (it == camera_perspective_records.end()) return;
+                    for (auto &&[camera_name, records] : it->second.camera_records)
+                        recorder->syncCameraPerspectiveRecords(camera_name, records);
+                }
+            )
+            .wait();
+
+        auto intersect_region_records =
+            sim->kernel_manager->getRecorderIntersectRegionRecords();
+        thread_pool
+            .submitLoop(
+                0,
+                recorders.size(),
+                [&](RIndex i) {
+                    const auto &recorder = recorders[i];
+                    auto it = intersect_region_records.find(recorder->getName());
+                    if (it == intersect_region_records.end()) return;
+                    for (auto &&[region_name, records] : it->second.intersect_region_records)
+                        recorder->syncIntersectRegionRecords(region_name, records);
+                }
+            )
+            .wait();
+        RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "record sync finished.");
     }));
 }
 
 void RS_SimulationManager::_flushSimRecorders(const std::shared_ptr<RS_Simulation> &sim) {
-    // Flush twice to ensure all records are flushed
+    // Flush twice to ensure all buffered records are drained.
     _syncSimRecorders(sim);
     _syncSimRecorders(sim);
     sim->waitForRecorderSync();
 }
 
 void RS_SimulationManager::_finishSimRecorders(const std::shared_ptr<RS_Simulation> &sim) {
-    thread_pool.submitLoop(
-                   0, sim->recorders.size(), [&](RIndex i) { sim->recorders[i]->finish(); }
-    ).wait();
+    std::vector<std::shared_ptr<RS_SimulationRecorder>> recorders;
+    {
+        std::lock_guard lock(sim->recorders_mutex);
+        recorders.reserve(sim->recorders.size());
+        for (auto &[_, entry] : sim->recorders) recorders.push_back(entry.second);
+        sim->recorders.clear();
+    }
+    if (recorders.empty()) return;
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "finalizing recorders.");
+    thread_pool.submitLoop(0, recorders.size(), [&](RIndex i) { recorders[i]->finish(); }).wait();
+    RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "recorders finalized.");
 }
 
 }  // namespace rise

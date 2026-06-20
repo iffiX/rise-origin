@@ -10,12 +10,12 @@
 #include "rise_origin/logic/soft/rs_voxel_m.h"
 #include "rise_origin/logic/vision/rs_vision_material_m.h"
 #include "rise_origin/logic/vision/rs_camera_m.h"
-#include "rise_origin/rsc/rs_floor_config.h"
-#include "rise_origin/rsc/rs_world_config.h"
-#include "rise_origin/utils/rs_color.h"
+#include "rise_origin/logic/vision/rs_vision_cosmic_background_m.h"
+#include "rise_origin/logic/vision/rs_vision_floor_m.h"
+#include "rise_origin/utils/math/rs_color.h"
 #include "rise_origin/utils/rs_conf.h"
-#include "rise_origin/utils/rs_triangle.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_triangle.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 
@@ -30,8 +30,8 @@ namespace logic {
  * single `current_medium_ior` scalar on the per-thread depth loop, updated only when the
  * Schlick + Snell pick lands on refraction. Self-intersection avoidance uses the Wachter and
  * Binder integer-offset method (Ray Tracing Gems vol. 1 ch. 6, 2019) instead of a fixed
- * surface epsilon. Sky background is dispatched by `world_render_type` to one of three
- * analytic models: constant color, a hand-tunable two-tone gradient with sun disk, or the
+ * surface epsilon. The cosmic background is dispatched by its type: a uniform color or
+ * equirectangular grid texture, a hand-tunable two-tone gradient with sun disk, or the
  * Hosek-Wilkie 2012 / 2013 analytic clear-sky model. The Hosek-Wilkie 27-coefficient state
  * is cooked once per camera-setup on the host and read by the kernel as a flat float array.
  *
@@ -134,6 +134,7 @@ class RS_VisionRayCompute {
     struct HitRecord {
         Vec3C p = Vec3C::zero();
         Vec3C normal = Vec3C(0, 0, 1);
+        Vec2C uv = Vec2C::zero();
         FloatC t = FloatC(0);
         Vec3C color = Vec3C::zero();
         Ray scattered;
@@ -303,7 +304,7 @@ class RS_VisionRayCompute {
      * @details Adds three buckets beyond the basic pass: endpoint shading
      *          AOVs (hit_position, normal, object_key, albedo, roughness,
      *          metalness, material_type, world_velocity, screen_motion),
-     *          chain_throughput, and chain_terminal_kind. OPAQUE primaries
+     *          chain_throughput, and chain_terminal_type. OPAQUE primaries
      *          short-circuit with endpoint = primary and throughput = (1,1,1);
      *          specular primaries follow the chain to the diffuse surface,
      *          sky, or emissive it eventually reaches.
@@ -373,16 +374,16 @@ class RS_VisionRayCompute {
             HitRecord endpoint_rec;
             Vec3C chain_throughput;
             Vec3C chain_reflect_radiance;
-            RSE_VisionRestirChainTerminalKind terminal_kind;
+            RSE_VisionRestirChainTerminalType terminal_type;
             _shadeInfoOnceRestir(
                 k, ray, any_hit, rec, chain_rs,
-                endpoint_rec, chain_throughput, chain_reflect_radiance, terminal_kind
+                endpoint_rec, chain_throughput, chain_reflect_radiance, terminal_type
             );
 
             ctx.camera_aux_chain_throughput[camera][{i, j}] = RVec3f(
                 float(chain_throughput.x), float(chain_throughput.y), float(chain_throughput.z)
             );
-            ctx.camera_aux_chain_terminal_kind[camera][{i, j}] = terminal_kind;
+            ctx.camera_aux_chain_terminal_type[camera][{i, j}] = terminal_type;
 
             // Off-chain reflect contributions atomic-added to canvas; the RGB
             // pass adds the on-chain reservoir term on top.
@@ -393,7 +394,7 @@ class RS_VisionRayCompute {
                 );
             }
 
-            if (terminal_kind == RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY) {
+            if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY) {
                 // endpoint_rec.p holds the terminal ray direction.
                 ctx.camera_aux_endpoint_hit_position[camera][{i, j}] = RVec3f(
                     float(endpoint_rec.p.x),
@@ -493,8 +494,8 @@ class RS_VisionRayCompute {
      *
      * @details Resolves the voxel handle through `ctx.structure_emissive_voxel_handles`, 
      *          reads the vision material's albedo and intensity, and stores the luminance 
-     *          of `albedo * intensity` into `light_weight`. Then inclusive scan into 
-     *          `light_cdf` runs after this kernel.
+     *          of `intensity` into `light_weight`. Then inclusive scan into `light_cdf` 
+     *          runs after this kernel.
      *
      * @param k             simulation kernel.
      * @param emissive_idx  flat index into `ctx.structure_emissive_voxel_handles`.
@@ -505,16 +506,16 @@ class RS_VisionRayCompute {
         using device::RS_ComputeFunction<RSCF_WriteEmissiveLightWeights>::index1D;
 
         template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel k) {
-            auto& ctx = k.ctx;
+        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel *k) {
+            auto& ctx = k->ctx;
             RIndex i = index1D();
             if (RSize(i) >= ctx.structure_emissive_voxel_handles.size()) return;
             RHandle voxel = ctx.structure_emissive_voxel_handles[i];
             RHandle vision_material = V_G(voxel, vision_material);
-            Vec3C albedo = Vec3C(VSM_G(vision_material, color).toVec3D());
-            FloatC intensity = FloatC(VSM_G(vision_material, intensity));
-            Vec3C emission = albedo * intensity;
-            ctx.light_weight[RSize(i) + 1] = float(_luminance(emission));
+            // Approximation using just intensity, for a better estimate, needs to 
+            // consider emission color (for texture probably average) and voxel size. 
+            FloatC intensity = FloatC(VSM_G(vision_material, emission_intensity));
+            ctx.light_weight[RSize(i) + 1] = float(intensity);
         }
     };
 
@@ -642,7 +643,8 @@ class RS_VisionRayCompute {
                 FloatC(k->vision_restir_disocclusion_position_threshold);
             FloatC normal_cos_threshold =
                 FloatC(k->vision_restir_disocclusion_normal_threshold);
-            bool is_prev_valid = reservoir_prev.sample_count > 0
+            bool is_prev_valid = !k->vision_is_restir_reservoir_stale
+                && reservoir_prev.sample_count > 0
                 && reservoir_prev.object_key == object_key
                 && (Vec3C(reservoir_prev.prev_hit_position) - hit_position).length()
                        < disocclusion_position_threshold
@@ -1008,7 +1010,7 @@ class RS_VisionRayCompute {
                     // path so the sun is correctly captured without double
                     // counting against NEE's sun pick).
                     Vec3C sky = _findHitBackground(k, bounce_dir);
-                    Vec3C sun_disk = _evalSunDiskHard(k, bounce_dir);
+                    Vec3C sun_disk = _evalCosmicBackgroundSunDisk(k, bounce_dir);
                     if (_luminance(sun_disk) > FloatC(0)) {
                         FloatC p_nee = _evalNeePdfSun(k, bounce_dir);
                         FloatC sun_mis_brdf = _powerHeuristicMIS(brdf_pdf, p_nee);
@@ -1976,7 +1978,7 @@ class RS_VisionRayCompute {
         // Note we are not walking on the array itself, we walk on the tile grid.
         FloatC t_curr = t_slab_enter;
         for (int iter = 0;
-             iter < RS_SIMULATION_MAX_ARRAY_FLOOR_RAY_TRACE_TILES && t_curr < t_slab_exit;
+             iter < RS_WORLD_VISION_TRACE_MAX_ARRAY_FLOOR_TILE_NUM && t_curr < t_slab_exit;
              ++iter) {
             // Determine current tile from an interior point just past t_curr.
             FloatC t_probe = t_curr + FloatC(RS_EPS);
@@ -2057,14 +2059,14 @@ class RS_VisionRayCompute {
         FloatC t_floor = voxel_hit ? t_voxel : RS_NumTraits<FloatC>::highest();
         Vec3C floor_normal(0, 0, 1);
         bool floor_hit = false;
-        if (k->floor_data_type == RSE_FLOOR_DATA_ARRAY) {
+        if (k->ctx.floor_vision_mem.data_type == RSE_VISION_FLOOR_DATA_ARRAY) {
             floor_hit = _findHitFloorTriangleTiled(
                 k, ray, RAY_T_MIN, t_floor, floor_triangle, t_floor, floor_normal
             );
-        } else if (k->floor_data_type == RSE_FLOOR_DATA_FLAT) {
+        } else if (k->ctx.floor_vision_mem.data_type == RSE_VISION_FLOOR_DATA_FLAT) {
             FloatC dz = ray.ray_direction.z;
             if (RS_ABS(dz) > FloatC(RS_EPS)) {
-                FloatC t_ground = -ray.ray_origin.z / dz;
+                FloatC t_ground = (FloatC(k->ctx.floor.height) - ray.ray_origin.z) / dz;
                 if (t_ground > RAY_T_MIN && t_ground < t_floor) {
                     t_floor = t_ground;
                     floor_normal = Vec3C(0, 0, 1);
@@ -2097,6 +2099,114 @@ class RS_VisionRayCompute {
      * Material resolution
      *****************************************************************/
 
+    /*****************************************************************
+     * Material-property resolution
+     *****************************************************************/
+
+    /**
+     * @brief Sample a procedural grid texture at a shading coordinate, picking line_color vs
+     *        fill_color (the metric position when is_meters, else the normalized UV).
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _sampleGridTexture(Kernel* k, RHandle h, const Vec2C& pos, const Vec2C& uv) {
+        const auto& grid = k->ctx.texture_grids[h];
+        FloatC cx = grid.is_meters ? pos.x : uv.x;
+        FloatC cy = grid.is_meters ? pos.y : uv.y;
+        FloatC half_width = FloatC(0.5) * FloatC(grid.line_width);
+        FloatC dx =
+            RS_ABS(cx - RS_FI::rs_round(cx / FloatC(grid.x_spacing)) * FloatC(grid.x_spacing));
+        FloatC dy =
+            RS_ABS(cy - RS_FI::rs_round(cy / FloatC(grid.y_spacing)) * FloatC(grid.y_spacing));
+        return (dx <= half_width || dy <= half_width) ? Vec3C(grid.line_color.toVec3D())
+                                                      : Vec3C(grid.fill_color.toVec3D());
+    }
+
+    /**
+     * @brief Resolve the albedo color for `vision_material` at the shading coordinate. Samples
+     *        the bound grid texture when grid-driven, otherwise returns the constant albedo.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void _resolveAlbedo(
+        Kernel* k,
+        RHandle vision_material,
+        const RS_VisionMaterialStateUnion& vsm_state,
+        const Vec2C& pos,
+        const Vec2C& uv,
+        Vec3C& albedo_out
+    ) {
+        auto& ctx = k->ctx;
+        switch (vsm_state.vision_material_state.albedo_input_type) {
+            case RSE_VISION_SAMPLE_INPUT_GRID:
+                albedo_out =
+                    _sampleGridTexture(k, VSM_G(vision_material, albedo).texture, pos, uv);
+                break;
+            default:
+                albedo_out = VSM_G(vision_material, albedo).constant.toVec3D();
+                break;
+        }
+    }
+
+    /**
+     * @brief Resolve the emission color for `vision_material` at the shading coordinate. The
+     *        caller multiplies by emission_intensity to produce final radiance.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void _resolveEmissionColor(
+        Kernel* k,
+        RHandle vision_material,
+        const RS_VisionMaterialStateUnion& vsm_state,
+        const Vec2C& pos,
+        const Vec2C& uv,
+        Vec3C& emission_color_out
+    ) {
+        auto& ctx = k->ctx;
+        switch (vsm_state.vision_material_state.emission_input_type) {
+            case RSE_VISION_SAMPLE_INPUT_GRID:
+                emission_color_out = _sampleGridTexture(
+                    k, VSM_G(vision_material, emission_color).texture, pos, uv
+                );
+                break;
+            default:
+                emission_color_out = VSM_G(vision_material, emission_color).constant.toVec3D();
+                break;
+        }
+    }
+
+    /**
+     * @brief Resolve the (roughness, metalness) pair for `vision_material` at the shading
+     *        coordinate. Grid-driven samples pack roughness in R and metalness in G; otherwise
+     *        returns the constant roughness/metalness.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void _resolveRoughnessMetalness(
+        Kernel* k,
+        RHandle vision_material,
+        const RS_VisionMaterialStateUnion& vsm_state,
+        const Vec2C& pos,
+        const Vec2C& uv,
+        FloatC& roughness_out,
+        FloatC& metalness_out
+    ) {
+        auto& ctx = k->ctx;
+        switch (vsm_state.vision_material_state.roughness_metalness_input_type) {
+            case RSE_VISION_SAMPLE_INPUT_GRID: {
+                Vec3C rm = _sampleGridTexture(
+                    k, VSM_G(vision_material, roughness_metalness).texture, pos, uv
+                );
+                roughness_out = rm.x;
+                metalness_out = rm.y;
+                break;
+            }
+            default: {
+                auto rm = VSM_G(vision_material, roughness_metalness).constant;
+                roughness_out = FloatC(rm.r);
+                metalness_out = FloatC(rm.g);
+                break;
+            }
+        }
+    }
+
     /**
      * @brief Read a voxel's vision material parameters into the hit record.
      */
@@ -2105,14 +2215,34 @@ class RS_VisionRayCompute {
     _loadVoxelMaterial(Kernel* k, RHandle voxel, HitRecord& rec_out) {
         auto& ctx = k->ctx;
         RHandle vision_material = V_G(voxel, vision_material);
-        rec_out.albedo = Vec3C(VSM_G(vision_material, color).toVec3D());
-        rec_out.ior = FloatC(VSM_G(vision_material, ior));
-        rec_out.intensity = FloatC(VSM_G(vision_material, intensity));
-        rec_out.roughness = FloatC(VSM_G(vision_material, roughness));
-        rec_out.metalness = FloatC(VSM_G(vision_material, metalness));
-        rec_out.material_gid = VSM_G(vision_material, material_gid);
         RS_VisionMaterialStateUnion mat_state{VSM_G(vision_material, state)};
-        rec_out.state.hit_state.vision_material_type = mat_state.vision_material_state.render_type;
+        const RSE_VisionMaterialType render_type = mat_state.vision_material_state.render_type;
+
+        // Per-face UV (0..1 within the voxel face); pos is the same coordinate in meters.
+        const Vec3C voxel_center = Vec3C(V_G(voxel, position));
+        RHandle voxel_material = V_G(voxel, voxel_material);
+        const FloatC voxel_size = FloatC(VM_G(voxel_material, voxel_size));
+        const Vec2C uv = _voxelFaceUV(
+            rec_out.p, rec_out.state.hit_state.face, voxel_center, voxel_size
+        );
+        const Vec2C pos = uv * voxel_size;
+        rec_out.uv = uv;
+
+        Vec3C albedo, emission_color;
+        FloatC roughness, metalness;
+        _resolveAlbedo(k, vision_material, mat_state, pos, uv, albedo);
+        _resolveRoughnessMetalness(k, vision_material, mat_state, pos, uv, roughness, metalness);
+        _resolveEmissionColor(k, vision_material, mat_state, pos, uv, emission_color);
+
+        // Emissive surfaces emit emission_color * emission_intensity downstream (rec.albedo *
+        // rec.intensity); route the emission color through the albedo slot in that case.
+        rec_out.albedo = (render_type == RSE_VISION_MATERIAL_EMISSIVE) ? emission_color : albedo;
+        rec_out.roughness = roughness;
+        rec_out.metalness = metalness;
+        rec_out.ior = FloatC(VSM_G(vision_material, ior));
+        rec_out.intensity = FloatC(VSM_G(vision_material, emission_intensity));
+        rec_out.material_gid = VSM_G(vision_material, material_gid);
+        rec_out.state.hit_state.vision_material_type = render_type;
     }
 
     /**
@@ -2141,39 +2271,43 @@ class RS_VisionRayCompute {
     }
 
     /**
-     * @brief Resolve the floor render mode into the hit record's material params.
+     * @brief Resolve the floor's referenced material into the hit record. Mirrors
+     *        _loadVoxelMaterial, sampling at the floor UV: flat floors tile per uv_scale,
+     *        array floors span the whole heightmap; pos is the world XY in meters.
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void _readFloorHit(Kernel* k, HitRecord& rec_in_out) {
-        if (k->floor_render_type == RSE_FLOOR_RENDER_TRANSPARENT) {
-            rec_in_out.state.hit_state.vision_material_type = RSE_VISION_MATERIAL_TRANSPARENT;
-            rec_in_out.albedo = Vec3C(k->floor_color.toVec3D());
-            rec_in_out.ior = FloatC(k->floor_ior);
-            rec_in_out.roughness = FloatC(k->floor_roughness);
-            rec_in_out.metalness = FloatC(0);
-        } else if (k->floor_render_type == RSE_FLOOR_RENDER_OPAQUE_GRID) {
-            FloatC half_width = FloatC(0.5) * FloatC(k->floor_grid_line_width);
-            FloatC x_spacing = FloatC(k->floor_grid_x_spacing);
-            FloatC y_spacing = FloatC(k->floor_grid_y_spacing);
-            FloatC dx = RS_ABS(rec_in_out.p.x - RS_FI::rs_round(rec_in_out.p.x / x_spacing) * x_spacing);
-            FloatC dy = RS_ABS(rec_in_out.p.y - RS_FI::rs_round(rec_in_out.p.y / y_spacing) * y_spacing);
-            rec_in_out.state.hit_state.vision_material_type = RSE_VISION_MATERIAL_OPAQUE;
-            rec_in_out.albedo = (dx <= half_width || dy <= half_width)
-                             ? Vec3C(k->floor_line_color.toVec3D())
-                             : Vec3C(k->floor_color.toVec3D());
-            rec_in_out.roughness = FloatC(k->floor_roughness);
-            rec_in_out.metalness = FloatC(k->floor_metalness);
+        auto& ctx = k->ctx;
+        const auto& fl = k->ctx.floor_vision_mem;
+        RHandle vision_material = fl.vision_material;
+        RS_VisionMaterialStateUnion mat_state{VSM_G(vision_material, state)};
+        const RSE_VisionMaterialType render_type = mat_state.vision_material_state.render_type;
+
+        const Vec2C pos = Vec2C(rec_in_out.p.x, rec_in_out.p.y);
+        Vec2C uv;
+        if (fl.data_type == RSE_VISION_FLOOR_DATA_ARRAY) {
+            const auto& fa = k->ctx.floor;
+            uv = Vec2C(
+                rec_in_out.p.x / FloatC(fa.x_size) + FloatC(0.5),
+                rec_in_out.p.y / FloatC(fa.y_size) + FloatC(0.5)
+            );
         } else {
-            rec_in_out.state.hit_state.vision_material_type = RSE_VISION_MATERIAL_OPAQUE;
-            rec_in_out.albedo = Vec3C(k->floor_color.toVec3D());
-            rec_in_out.roughness = FloatC(k->floor_roughness);
-            rec_in_out.metalness = FloatC(k->floor_metalness);
+            uv = pos / FloatC(fl.uv_scale);
         }
-        rec_in_out.intensity = FloatC(0);
-        rec_in_out.ior = FloatC(1);
-        if (k->floor_render_type == RSE_FLOOR_RENDER_TRANSPARENT) {
-            rec_in_out.ior = FloatC(k->floor_ior);
-        }
+
+        Vec3C albedo, emission_color;
+        FloatC roughness, metalness;
+        _resolveAlbedo(k, vision_material, mat_state, pos, uv, albedo);
+        _resolveRoughnessMetalness(k, vision_material, mat_state, pos, uv, roughness, metalness);
+        _resolveEmissionColor(k, vision_material, mat_state, pos, uv, emission_color);
+
+        rec_in_out.albedo = (render_type == RSE_VISION_MATERIAL_EMISSIVE) ? emission_color : albedo;
+        rec_in_out.roughness = roughness;
+        rec_in_out.metalness = metalness;
+        rec_in_out.ior = FloatC(VSM_G(vision_material, ior));
+        rec_in_out.intensity = FloatC(VSM_G(vision_material, emission_intensity));
+        rec_in_out.material_gid = VSM_G(vision_material, material_gid);
+        rec_in_out.state.hit_state.vision_material_type = render_type;
     }
 
     /*****************************************************************
@@ -2403,39 +2537,70 @@ class RS_VisionRayCompute {
     }
 
     /*****************************************************************
-     * Environment sky models
+     * Cosmic background models
      *****************************************************************/
 
     /**
-     * @brief Constant-color sky: returns the configured zenith color regardless of direction.
+     * @brief Equirectangular UV for a world-space direction, rotated about the
+     *        world up axis by `rotation_rad`. u from the azimuth, v from the
+     *        elevation; matches the texture lookup convention.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER static Vec2C
+    _cosmicBackgroundDirToUv(const Vec3C& dir, FloatC rotation_rad) {
+        Vec3C d = dir.normalized();
+        FloatC sin_r, cos_r;
+        RS_FI::rs_sincos(rotation_rad, &sin_r, &cos_r);
+        FloatC dx = cos_r * d.x + sin_r * d.y;
+        FloatC dy = -sin_r * d.x + cos_r * d.y;
+        FloatC u = FloatC(0.5) + RS_FI::rs_atan2(dy, dx) / FloatC(RS_2PI);
+        FloatC z = RS_MAX(FloatC(-1), RS_MIN(FloatC(1), d.z));
+        FloatC v = FloatC(0.5) + RS_FI::rs_asin(z) / FloatC(RS_PI);
+        return Vec2C(u, v);
+    }
+
+    /**
+     * @brief Uniform background: flat color (CONSTANT) or the procedural grid
+     *        sampled at the equirectangular UV (GRID), scaled by intensity.
+     *        Has no sun disk.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _evalConstantColorSky(Kernel* k) {
-        return Vec3C(k->world_color.toVec3D());
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _evalCosmicBackgroundUniform(Kernel* k, const Vec3C& dir) {
+        const auto& cb = k->ctx.cosmic_background_vision_mem;
+        RS_VisionCosmicBackgroundStateUnion st{cb.state};
+        if (st.cosmic_background_state.color_input_type == RSE_VISION_SAMPLE_INPUT_GRID) {
+            Vec2C uv = _cosmicBackgroundDirToUv(dir, FloatC(cb.rotation_rad));
+            return _sampleGridTexture(k, cb.color.texture, uv, uv) * FloatC(cb.intensity);
+        }
+        return Vec3C(cb.color.constant.toVec3D()) * FloatC(cb.intensity);
     }
 
     /**
      * @brief Two-tone gradient sky, sun disk excluded. Zenith and horizon
      *        colors blend by `1 - |dir.z|`; the sun is added separately by
-     *        `_evalSunDiskHard` so MIS can weight it independently.
+     *        `_evalCosmicBackgroundSunDisk` so MIS can weight it independently.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _evalGradientSky(Kernel* k, const Vec3C& dir) {
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _evalCosmicBackgroundGradient(Kernel* k, const Vec3C& dir) {
+        const auto& cb = k->ctx.cosmic_background_vision_mem;
         FloatC horizon_w = FloatC(1) - RS_ABS(dir.z);
-        Vec3C zenith = Vec3C(k->world_color.toVec3D());
-        Vec3C horizon = Vec3C(k->world_horizon_color.toVec3D());
+        Vec3C zenith = Vec3C(cb.zenith_color.toVec3D());
+        Vec3C horizon = Vec3C(cb.horizon_color.toVec3D());
         return zenith * (FloatC(1) - horizon_w) + horizon * horizon_w;
     }
 
     /**
      * @brief Hosek-Wilkie analytic clear-sky lookup, sun disk excluded.
      *        Verbatim `ArHosekSkyModel_GetRadianceInternal` over cooked
-     *        `world_hw_config` / `world_hw_radiance`; below-horizon returns zero.
+     *        `hw_config` / `hw_radiance`; below-horizon returns zero.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _evalHosekWilkieSky(Kernel* k, const Vec3C& dir) {
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _evalCosmicBackgroundHosekWilkie(Kernel* k, const Vec3C& dir) {
+        const auto& cb = k->ctx.cosmic_background_vision_mem;
         if (dir.z <= FloatC(0)) return Vec3C::zero();
-        Vec3C sun_dir = Vec3C(k->world_sun_direction).normalized();
+        Vec3C sun_dir = Vec3C(cb.sun_direction).normalized();
         FloatC cos_theta = dir.z;
         FloatC cos_gamma = dir.dot(sun_dir);
         if (cos_gamma > FloatC(1)) cos_gamma = FloatC(1);
@@ -2443,15 +2608,15 @@ class RS_VisionRayCompute {
 
         Vec3C sky_color;
         for (int ch = 0; ch < 3; ++ch) {
-            FloatC c0 = FloatC(k->world_hw_config[ch * 9 + 0]);
-            FloatC c1 = FloatC(k->world_hw_config[ch * 9 + 1]);
-            FloatC c2 = FloatC(k->world_hw_config[ch * 9 + 2]);
-            FloatC c3 = FloatC(k->world_hw_config[ch * 9 + 3]);
-            FloatC c4 = FloatC(k->world_hw_config[ch * 9 + 4]);
-            FloatC c5 = FloatC(k->world_hw_config[ch * 9 + 5]);
-            FloatC c6 = FloatC(k->world_hw_config[ch * 9 + 6]);
-            FloatC c7 = FloatC(k->world_hw_config[ch * 9 + 7]);
-            FloatC c8 = FloatC(k->world_hw_config[ch * 9 + 8]);
+            FloatC c0 = FloatC(cb.hw_config[ch * 9 + 0]);
+            FloatC c1 = FloatC(cb.hw_config[ch * 9 + 1]);
+            FloatC c2 = FloatC(cb.hw_config[ch * 9 + 2]);
+            FloatC c3 = FloatC(cb.hw_config[ch * 9 + 3]);
+            FloatC c4 = FloatC(cb.hw_config[ch * 9 + 4]);
+            FloatC c5 = FloatC(cb.hw_config[ch * 9 + 5]);
+            FloatC c6 = FloatC(cb.hw_config[ch * 9 + 6]);
+            FloatC c7 = FloatC(cb.hw_config[ch * 9 + 7]);
+            FloatC c8 = FloatC(cb.hw_config[ch * 9 + 8]);
             FloatC gamma = RS_FI::rs_acos(cos_gamma);
             FloatC expM = RS_FI::rs_exp_fast(c4 * gamma);
             FloatC rayM = cos_gamma * cos_gamma;
@@ -2460,9 +2625,9 @@ class RS_VisionRayCompute {
             FloatC zenith_term = RS_FI::rs_sqrt(cos_theta);
             FloatC val = (FloatC(1) + c0 * RS_FI::rs_exp_fast(c1 / (cos_theta + FloatC(0.01)))) *
                          (c2 + c3 * expM + c5 * rayM + c6 * mieM + c7 * zenith_term);
-            sky_color[ch] = val * FloatC(k->world_hw_radiance[ch]);
+            sky_color[ch] = val * FloatC(cb.hw_radiance[ch]);
         }
-        sky_color *= FloatC(k->world_sky_intensity);
+        sky_color *= FloatC(cb.intensity);
         return sky_color;
     }
 
@@ -2470,39 +2635,43 @@ class RS_VisionRayCompute {
      * @brief True when `dir` points into the sun disk's angular cone.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static bool _isInSunCone(Kernel* k, const Vec3C& dir) {
-        Vec3C sun_dir = Vec3C(k->world_sun_direction).normalized();
-        FloatC cos_radius = RS_FI::rs_cos(FloatC(k->world_sun_angular_radius));
+    HOST_DEVICE_INLINE_QUALIFIER static bool
+    _isInCosmicBackgroundSunCone(Kernel* k, const Vec3C& dir) {
+        const auto& cb = k->ctx.cosmic_background_vision_mem;
+        Vec3C sun_dir = Vec3C(cb.sun_direction).normalized();
+        FloatC cos_radius = RS_FI::rs_cos(FloatC(cb.sun_angular_radius));
         return dir.dot(sun_dir) >= cos_radius;
     }
 
     /**
      * @brief Sun disk radiance under the hard-cutoff disk model.
-     *        `world_sun_color` inside the cone, zero outside; shared by both
-     *        the sky background path and the NEE sun emission.
+     *        `sun_color` inside the cone, zero outside; shared by both
+     *        the cosmic background path and the NEE sun emission.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _evalSunDiskHard(Kernel* k, const Vec3C& dir) {
-        if (!_isInSunCone(k, dir)) return Vec3C::zero();
-        return Vec3C(k->world_sun_color.toVec3D());
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _evalCosmicBackgroundSunDisk(Kernel* k, const Vec3C& dir) {
+        if (!_isInCosmicBackgroundSunCone(k, dir)) return Vec3C::zero();
+        return Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D());
     }
 
     /**
-     * @brief Background dispatch by `world_render_type`, sky plus sun disk.
-     *        MIS-weighting callers should split via `_evalGradientSky` /
-     *        `_evalHosekWilkieSky` and `_evalSunDiskHard` directly.
+     * @brief Background dispatch by cosmic background type, sky plus sun disk.
+     *        MIS-weighting callers should split via `_evalCosmicBackgroundGradient` /
+     *        `_evalCosmicBackgroundHosekWilkie` and `_evalCosmicBackgroundSunDisk` directly.
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static Vec3C _findHitBackground(Kernel* k, const Vec3C& dir) {
+        RS_VisionCosmicBackgroundStateUnion st{k->ctx.cosmic_background_vision_mem.state};
         Vec3C base;
-        if (k->world_render_type == RSE_WORLD_RENDER_HOSEK_WILKIE) {
-            base = _evalHosekWilkieSky(k, dir);
-        } else if (k->world_render_type == RSE_WORLD_RENDER_GRADIENT) {
-            base = _evalGradientSky(k, dir);
+        if (st.cosmic_background_state.type == RSE_VISION_COSMIC_BACKGROUND_HOSEK_WILKIE) {
+            base = _evalCosmicBackgroundHosekWilkie(k, dir);
+        } else if (st.cosmic_background_state.type == RSE_VISION_COSMIC_BACKGROUND_GRADIENT) {
+            base = _evalCosmicBackgroundGradient(k, dir);
         } else {
-            return _evalConstantColorSky(k);
+            return _evalCosmicBackgroundUniform(k, dir);
         }
-        return base + _evalSunDiskHard(k, dir);
+        return base + _evalCosmicBackgroundSunDisk(k, dir);
     }
 
     /*****************************************************************
@@ -2764,23 +2933,27 @@ class RS_VisionRayCompute {
         RHandle voxel = ctx.structure_emissive_voxel_handles[light_index - 1];
         position_out = Vec3C(V_G(voxel, position));
         RHandle vision_material = V_G(voxel, vision_material);
-        Vec3C albedo = Vec3C(VSM_G(vision_material, color).toVec3D());
-        FloatC intensity = FloatC(VSM_G(vision_material, intensity));
-        emission_out = albedo * intensity;
+        RS_VisionMaterialStateUnion mat_state{VSM_G(vision_material, state)};
+        Vec3C emission_color;
+        _resolveEmissionColor(
+            k, vision_material, mat_state, Vec2C::zero(), Vec2C::zero(), emission_color
+        );
+        FloatC intensity = FloatC(VSM_G(vision_material, emission_intensity));
+        emission_out = emission_color * intensity;
         RHandle voxel_material = V_G(voxel, voxel_material);
         voxel_size_out = FloatC(VM_G(voxel_material, voxel_size));
     }
 
     /**
      * @brief Sample a direction uniformly inside the sun's angular disc.
-     *        Uniform-on-cone around `world_sun_direction`; degenerate cone
+     *        Uniform-on-cone around the cosmic background sun direction; degenerate cone
      *        collapses to the sun axis exactly.
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static Vec3C
     _sampleSunConeDirection(Kernel* k, device::RS_RandomState& rs_in_out) {
-        Vec3C sun_dir = Vec3C(k->world_sun_direction).normalized();
-        FloatC half_angle = FloatC(k->world_sun_angular_radius);
+        Vec3C sun_dir = Vec3C(k->ctx.cosmic_background_vision_mem.sun_direction).normalized();
+        FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
         FloatC cos_half = RS_FI::rs_cos(half_angle);
         FloatC one_minus_cos = FloatC(1) - cos_half;
         if (one_minus_cos <= FloatC(RS_EPS)) return sun_dir;
@@ -2819,7 +2992,7 @@ class RS_VisionRayCompute {
             ls.dir = sun_dir;
             ls.dist = FloatC(RS_MAX_FLOAT);
             ls.position = Vec3C::zero();
-            ls.emission = Vec3C(k->world_sun_color.toVec3D());
+            ls.emission = Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D());
             ls.cos_emit = FloatC(1);
             ls.area_visible = FloatC(1);
             ls.is_sun = true;
@@ -2904,7 +3077,7 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Re-evaluate a stored light sample at a new shading point. Sun
-     *        always resolves to `world_sun_direction`; voxel recovers the face
+     *        always resolves to the cosmic background sun direction; voxel recovers the face
      *        the stored point sits on, then recomputes cos_emit / area_visible
      *        for the new receiver.
      */
@@ -2915,10 +3088,10 @@ class RS_VisionRayCompute {
     ) {
         LightSample ls;
         if (light_index == RS_VISION_SUN_LIGHT_INDEX) {
-            ls.dir = Vec3C(k->world_sun_direction).normalized();
+            ls.dir = Vec3C(k->ctx.cosmic_background_vision_mem.sun_direction).normalized();
             ls.dist = FloatC(RS_MAX_FLOAT);
             ls.position = Vec3C::zero();
-            ls.emission = Vec3C(k->world_sun_color.toVec3D());
+            ls.emission = Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D());
             ls.cos_emit = FloatC(1);
             ls.area_visible = FloatC(1);
             ls.is_sun = true;
@@ -2954,8 +3127,8 @@ class RS_VisionRayCompute {
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static FloatC
     _evalNeePdfSun(Kernel* k, const Vec3C& dir) {
-        if (!_isInSunCone(k, dir)) return FloatC(0);
-        FloatC half_angle = FloatC(k->world_sun_angular_radius);
+        if (!_isInCosmicBackgroundSunCone(k, dir)) return FloatC(0);
+        FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
         FloatC cos_half = RS_FI::rs_cos(half_angle);
         FloatC one_minus_cos = FloatC(1) - cos_half;
         if (one_minus_cos <= FloatC(RS_EPS)) return FloatC(0);
@@ -2983,9 +3156,7 @@ class RS_VisionRayCompute {
         if (total <= FloatC(0)) return FloatC(0);
 
         RHandle vision_material = V_G(bounce_hit_voxel, vision_material);
-        Vec3C albedo_v = Vec3C(VSM_G(vision_material, color).toVec3D());
-        FloatC intensity_v = FloatC(VSM_G(vision_material, intensity));
-        FloatC weight_v = _luminance(albedo_v * intensity_v);
+        FloatC weight_v = FloatC(VSM_G(vision_material, emission_intensity));
         if (weight_v <= FloatC(0)) return FloatC(0);
         FloatC p_pick = weight_v / total;
 
@@ -3029,8 +3200,8 @@ class RS_VisionRayCompute {
     HOST_DEVICE_INLINE_QUALIFIER static FloatC
     _evalNeePdf(Kernel* k, RIndex light_index, const LightSample& ls) {
         if (light_index == RS_VISION_SUN_LIGHT_INDEX) {
-            if (!_isInSunCone(k, ls.dir)) return FloatC(0);
-            FloatC half_angle = FloatC(k->world_sun_angular_radius);
+            if (!_isInCosmicBackgroundSunCone(k, ls.dir)) return FloatC(0);
+            FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
             FloatC cos_half = RS_FI::rs_cos(half_angle);
             FloatC one_minus_cos = FloatC(1) - cos_half;
             if (one_minus_cos <= FloatC(RS_EPS)) return FloatC(0);
@@ -3243,7 +3414,7 @@ class RS_VisionRayCompute {
                 // BRDF-into-sky: MIS against sun-cone NEE pdf so the sun disc
                 // does not get double-counted when this direction lands in it.
                 Vec3C sky = _findHitBackground(k, bounce_dir);
-                Vec3C sun_disk = _evalSunDiskHard(k, bounce_dir);
+                Vec3C sun_disk = _evalCosmicBackgroundSunDisk(k, bounce_dir);
                 if (_luminance(sun_disk) > FloatC(0)) {
                     FloatC p_nee = _evalNeePdfSun(k, bounce_dir);
                     FloatC mis_brdf = _powerHeuristicMIS(brdf_pdf, p_nee);
@@ -3570,7 +3741,7 @@ class RS_VisionRayCompute {
             // MIS-weight the sun-disc contribution only; smooth sky has no NEE
             // partner and passes through with weight 1.
             if (last_bounce_brdf_pdf_in_out < MIS_DELTA_BRDF_PDF) {
-                Vec3C sun_disk = _evalSunDiskHard(k, dir);
+                Vec3C sun_disk = _evalCosmicBackgroundSunDisk(k, dir);
                 if (_luminance(sun_disk) > FloatC(0)) {
                     FloatC p_nee = _evalNeePdfSun(k, dir);
                     FloatC mis_brdf =
@@ -3648,7 +3819,7 @@ class RS_VisionRayCompute {
      *        until it lands on diffuse, sky, or emissive (or runs out of the
      *        budget), accumulating Beer-Lambert / Fresnel throughput along the
      *        way. Caller hands in the primary HitRecord; gets back the
-     *        endpoint shading record + accumulated throughput + terminal kind
+     *        endpoint shading record + accumulated throughput + terminal type
      *        + off-chain reflect radiance.
      *
      * @details For non-specular primaries (or a miss) the function returns
@@ -3656,7 +3827,7 @@ class RS_VisionRayCompute {
      *          When the chain ends in SKY, `endpoint_rec_out.p` holds the
      *          terminal ray direction (not a world point); callers writing
      *          it into the endpoint_hit_position AOV treat it as a direction
-     *          based on the terminal_kind tag.
+     *          based on the terminal_type tag.
      *
      *          At each glass surface along the chain, the main chain follows
      *          refract deterministically; the reflect side is handled by
@@ -3676,14 +3847,14 @@ class RS_VisionRayCompute {
         HitRecord& endpoint_rec_out,
         Vec3C& chain_throughput_out,
         Vec3C& chain_reflect_radiance_out,
-        RSE_VisionRestirChainTerminalKind& terminal_kind_out
+        RSE_VisionRestirChainTerminalType& terminal_type_out
     ) {
         chain_throughput_out = Vec3C::one();
         chain_reflect_radiance_out = Vec3C::zero();
         if (!primary_any_hit) {
             endpoint_rec_out = HitRecord{};
             endpoint_rec_out.p = primary_ray.ray_direction;
-            terminal_kind_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY;
+            terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY;
             return;
         }
 
@@ -3698,12 +3869,12 @@ class RS_VisionRayCompute {
 
             if (mt == RSE_VISION_MATERIAL_EMISSIVE) {
                 endpoint_rec_out = cur_rec;
-                terminal_kind_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_EMISSIVE;
+                terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_EMISSIVE;
                 return;
             }
             if (!_isSpecularSurface(mt, cur_rec.roughness, cur_rec.metalness)) {
                 endpoint_rec_out = cur_rec;
-                terminal_kind_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE;
+                terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE;
                 return;
             }
 
@@ -3732,18 +3903,18 @@ class RS_VisionRayCompute {
             if (!_findHit(k, cur_ray, cur_rec)) {
                 endpoint_rec_out = HitRecord{};
                 endpoint_rec_out.p = cur_ray.ray_direction;
-                terminal_kind_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY;
+                terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY;
                 return;
             }
         }
         // Budget exhausted: treat the last hit as a surface endpoint (slight
         // darkening on hall-of-mirrors corners).
         endpoint_rec_out = cur_rec;
-        terminal_kind_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE;
+        terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE;
     }
 
     /**
-     * @brief ReSTIR-mode flat shader: dispatches on the chain terminal kind
+     * @brief ReSTIR-mode flat shader: dispatches on the chain terminal type
      *        and reads endpoint AOVs + reservoirs. Used when
      *        `vision_is_restir_enabled == true`.
      */
@@ -3759,17 +3930,17 @@ class RS_VisionRayCompute {
         if (k == nullptr) return;
         auto& ctx = k->ctx;
 
-        RSE_VisionRestirChainTerminalKind kind =
-            ctx.camera_aux_chain_terminal_kind[camera][{ii, jj}];
+        RSE_VisionRestirChainTerminalType terminal_type =
+            ctx.camera_aux_chain_terminal_type[camera][{ii, jj}];
         Vec3C throughput = Vec3C(ctx.camera_aux_chain_throughput[camera][{ii, jj}]);
 
-        if (kind == RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY) {
+        if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY) {
             Vec3C sky_dir = Vec3C(ctx.camera_aux_endpoint_hit_position[camera][{ii, jj}]);
             contribution_out = throughput.elemMul(_findHitBackground(k, sky_dir));
             return;
         }
 
-        if (kind == RSE_VISION_RESTIR_CHAIN_TERMINAL_EMISSIVE) {
+        if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_EMISSIVE) {
             Vec3C albedo = Vec3C(ctx.camera_aux_endpoint_albedo[camera][{ii, jj}]);
             FloatC intensity = FloatC(ctx.camera_aux_endpoint_intensity[camera][{ii, jj}]);
             contribution_out = throughput.elemMul(albedo * intensity);
@@ -3936,6 +4107,29 @@ class RS_VisionRayCompute {
     /*****************************************************************
      * Pure-math primitives
      *****************************************************************/
+
+    /**
+     * @brief Procedural face-tiled UV for a voxel face; one voxel face spans 1 UV unit.
+     *
+     * @details Per-face unwrap: axis = face/2 (X/Y/Z faces), the two in-plane axes are
+     * (axis+1)%3 and (axis+2)%3, and the origin is the voxel's min corner on that face.
+     * Returns the hit point's in-face offset normalized by the current voxel size, so
+     * uv(0,0) is the min corner and uv(1,1) the opposite corner.
+     *
+     * @param hit_p        world hit point on the face.
+     * @param face         crossed face index (+x,-x,+y,-y,+z,-z).
+     * @param voxel_center world-space voxel center.
+     * @param voxel_size   current voxel edge length.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER static Vec2C
+    _voxelFaceUV(const Vec3C& hit_p, int face, const Vec3C& voxel_center, FloatC voxel_size) {
+        int axis = face / 2;
+        int u_axis = (axis + 1) % 3;
+        int v_axis = (axis + 2) % 3;
+        Vec3C cube_min = voxel_center - Vec3C::full(FloatC(0.5) * voxel_size);
+        Vec3C local = hit_p - cube_min;
+        return Vec2C(local[u_axis], local[v_axis]) / voxel_size;
+    }
 
     /**
      * @brief Wachter and Binder self-intersection offset (Ray Tracing Gems vol. 1 ch. 6).

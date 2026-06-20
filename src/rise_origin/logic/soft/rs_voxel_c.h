@@ -6,6 +6,7 @@
 
 #include "rise_origin/core/rs_kernel.h"
 #include "rise_origin/device/rs_static_construct.h"
+#include "rise_origin/logic/soft/rs_link_c.h"
 
 namespace rise {
 
@@ -50,11 +51,19 @@ class RS_LinkCompute;
 template <RSE_FloatType FloatComputeAccuracy>
 class RS_RigidBodyCompute;
 
+/**
+ * @brief Disable every voxel in a structure's voxel segment by clearing its is_enabled flag.
+ * @details A disabled voxel is skipped by the physics, contact and render passes while the rest
+ * of its state is left untouched, so it can be re-enabled later.
+ *
+ * @param k                    simulation kernel.
+ * @param voxel_segment_offset handle offset added to the 1D index to reach this segment's voxels.
+ */
 class RSCF_DisableVoxel : public device::RS_ComputeFunction<RSCF_DisableVoxel> {
    public:
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel k, RSize voxel_segment_offset) {
-        auto &ctx = k.ctx;
+    HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel *k, RSize voxel_segment_offset) {
+        auto &ctx = k->ctx;
         RHandle voxel = index1D() + voxel_segment_offset;
         RS_VoxelStateUnion state_union{V_G(voxel, state)};
         state_union.voxel_state.is_enabled = false;
@@ -62,19 +71,54 @@ class RSCF_DisableVoxel : public device::RS_ComputeFunction<RSCF_DisableVoxel> {
     }
 };
 
+/**
+ * @brief Set or clear the effective immobility of every voxel in a structure's voxel segment.
+ * @details Freezing forces is_static true so the voxel stops integrating and joins the static
+ * subset while staying collidable and rendered; unfreezing restores is_static to the voxel's
+ * permanent is_fixed, so a mixed-material structure keeps its originally-fixed voxels immobile.
+ *
+ * @param k                   simulation kernel.
+ * @param voxel_segment_offset handle offset added to the 1D index to reach this segment's voxels.
+ * @param freeze              true to freeze the voxels, false to restore them.
+ */
+class RSCF_SetVoxelStaticOverSegment
+    : public device::RS_ComputeFunction<RSCF_SetVoxelStaticOverSegment> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    run(Kernel *k, RSize voxel_segment_offset, bool freeze) {
+        auto &ctx = k->ctx;
+        RHandle voxel = index1D() + voxel_segment_offset;
+        RS_VoxelStateUnion state_union{V_G(voxel, state)};
+        state_union.voxel_state.is_static = freeze ? true : state_union.voxel_state.is_fixed;
+        V_S(state, state_union.voxel_state_packed);
+    }
+};
+
+/**
+ * @brief Resolve a voxel's segment-relative dependency ids into absolute handles.
+ * @details Adds the matching segment offset to the stored voxel-material, link, neighbor-voxel
+ * and rigid-body ids so the voxel holds live handles after its segment is placed; null ids are
+ * left unresolved.
+ *
+ * @param k                             simulation kernel.
+ * @param voxel_segment_offset          handle offset to this segment's voxels.
+ * @param link_segment_offset           handle offset to this segment's links.
+ * @param voxel_material_segment_offset handle offset to this segment's voxel materials.
+ * @param rigid_body_segment_offset     handle offset to this segment's rigid bodies.
+ */
 class RSCF_ResolveVoxelDependency : public device::RS_ComputeFunction<RSCF_ResolveVoxelDependency> {
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void run(
-        Kernel k,
+        Kernel *k,
         RSize voxel_segment_offset,
         RSize link_segment_offset,
         RSize voxel_material_segment_offset,
-        RSize rigid_body_segment_offset,
-        RSize expansion_signal_segment_offset
+        RSize rigid_body_segment_offset
     ) {
         RHandle voxel = index1D() + voxel_segment_offset;
-        auto &ctx = k.ctx;
+        auto &ctx = k->ctx;
         if (RIndex voxel_material_sid = V_G(voxel_material_sid);
             voxel_material_sid != RS_NULL_INDEX) {
             RHandle voxel_material = voxel_material_sid + voxel_material_segment_offset;
@@ -104,9 +148,6 @@ class RSCF_ResolveVoxelDependency : public device::RS_ComputeFunction<RSCF_Resol
             RHandle rigid_body = rigid_body_sid + rigid_body_segment_offset;
             V_S(rigid_body, rigid_body);
         }
-
-        RHandle expansion_signal = V_G(expansion_signal_sid) + expansion_signal_segment_offset;
-        V_S(expansion_signal, expansion_signal);
     }
 };
 
@@ -123,6 +164,18 @@ class RS_VoxelCompute {
     /*****************************************************************
      * Device side compute functions for updating
      *****************************************************************/
+    /**
+     * @brief Advance one soft-body voxel by a single integration step.
+     * @details For an enabled, non-static voxel: refreshes expansion and size, gathers the
+     * external force and moment from its bonds, contacts, gravity and damping, resolves floor
+     * friction, then semi-implicitly integrates linear and angular momentum to update position
+     * and orientation and refresh the Poisson strain and corner offsets. A rigid voxel only
+     * accumulates its external force and moment, since its pose is driven by the owning rigid
+     * body.
+     *
+     * @param k     simulation kernel.
+     * @param voxel handle of the voxel to update.
+     */
     class RSCF_UpdateVoxel : public device::RS_ComputeFunction<RSCF_UpdateVoxel> {
        public:
         using BaseType = device::RS_ComputeFunction<RSCF_UpdateVoxel>;
@@ -162,7 +215,8 @@ class RS_VoxelCompute {
 
                 RS_VoxelStateUnion state_union{V_G(state)};
 
-                if (state_union.voxel_state.is_fixed || !state_union.voxel_state.is_enabled) return;
+                if (state_union.voxel_state.is_static || !state_union.voxel_state.is_enabled)
+                    return;
 
                 RHandle voxel_material = V_G(voxel_material);
                 FloatC voxel_size = VM_G(voxel_size);
@@ -209,7 +263,7 @@ class RS_VoxelCompute {
                         normal_vec
                     );
 
-#ifdef RS_DEBUG_VOXEL
+#ifdef RS_DEBUG_ENABLE_LOGIC_VOXEL
                     CUDA_PRINTF_ASSERT(!isnan(total_force.x) && abs(total_force.x) < 1e6);
                     CUDA_PRINTF_ASSERT(!isnan(total_force.y) && abs(total_force.y) < 1e6);
                     CUDA_PRINTF_ASSERT(!isnan(total_force.z) && abs(total_force.z) < 1e6);
@@ -254,7 +308,7 @@ class RS_VoxelCompute {
                     V_S(linear_momentum, linear_momentum);
                     V_S(state, state_union.voxel_state_packed);
 
-#ifdef RS_DEBUG_VOXEL
+#ifdef RS_DEBUG_ENABLE_LOGIC_VOXEL
                     CUDA_PRINTF_ASSERT(Vec3C(V_G(position)).isValid());
                     CUDA_PRINTF_ASSERT(Quat3C(V_G(orientation)).isValid());
 #endif
@@ -278,9 +332,10 @@ class RS_VoxelCompute {
             // Update expansion
             if (state_union_in_out.voxel_state.has_expansion) {
                 FloatC old_expansion = V_G(expansion);
-                FloatC signal = ctx.structure_expansion_signals[V_G(expansion_signal)];
+                FloatC signal = ctx.structure_signals[V_G(structure_signal)]
+                                    .expansion_signals.expansion[V_G(expansion_signal_sid)];
                 FloatC target = state_union_in_out.voxel_state.expansion_control_mode ==
-                                        RSE_STRUCTURE_EXPANSION_CONTROL_MODE_RATE
+                                        RSE_VOXEL_EXPANSION_CONTROL_RATE
                                     ? old_expansion + dt * signal
                                     : signal;
                 FloatC new_expansion = RS_BOUND(
@@ -308,7 +363,6 @@ class RS_VoxelCompute {
             // forces from internal bonds
             ext_force_out = Vec3C::zero();
             ext_moment_out = Vec3C::zero();
-            Vec3C ext_abs_force = Vec3C::zero();
 
             auto link_sid = V_G(link_sid);
             auto links = V_G(links);
@@ -336,24 +390,16 @@ class RS_VoxelCompute {
                             } else {
                                 if (link) {
                                     has_link = true;
-                                    if (!(state_union_in_out.voxel_state.link_is_tendon &
-                                          (1u << i))) {
-                                        // For link, it always points from voxel_neg to voxel_pos
-                                        // and its direction is always in the positive direction
-                                        if (isLinkDirectionNegative(
-                                                static_cast<RSE_LinkDirection>(i)
-                                            )) {
-                                            ext_force_out += Vec3C(L_G(link, force_pos));
-                                            ext_moment_out += Vec3C(L_G(link, moment_pos));
-                                        } else {
-                                            ext_force_out += Vec3C(L_G(link, force_neg));
-                                            ext_moment_out += Vec3C(L_G(link, moment_neg));
-                                        }
+                                    // For link, it always points from voxel_neg to voxel_pos
+                                    // and its direction is always in the positive direction
+                                    if (isLinkDirectionNegative(
+                                            static_cast<RSE_LinkDirection>(i)
+                                        )) {
+                                        ext_force_out += Vec3C(L_G(link, force_pos));
+                                        ext_moment_out += Vec3C(L_G(link, moment_pos));
                                     } else {
-                                        if (L_G(link, voxel_neg) == voxel)
-                                            ext_abs_force += Vec3C(L_G(link, force_neg));
-                                        else
-                                            ext_abs_force += Vec3C(L_G(link, force_pos));
+                                        ext_force_out += Vec3C(L_G(link, force_neg));
+                                        ext_moment_out += Vec3C(L_G(link, moment_neg));
                                     }
                                 }
                             }
@@ -371,17 +417,17 @@ class RS_VoxelCompute {
 
             // from local to global coordinates
             RQuat3rf orientation = V_G(orientation);
-            ext_force_out = orientation.rotateVec3D(ext_force_out) + ext_abs_force;
+            ext_force_out = orientation.rotateVec3D(ext_force_out);
 
             // Contact force
             if (state_union_in_out.voxel_state.has_contact_voxel_0 &&
                 (!state_union_in_out.voxel_state.is_rigid ||
-                 !state_union_in_out.voxel_state.is_contact_voxel_0_rigid)) {
+                 !state_union_in_out.voxel_state.is_contact_voxel_0_rigid_or_static)) {
                 ext_force_out += Vec3C(V_G(contact_force_0));
             }
             if (state_union_in_out.voxel_state.has_contact_voxel_1 &&
                 (!state_union_in_out.voxel_state.is_rigid ||
-                 !state_union_in_out.voxel_state.is_contact_voxel_1_rigid)) {
+                 !state_union_in_out.voxel_state.is_contact_voxel_1_rigid_or_static)) {
                 ext_force_out += Vec3C(V_G(contact_force_1));
             }
 
@@ -412,7 +458,7 @@ class RS_VoxelCompute {
             }
             V_S(ext_moment, ext_moment_out);
 
-#ifdef RS_DEBUG_VOXEL
+#ifdef RS_DEBUG_ENABLE_LOGIC_VOXEL
             CUDA_PRINTF_ASSERT(!isnan(ext_force.x) && abs(ext_force.x) < 1e6);
             CUDA_PRINTF_ASSERT(!isnan(ext_force.y) && abs(ext_force.y) < 1e6);
             CUDA_PRINTF_ASSERT(!isnan(ext_force.z) && abs(ext_force.z) < 1e6);
@@ -448,6 +494,16 @@ class RS_VoxelCompute {
                     Vec3C velocity = linearVelocity(linear_momentum_in_out, mass_inverse);
                     FloatC normal_force_norm = VM_G(penetration_stiffness) * floor_penetration;
 
+                    // Voxel-floor friction from the material pair tables.
+                    RIndex mat_gid_a = VM_G(material_gid);
+                    RIndex floor_gid = ctx.floor.material_gid;
+                    FloatC u_static = FloatC(
+                        ctx.material_friction_static_table[{(RSize)mat_gid_a, (RSize)floor_gid}]
+                    );
+                    FloatC u_dynamic = FloatC(
+                        ctx.material_friction_dynamic_table[{(RSize)mat_gid_a, (RSize)floor_gid}]
+                    );
+
                     // in the normal direction: k*x-C*v - spring and damping
                     total_force_in_out += normal_force_norm * normal_vec_out;
                     total_force_in_out -= VM_G(contact_damping_translate_c) * velocity;
@@ -463,7 +519,7 @@ class RS_VoxelCompute {
 
                         // use squares to avoid a square root
                         FloatC surface_force_sq = plane_force.length2();
-                        FloatC friction_force_sq = VM_G(u_static) * normal_force_norm;
+                        FloatC friction_force_sq = u_static * normal_force_norm;
                         friction_force_sq = friction_force_sq * friction_force_sq;
 
                         current_friction_state = surface_force_sq < friction_force_sq
@@ -472,7 +528,7 @@ class RS_VoxelCompute {
                     } else {
                         // Check whether voxel will continue to stay in dynamic friction
                         // state Work of dynamic friction
-                        FloatC friction_force = VM_G(u_dynamic) * normal_force_norm;
+                        FloatC friction_force = u_dynamic * normal_force_norm;
                         FloatC work = dt * friction_force * plane_velocity.length();
 
                         // horizontal kinetic energy
@@ -494,8 +550,7 @@ class RS_VoxelCompute {
                         FloatC plane_velocity_norm = plane_velocity.length();
                         if (plane_velocity_norm > 0) {
                             Vec3C friction_dir = -plane_velocity / plane_velocity_norm;
-                            total_force_in_out +=
-                                VM_G(u_dynamic) * normal_force_norm * friction_dir;
+                            total_force_in_out += u_dynamic * normal_force_norm * friction_dir;
                         }
                     } else {
                         // current_friction_state = STATIC_FRICTION, since NO_CONTACT will
@@ -518,8 +573,7 @@ class RS_VoxelCompute {
             FloatC voxel_size
         ) {
             // if no connections in the positive and negative directions of a particular
-            // axis,
-            // strain is zero.
+            // axis, strain is zero.
             // if one connection in positive or negative direction of a particular
             // axis, strain is that strain - ?? and force or constraint?
             // if connections in both the positive and negative directions of a particular
@@ -590,7 +644,7 @@ class RS_VoxelCompute {
                 axis_strain_sum.z = tension[2] ? axis_strain_sum.z : value;
             }
             V_S(poissons_strain, axis_strain_sum);
-#ifdef RS_DEBUG_VOXEL
+#ifdef RS_DEBUG_ENABLE_LOGIC_VOXEL
             CUDA_PRINTF_ASSERT(!isnan(axis_strain_sum.x) && axis_strain_sum.x < 1e6);
             CUDA_PRINTF_ASSERT(!isnan(axis_strain_sum.y) && axis_strain_sum.y < 1e6);
             CUDA_PRINTF_ASSERT(!isnan(axis_strain_sum.z) && axis_strain_sum.z < 1e6);
@@ -598,113 +652,126 @@ class RS_VoxelCompute {
         }
     };
 
-    /// Per voxel slot over the whole SoA: write 1 to flag[i] iff this voxel belongs in the static
-    /// voxel BVH. Sweeps every slot, including fully-fixed structures absent from the active list.
-    class RSCF_GetStaticVoxelFlag : public device::RS_ComputeFunction<RSCF_GetStaticVoxelFlag> {
-       public:
-        using BaseType = device::RS_ComputeFunction<RSCF_GetStaticVoxelFlag>;
-        using BaseType::index1D;
-
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void
-        run(const Kernel *k, RS_MemoryPtr buffer, RSize num_voxels) {
-            if (k == nullptr) return;
-            auto &ctx = k->ctx;
-            RIndex i = index1D();
-            if (i >= num_voxels) return;
-            RHandle voxel = RHandle(i);
-            auto &flag = buffer.template get<RIndex>(i);
-            RS_VoxelStateUnion s_union{V_G(state)};
-            if (!s_union.voxel_state.is_enabled || !(isContactActive(s_union.voxel_state_packed) ||
-                                                     isRenderActive(s_union.voxel_state_packed))) {
-                flag = 0;
-                return;
-            }
-            bool is_static = s_union.voxel_state.is_fixed;
-            if (!is_static && s_union.voxel_state.is_rigid) {
-                RHandle rigid_body = V_G(rigid_body);
-                if (rigid_body != RS_NULL_HANDLE) {
-                    RS_RigidBodyStateUnion rb_union{RB_G(rigid_body, state)};
-                    is_static = rb_union.rigid_body_state.is_fixed;
-                }
-            }
-            flag = is_static ? 1 : 0;
-        }
-    };
-
-    /// Per voxel slot over the whole SoA: compact static voxels into a packed handle list.
-    class RSCF_CompactStaticVoxels : public device::RS_ComputeFunction<RSCF_CompactStaticVoxels> {
-       public:
-        using BaseType = device::RS_ComputeFunction<RSCF_CompactStaticVoxels>;
-        using BaseType::index1D;
-
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(
-            const Kernel *k,
-            RS_MemoryPtr flags,
-            RSize num_voxels,
-            RS_MemoryPtr prefix_sums,
-            RS_MemoryPtr active_handles
-        ) {
-            if (k == nullptr) return;
-            RIndex i = index1D();
-            if (i >= num_voxels) return;
-            if (flags.template get<RIndex>(i)) {
-                RIndex out = prefix_sums.template get<RIndex>(i) - 1;
-                active_handles.template get<RHandle>(out) = RHandle(i);
-            }
-        }
-    };
-
-    /// Per voxel: write 1 to flag[i] iff this voxel belongs in the dynamic voxel BVH.
-    class RSCF_GetDynamicVoxelFlag : public device::RS_ComputeFunction<RSCF_GetDynamicVoxelFlag> {
-       public:
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void
-        run(const Kernel *k, RS_MemoryPtr buffer, RHandle voxel, RIndex flag_index) {
-            if (k == nullptr || voxel == RS_NULL_HANDLE) return;
-            auto &ctx = k->ctx;
-            auto &flag = buffer.template get<RIndex>(flag_index);
-            RS_VoxelStateUnion s_union{V_G(state)};
-            if (!s_union.voxel_state.is_enabled || !(isContactActive(s_union.voxel_state_packed) ||
-                                                     isRenderActive(s_union.voxel_state_packed))) {
-                flag = 0;
-                return;
-            }
-            bool is_static = s_union.voxel_state.is_fixed;
-            if (!is_static && s_union.voxel_state.is_rigid) {
-                RHandle rigid_body = V_G(rigid_body);
-                if (rigid_body != RS_NULL_HANDLE) {
-                    RS_RigidBodyStateUnion rb_union{RB_G(rigid_body, state)};
-                    is_static = rb_union.rigid_body_state.is_fixed;
-                }
-            }
-            flag = is_static ? 0 : 1;
-        }
-    };
-
-    /// Per voxel: compact dynamic voxels into a packed handle list using the prefix-sum.
-    class RSCF_CompactDynamicVoxels : public device::RS_ComputeFunction<RSCF_CompactDynamicVoxels> {
+    /**
+     * @brief Classify a voxel into the dynamic and static subsets.
+     * @details The dynamic subset is every mobile voxel so physics never reads static state. The
+     * static subset is every immobile voxel, with no exposed gate: the structure voxel manager
+     * already keeps only exposed voxels when it emits a fixed body, and a static voxel's exposure
+     * never changes at runtime, so the gate would be redundant for fixed and frozen-rigid bodies.
+     * A frozen soft body adds its interior voxels to the static subset, an accepted cost.
+     *
+     * @param k             simulation kernel.
+     * @param voxel         handle of the voxel to classify.
+     * @param flag_index    index of this voxel within the flag arrays.
+     * @param dynamic_flags per-voxel output, 1 when mobile.
+     * @param static_flags  per-voxel output, 1 when immobile.
+     */
+    class RSCF_GetVoxelMobilityFlags
+        : public device::RS_ComputeFunction<RSCF_GetVoxelMobilityFlags> {
        public:
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void run(
             const Kernel *k,
-            RS_MemoryPtr flags,
             RHandle voxel,
             RIndex flag_index,
-            RS_MemoryPtr prefix_sums,
-            RS_MemoryPtr active_handles
+            device::RS_Vector<RIndex> dynamic_flags,
+            device::RS_Vector<RIndex> static_flags
         ) {
             if (k == nullptr || voxel == RS_NULL_HANDLE) return;
-            if (flags.template get<RIndex>(flag_index)) {
-                RIndex out = prefix_sums.template get<RIndex>(flag_index) - 1;
-                active_handles.template get<RHandle>(out) = voxel;
+            auto &ctx = k->ctx;
+            auto &dynamic_flag = dynamic_flags[flag_index];
+            auto &static_flag = static_flags[flag_index];
+            RS_VoxelStateUnion s_union{V_G(state)};
+            if (!s_union.voxel_state.is_enabled) {
+                dynamic_flag = 0;
+                static_flag = 0;
+                return;
+            }
+            bool is_static = s_union.voxel_state.is_static;
+            if (!is_static && s_union.voxel_state.is_rigid) {
+                RHandle rigid_body = V_G(rigid_body);
+                if (rigid_body != RS_NULL_HANDLE) {
+                    RS_RigidBodyStateUnion rb_union{RB_G(rigid_body, state)};
+                    is_static = rb_union.rigid_body_state.is_static;
+                }
+            }
+            dynamic_flag = is_static ? 0 : 1;
+            static_flag = is_static ? 1 : 0;
+        }
+    };
+
+    /**
+     * @brief Classify a mobile voxel into the dynamic BVH subset.
+     * @details Launched over the dynamic subset, so the voxel is already known mobile; only the
+     * exposed gate remains, since only an air or transparent face can be hit. Run on every dynamic
+     * BVH rebuild so a freshly exposed voxel, such as a soft bond tearing open, joins the BVH.
+     *
+     * @param k                 simulation kernel.
+     * @param voxel             handle of the voxel to classify.
+     * @param flag_index        index of this voxel within the flag array.
+     * @param bvh_dynamic_flags per-voxel output, 1 when exposed.
+     */
+    class RSCF_GetVoxelBVHDynamicFlags
+        : public device::RS_ComputeFunction<RSCF_GetVoxelBVHDynamicFlags> {
+       public:
+        template <typename Kernel>
+        HOST_DEVICE_INLINE_QUALIFIER static void run(
+            const Kernel *k,
+            RHandle voxel,
+            RIndex flag_index,
+            device::RS_Vector<RIndex> bvh_dynamic_flags
+        ) {
+            if (k == nullptr || voxel == RS_NULL_HANDLE) return;
+            auto &ctx = k->ctx;
+            RS_VoxelStateUnion s_union{V_G(state)};
+            bool is_exposed = isContactActive(s_union.voxel_state_packed) ||
+                              isRenderActive(s_union.voxel_state_packed);
+            bvh_dynamic_flags[flag_index] =
+                (s_union.voxel_state.is_enabled && is_exposed) ? 1 : 0;
+        }
+    };
+
+    /**
+     * @brief Scatter the flagged voxel handles into a packed list using the prefix-sum.
+     * @details Used for both the static and dynamic subsets. A voxel whose flag is set writes its
+     * handle into out_handles at prefix_sums[flag_index] - 1.
+     *
+     * @param k           simulation kernel.
+     * @param voxel       handle of this voxel.
+     * @param flag_index  index of this voxel within the flag and prefix arrays.
+     * @param flags       per-voxel 0/1 membership flags for the subset being compacted.
+     * @param prefix_sums inclusive prefix sum of flags giving each flagged voxel its output slot.
+     * @param out_handles packed output list of the flagged voxel handles.
+     */
+    class RSCF_CompactVoxelHandles : public device::RS_ComputeFunction<RSCF_CompactVoxelHandles> {
+       public:
+        template <typename Kernel>
+        HOST_DEVICE_INLINE_QUALIFIER static void run(
+            const Kernel *k,
+            RHandle voxel,
+            RIndex flag_index,
+            device::RS_Vector<RIndex> flags,
+            device::RS_Vector<RIndex> prefix_sums,
+            device::RS_Vector<RHandle> out_handles
+        ) {
+            if (k == nullptr || voxel == RS_NULL_HANDLE) return;
+            if (flags[flag_index]) {
+                RIndex out = prefix_sums[flag_index] - 1;
+                out_handles[out] = voxel;
             }
         }
     };
 
-    /// Per (active) voxel: write {object_metadata, object_handle} into obj_ids
-    /// and the loose world-AABB into leaf_bounds. Build-path kernel.
+    /**
+     * @brief Fill one voxel-BVH leaf on the build path.
+     * @details For each active voxel, composes the leaf identifier of object metadata and handle
+     * into obj_ids and writes the loose world-AABB into leaf_bounds.
+     *
+     * @param k              simulation kernel.
+     * @param active_handles packed list of the active voxel handles, one per leaf.
+     * @param obj_ids        per-leaf output of composed voxel-BVH leaf identifiers.
+     * @param leaf_bounds    per-leaf output of loose world-space AABBs.
+     */
     class RSCF_FillVoxelBVHLeafData : public device::RS_ComputeFunction<RSCF_FillVoxelBVHLeafData> {
        public:
         using BaseType = device::RS_ComputeFunction<RSCF_FillVoxelBVHLeafData>;
@@ -725,8 +792,15 @@ class RS_VoxelCompute {
         }
     };
 
-    /// Per existing BVH leaf: read the voxel handle out of obj_ids and refresh
-    /// both metadata and bounds in place. Refit-path kernel; preserves Morton order.
+    /**
+     * @brief Refit one voxel-BVH leaf in place on the refit path.
+     * @details Reads the voxel handle out of obj_ids and refreshes both the leaf identifier and
+     * the loose world-AABB without reordering, so the existing Morton order is preserved.
+     *
+     * @param k           simulation kernel.
+     * @param obj_ids     per-leaf voxel-BVH leaf identifiers, read for the handle and rewritten.
+     * @param leaf_bounds per-leaf output of refreshed loose world-space AABBs.
+     */
     class RSCF_RefitVoxelBVHLeafData
         : public device::RS_ComputeFunction<RSCF_RefitVoxelBVHLeafData> {
        public:
@@ -746,12 +820,17 @@ class RS_VoxelCompute {
         }
     };
 
-    /// Per leaf of the dynamic voxel BVH (Morton-sorted by HLBVH build): query
-    /// both voxel BVHs for nearby candidates, apply same-body / connected-body
-    /// filtering, and store the two largest sphere-overlap contacts into
-    /// contact_voxel_0 / contact_voxel_1. Launched over
-    /// `ctx.dynamic_voxel_bvh.object_identifiers` so adjacent warp threads work
-    /// on spatially-adjacent voxels — BVH walks share node cache lines.
+    /**
+     * @brief Find the up to two nearest contact-candidate voxels for one voxel.
+     * @details Queries both the dynamic and static voxel BVHs for nearby candidates, applies the
+     * same-body and connected-body filtering, and stores the two largest sphere-overlap contacts
+     * into contact_voxel_0 and contact_voxel_1. Launched over the Morton-sorted
+     * ctx.dynamic_voxel_bvh.object_identifiers so adjacent warp threads process spatially
+     * adjacent voxels and share BVH node cache lines.
+     *
+     * @param k                         simulation kernel.
+     * @param sorted_object_identifiers Morton-sorted voxel-BVH leaf identifiers, one per thread.
+     */
     class RSCF_FindContactVoxels : public device::RS_ComputeFunction<RSCF_FindContactVoxels> {
        public:
         using BaseType = device::RS_ComputeFunction<RSCF_FindContactVoxels>;
@@ -765,7 +844,7 @@ class RS_VoxelCompute {
             if (idx >= sorted_object_identifiers.size()) return;
 
             // Metadata-only early-out: skip non-collision / disabled leaves without
-            // touching the voxel SoA. is_fixed never enters here because the dynamic
+            // touching the voxel SoA. is_static never enters here because the dynamic
             // BVH build excluded fixed and parent-fixed-rigid-body voxels.
             RS_VoxelBVHLeafMetadataUnion meta{sorted_object_identifiers[idx].object_metadata};
             if (!meta.meta.is_enabled || !meta.meta.is_contact_active) return;
@@ -781,11 +860,17 @@ class RS_VoxelCompute {
 
             RIndex self_structure_gid = V_G(structure_gid);
             RS_VoxelContactFilterKeyUnion self_filter_key{V_G(contact_filter_key)};
-            RBigIndex self_connected_body_mask =
-                self_filter_key.contact_filter_key.rigid_body_sid !=
-                        RS_VOXEL_CONTACT_FILTER_KEY_NULL_RIGID_BODY_SID
-                    ? RB_G(V_G(rigid_body), connected_body_mask)
-                    : RBigIndex(0);
+
+            // Load the connected-body mask as two register words. Only constrained
+            // structures own a mask; everything else leaves both words zero.
+            bool is_structure_constrained = meta.meta.is_structure_constrained;
+            RBigIndex self_mask_0 = 0, self_mask_1 = 0;
+            if (is_structure_constrained &&
+                self_filter_key.contact_filter_key.constrained_rigid_body_sid !=
+                    RS_VOXEL_CONTACT_FILTER_KEY_NULL_CONSTRAINED_RIGID_BODY_SID) {
+                self_mask_0 = RB_G(V_G(rigid_body), connected_body_mask_0);
+                self_mask_1 = RB_G(V_G(rigid_body), connected_body_mask_1);
+            }
 
             // Expand by our sphere radius: BVH leaf AABB encloses the other voxel.
             RBound3f query_bound(
@@ -813,7 +898,9 @@ class RS_VoxelCompute {
                     radius,
                     self_structure_gid,
                     self_filter_key,
-                    self_connected_body_mask,
+                    is_structure_constrained,
+                    self_mask_0,
+                    self_mask_1,
                     query_bound,
                     bvh_accessor,
                     contact_voxel_0,
@@ -831,7 +918,9 @@ class RS_VoxelCompute {
                     radius,
                     self_structure_gid,
                     self_filter_key,
-                    self_connected_body_mask,
+                    is_structure_constrained,
+                    self_mask_0,
+                    self_mask_1,
                     query_bound,
                     bvh_accessor,
                     contact_voxel_0,
@@ -867,6 +956,13 @@ class RS_VoxelCompute {
         }
 
        private:
+        // Signed difference of two mod-16 residuals, result in the range -8..7.
+        // The bitwise mask recovers the low nibble for a negative difference.
+        HOST_DEVICE_INLINE_QUALIFIER static int _mod16Difference(int a, int b) {
+            int d = (a - b) & 0xF;
+            return d >= 8 ? d - 16 : d;
+        }
+
         // Walk one voxel BVH starting from the root currently held by
         // bvh_accessor_in_out and apply same-body / connected-body filtering
         // to each candidate leaf, keeping the two largest sphere-overlap
@@ -880,7 +976,9 @@ class RS_VoxelCompute {
             FloatC radius,
             RIndex self_structure_gid,
             const RS_VoxelContactFilterKeyUnion &self_filter_key,
-            RBigIndex self_connected_body_mask,
+            bool is_structure_constrained,
+            RBigIndex self_mask_0,
+            RBigIndex self_mask_1,
             const RBound3f &query_bound,
             BVHAccessor &bvh_accessor_in_out,
             RHandle &contact_voxel_0_in_out,
@@ -912,24 +1010,37 @@ class RS_VoxelCompute {
                         RS_VoxelContactFilterKeyUnion other_filter_key{obj->contact_filter_key};
 
                         // Same body + Chebyshev-1 in voxel grid → linked neighbor, skip.
+                        // Indices are stored as mod-16 residuals; the signed mod-16
+                        // difference recovers the true gap because sphere overlap
+                        // bounds candidates to one grid unit per axis. Another voxel
+                        // in the same structure physically cannot self collide out of 
+                        // radius with another same structure while having same residual
+                        // in indices. 
                         if (self_filter_key.contact_filter_key.body_sid ==
                             other_filter_key.contact_filter_key.body_sid) {
-                            int dx = int(self_filter_key.contact_filter_key.index_x) -
-                                     int(other_filter_key.contact_filter_key.index_x);
-                            int dy = int(self_filter_key.contact_filter_key.index_y) -
-                                     int(other_filter_key.contact_filter_key.index_y);
-                            int dz = int(self_filter_key.contact_filter_key.index_z) -
-                                     int(other_filter_key.contact_filter_key.index_z);
+                            int dx = _mod16Difference(
+                                int(self_filter_key.contact_filter_key.index_x_res),
+                                int(other_filter_key.contact_filter_key.index_x_res)
+                            );
+                            int dy = _mod16Difference(
+                                int(self_filter_key.contact_filter_key.index_y_res),
+                                int(other_filter_key.contact_filter_key.index_y_res)
+                            );
+                            int dz = _mod16Difference(
+                                int(self_filter_key.contact_filter_key.index_z_res),
+                                int(other_filter_key.contact_filter_key.index_z_res)
+                            );
                             if (RS_ABS(dx) <= 1 && RS_ABS(dy) <= 1 && RS_ABS(dz) <= 1) continue;
                         }
 
                         // Constraint-connected rigid-body pair, skip.
-                        RBigIndex other_rb_sid = other_filter_key.contact_filter_key.rigid_body_sid;
-                        if (other_rb_sid != RS_VOXEL_CONTACT_FILTER_KEY_NULL_RIGID_BODY_SID &&
-                            self_filter_key.contact_filter_key.rigid_body_sid !=
-                                RS_VOXEL_CONTACT_FILTER_KEY_NULL_RIGID_BODY_SID &&
-                            ((self_connected_body_mask >> other_rb_sid) & RBigIndex(1))) {
-                            continue;
+                        RBigIndex other_crb_sid =
+                            other_filter_key.contact_filter_key.constrained_rigid_body_sid;
+                        if (is_structure_constrained &&
+                            other_crb_sid !=
+                                RS_VOXEL_CONTACT_FILTER_KEY_NULL_CONSTRAINED_RIGID_BODY_SID) {
+                            RBigIndex word = (other_crb_sid < 64) ? self_mask_0 : self_mask_1;
+                            if ((word >> (other_crb_sid & 63)) & RBigIndex(1)) continue;
                         }
                     }
 
@@ -963,6 +1074,17 @@ class RS_VoxelCompute {
         }
     };
 
+    /**
+     * @brief Resolve a voxel's contacts and write the resulting contact forces.
+     * @details Flags floor contact for air-exposed rigid voxels, then for each of the up to two
+     * broad-phase contact partners builds an oriented bounding box, runs a separating-axis test
+     * and, on penetration, computes the penetration depth, contact normal and the normal plus
+     * friction force stored back on the voxel. A voxel with no contact partner clears its stale
+     * floor accumulator and returns early.
+     *
+     * @param k     simulation kernel.
+     * @param voxel handle of the voxel to update.
+     */
     class RSCF_UpdateVoxelContact : public device::RS_ComputeFunction<RSCF_UpdateVoxelContact> {
        public:
         template <typename Kernel>
@@ -977,7 +1099,7 @@ class RS_VoxelCompute {
                 bool floor_contact = false;
                 if (state_union.voxel_state.is_rigid &&
                     isContactActive(state_union.voxel_state_packed) &&
-                    !state_union.voxel_state.is_fixed) {
+                    !state_union.voxel_state.is_static) {
                     Vec3C voxel_pos = V_G(position);
                     FloatC voxel_size = VM_G(V_G(voxel_material), voxel_size);
                     FloatC floor_height;
@@ -1142,43 +1264,54 @@ class RS_VoxelCompute {
             auto &ctx = k->ctx;
 
             RS_VoxelStateUnion contact_voxel_state_union{V_G(other_voxel, state)};
+            bool is_self_rigid_or_static = state_union_in_out.voxel_state.is_rigid ||
+                                           state_union_in_out.voxel_state.is_static;
+            bool is_other_rigid_or_static = contact_voxel_state_union.voxel_state.is_rigid ||
+                                            contact_voxel_state_union.voxel_state.is_static;
             if constexpr (ContactIndex == 0) {
-                state_union_in_out.voxel_state.is_contact_voxel_0_rigid =
-                    contact_voxel_state_union.voxel_state.is_rigid;
+                state_union_in_out.voxel_state.is_contact_voxel_0_rigid_or_static =
+                    is_other_rigid_or_static;
             } else {
-                state_union_in_out.voxel_state.is_contact_voxel_1_rigid =
-                    contact_voxel_state_union.voxel_state.is_rigid;
+                state_union_in_out.voxel_state.is_contact_voxel_1_rigid_or_static =
+                    is_other_rigid_or_static;
             }
 
-            if (state_union_in_out.voxel_state.is_rigid &&
-                contact_voxel_state_union.voxel_state.is_rigid) {
-                // Force is resolved by the rigid body solver
+            if (state_union_in_out.voxel_state.is_rigid && is_other_rigid_or_static) {
+                // Resolved by the rigid body solver: rigid against another rigid body, or
+                // against an immovable anchor (fixed or frozen) through its anchor path.
                 contact_force_out = Vec3C::zero();
             } else {
+                // Note: The following pipeline would not be energy conservative if the voxel
+                // size differ dramatically and the large side voxels likely will lose contact
+                // info if it is colliding with many smaller soft voxels. For efficiency, we
+                // choose to accept low-fidelity and just let smaller soft-voxels being pushed
+                // away. Rigid/Fixed-Rigid/Fixed relationship does not have this problem becase
+                // We use the manifold reduction pipeline.
                 RHandle voxel_material = V_G(voxel, voxel_material);
                 RHandle other_voxel_material = V_G(other_voxel, voxel_material);
 
-                // 1. Solve the contact force
-                if (state_union_in_out.voxel_state.is_rigid) {
-                    // Use the stiffness of the contact soft voxel
-                    contact_force_out = VM_G(other_voxel_material, penetration_stiffness) *
-                                        contact_depth * contact_normal;
-                } else {
-                    // Use stiffness of the current soft voxel
-                    contact_force_out = VM_G(voxel_material, penetration_stiffness) *
-                                        contact_depth * contact_normal;
-                }
+                // 1. Solve the contact force. A rigid or static side is immovable and cannot
+                // deform, so a free side governs; with both sides free the softer one governs.
+                // The effective stiffness is identical from either voxel, so the contact force
+                // is symmetric across the pair.
+                FloatC self_stiffness = VM_G(voxel_material, penetration_stiffness);
+                FloatC other_stiffness = VM_G(other_voxel_material, penetration_stiffness);
+                FloatC stiffness;
+                if (!is_self_rigid_or_static && !is_other_rigid_or_static)
+                    stiffness = self_stiffness < other_stiffness ? self_stiffness : other_stiffness;
+                else if (!is_self_rigid_or_static)
+                    stiffness = self_stiffness;
+                else if (!is_other_rigid_or_static)
+                    stiffness = other_stiffness;
+                else
+                    stiffness = FloatC(0);
+                contact_force_out = stiffness * contact_depth * contact_normal;
 
                 // 2. Solve the friction force
                 // Note: for efficiency, for now we just have dynamic friction, and since
                 // the friction coefficient is only between material and ground, for friction
                 // coefficient between materials, we use the harmonic mean of the dynamic
                 // friction coefficients of the two materials.
-
-                // TODO:
-                // 1. implement iteration based solving? because static frictions form
-                // a cone and we need to solve it iteratively.
-                // 2. have pair wise friction coefficient
 
                 FloatC mass_inverse = VM_G(voxel_material, mass_inverse);
                 FloatC other_mass_inverse = VM_G(other_voxel_material, mass_inverse);
@@ -1194,14 +1327,15 @@ class RS_VoxelCompute {
 
                 if (tangent_speed > 0) {
                     FloatC normal_force = contact_force_out.length();
-                    FloatC u_dynamic = VM_G(voxel_material, u_dynamic);
-                    FloatC u_dynamic_other = VM_G(other_voxel_material, u_dynamic);
-                    FloatC u_dynamic_harmonic =
-                        (FloatC(2.0) * u_dynamic * u_dynamic_other) / (u_dynamic + u_dynamic_other);
+                    RIndex mat_gid_a = VM_G(voxel_material, material_gid);
+                    RIndex mat_gid_b = VM_G(other_voxel_material, material_gid);
+                    FloatC u_dynamic = FloatC(
+                        ctx.material_friction_dynamic_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]
+                    );
 
                     // Apply dynamic friction
                     Vec3C friction_force =
-                        -(tangent_vel / tangent_speed) * (u_dynamic_harmonic * normal_force);
+                        -(tangent_vel / tangent_speed) * (u_dynamic * normal_force);
                     contact_force_out += friction_force;
                 }
             }
@@ -1283,18 +1417,12 @@ class RS_VoxelCompute {
      * Device side methods for acquiring info
      *****************************************************************/
 
-    /// Returns the nominal size of this voxel accounting for any
-    /// specified temperature and external actuation. Specifically, returns
-    /// the zero-stress size of the voxel if all forces/moments were removed.
+    /** @brief Zero-stress nominal voxel size including expansion. */
     HOST_DEVICE_INLINE_QUALIFIER static FloatC baseSize(FloatC vm_voxel_size, FloatC v_expansion) {
         return vm_voxel_size * (FloatC(1) + v_expansion);
     }
 
-    /// Returns the transverse area of this voxel with respect
-    /// to the specified axis. This would normally be called
-    /// only internally, but can be used to calculate the
-    /// correct relationship between force and stress for this
-    /// voxel if Poisson's ratio is non-zero.
+    /** @brief Transverse area of the voxel about an axis, accounting for Poisson strain. */
     HOST_DEVICE_INLINE_QUALIFIER static FloatC transverseArea(
         FloatC vm_voxel_size,
         FloatC vm_nu,
@@ -1318,11 +1446,7 @@ class RS_VoxelCompute {
         }
     }
 
-    /// Returns the sum of the current strain of this voxel in
-    /// the two mutually perpendicular axis to the specified
-    /// axis. This would normally be called only internally, but
-    /// can be used to correctly calculate stress for this voxel
-    /// if Poisson's ratio is non-zero.
+    /** @brief Sum of strain in the two axes perpendicular to the given axis. */
     HOST_DEVICE_INLINE_QUALIFIER static FloatC
     transverseStrainSum(FloatC vm_nu, RSE_LinkAxis axis, const Vec3C &poissons_strain) {
         if (vm_nu == 0) return 0;
@@ -1339,18 +1463,13 @@ class RS_VoxelCompute {
         }
     }
 
-    /// Returns the interference (in meters) between the contact envelope
-    /// of this voxel and the floor at Z=0. >=0 numbers correspond to
-    /// interference. If the voxel is not touching the floor return a value < 0.
+    /** @brief Interference in meters between the voxel and the floor, negative if clear. */
     HOST_DEVICE_INLINE_QUALIFIER static FloatC
     floorPenetration(FloatC v_voxel_size, FloatC v_position_z, FloatC floor_z = 0) {
         return v_voxel_size * FloatC(0.5) - (v_position_z - floor_z);
     }
 
-    /// Samples the floor under a world position. Returns true when a floor exists (flat or
-    /// array) and writes its height (Z) and up-normal; returns false for RSE_FLOOR_DATA_NONE.
-    /// Flat floors are at Z=0 with a +Z normal; array floors read the precomputed cell under
-    /// the position (out-of-bounds cells fall back to a +Z normal at Z=0).
+    /** @brief Sample the floor height and up-normal under a position, false when no floor. */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static bool floorHeightAndNormal(
         Kernel *k,
@@ -1359,13 +1478,14 @@ class RS_VoxelCompute {
         Vec3C &normal_out
     ) {
         auto &ctx = k->ctx;
-        RSE_FloorDataType floor_data_type = k->floor_data_type;
-        if (floor_data_type != RSE_FLOOR_DATA_FLAT && floor_data_type != RSE_FLOOR_DATA_ARRAY)
+        RSE_VisionFloorDataType floor_data_type = k->ctx.floor_vision_mem.data_type;
+        if (floor_data_type != RSE_VISION_FLOOR_DATA_FLAT &&
+            floor_data_type != RSE_VISION_FLOOR_DATA_ARRAY)
             return false;
 
-        floor_height_out = FloatC(0);
+        floor_height_out = FloatC(ctx.floor.height);
         normal_out = {0, 0, 1};
-        if (floor_data_type == RSE_FLOOR_DATA_ARRAY) {
+        if (floor_data_type == RSE_VISION_FLOOR_DATA_ARRAY) {
             RSize x_values = ctx.floor.x_values;
             RSize y_values = ctx.floor.y_values;
             // Align world origin (0,0) to the floor center; sample the cell directly under the
@@ -1399,22 +1519,20 @@ class RS_VoxelCompute {
         return true;
     }
 
-    /// Returns the 3D linear linearVelocity of this voxel in m/s (GCS)
+    /** @brief Linear velocity of the voxel in m/s, global frame. */
     HOST_DEVICE_INLINE_QUALIFIER static Vec3C
     linearVelocity(const Vec3C &v_linear_momentum, FloatC vm_mass_inverse) {
         return v_linear_momentum * vm_mass_inverse;
     }
 
-    /// Returns the 3D angular linearVelocity of this voxel in rad/s (GCS)
+    /** @brief Angular velocity of the voxel in rad/s, global frame. */
     HOST_DEVICE_INLINE_QUALIFIER static Vec3C
     angularVelocity(const Vec3C &v_angular_momentum, FloatC vm_moment_inertia_inverse) {
         return v_angular_momentum * vm_moment_inertia_inverse;
     }
 
    private:
-    /// Compose BVH leaf metadata from a voxel's state and its vision material's
-    /// render type; no prebake, so material render-type changes propagate at
-    /// the next rebuild/refit.
+    /** @brief Compose voxel-BVH leaf metadata from voxel state and vision render type. */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static RState
     _composeVoxelBVHLeafMetadata(Kernel *k, RHandle voxel) {
@@ -1429,17 +1547,17 @@ class RS_VoxelCompute {
         RS_VoxelBVHLeafMetadataUnion m_union{0};
         m_union.meta.is_enabled = s_union.voxel_state.is_enabled;
         m_union.meta.is_surface = s_union.voxel_state.is_surface;
+        m_union.meta.is_static = s_union.voxel_state.is_static;
         m_union.meta.is_rigid = s_union.voxel_state.is_rigid;
-        m_union.meta.is_fixed = s_union.voxel_state.is_fixed;
         m_union.meta.is_emissive = (render_type == RSE_VISION_MATERIAL_EMISSIVE) ? 1 : 0;
         m_union.meta.is_transparent = (render_type == RSE_VISION_MATERIAL_TRANSPARENT) ? 1 : 0;
         m_union.meta.is_render_active = isRenderActive(s_union.voxel_state_packed) ? 1 : 0;
         m_union.meta.is_contact_active = isContactActive(s_union.voxel_state_packed) ? 1 : 0;
+        m_union.meta.is_structure_constrained = s_union.voxel_state.is_structure_constrained;
         return m_union.meta_packed;
     }
 
-    /// Compose the fat voxel-BVH leaf identifier: metadata plus the contact
-    /// broad-phase payload.
+    /** @brief Compose the voxel-BVH leaf identifier of metadata and contact payload. */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static RS_VoxelBVHObjectIdentifier
     _composeVoxelBVHLeafIdentifier(Kernel *k, RHandle voxel) {
@@ -1454,7 +1572,7 @@ class RS_VoxelCompute {
         return oid;
     }
 
-    /// Loose world-AABB enclosing a voxel's rotated OBB.
+    /** @brief Loose world-AABB enclosing a voxel's rotated OBB. */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static RBound3f _computeVoxelLooseAABB(Kernel *k, RHandle voxel) {
         auto &ctx = k->ctx;

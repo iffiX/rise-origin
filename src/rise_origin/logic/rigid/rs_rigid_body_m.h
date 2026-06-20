@@ -5,10 +5,10 @@
 #define RS_RIGID_BODY_M_H
 
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/rs_float.h"
-#include "rise_origin/utils/rs_mat.h"
-#include "rise_origin/utils/rs_quat.h"
-#include "rise_origin/utils/rs_vec.h"
+#include "rise_origin/utils/math/rs_float.h"
+#include "rise_origin/utils/math/rs_mat.h"
+#include "rise_origin/utils/math/rs_quat.h"
+#include "rise_origin/utils/math/rs_vec.h"
 
 namespace rise {
 
@@ -17,7 +17,9 @@ namespace logic {
 union RS_RigidBodyStateUnion {
     RState rigid_body_state_packed;
     struct RS_RigidBodyState {
-        /// Whether this rigid body is fixed in place
+        /// Whether this rigid body is currently immobile (permanently fixed or frozen)
+        RState is_static : 1;
+        /// Whether this rigid body is permanently fixed by its material
         RState is_fixed : 1;
     } rigid_body_state;
 };
@@ -56,8 +58,11 @@ class RS_RigidBodyMem {
     /// Initial orientation in global coords
     Quat3M initial_orientation = Quat3M::unit();
 
-    /// Bitmask of rigid bodies by sid) that this body must not collide with
-    RBigIndex connected_body_mask = 0;
+    /// Low word of the bitmask of rigid bodies by sid that this body must not collide with
+    RBigIndex connected_body_mask_0 = 0;
+
+    /// High word of the bitmask of rigid bodies by sid that this body must not collide with
+    RBigIndex connected_body_mask_1 = 0;
 
     /*****************************************************************
      * Post-set attributes
@@ -120,7 +125,8 @@ class RS_RigidBodyMem {
         field(body_sid),                            \
         field(segment_bid),                         \
         field(initial_orientation),                 \
-        field(connected_body_mask),                 \
+        field(connected_body_mask_0),               \
+        field(connected_body_mask_1),               \
         field(state),                               \
         field(mass),                                \
         field(mass_inverse),                        \

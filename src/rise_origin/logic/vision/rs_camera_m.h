@@ -8,11 +8,14 @@
 
 #include "rise_origin/device/data/rs_array.h"
 #include "rise_origin/logic/vision/rs_vision_material_m.h"
-#include "rise_origin/rsc/rs_camera_config.h"
-#include "rise_origin/utils/rs_color.h"
+#include "rise_origin/utils/math/rs_color.h"
+
+namespace rise {
+
+namespace logic {
 
 /**
- * @brief Surface kind at the end of the PTUD specular chain. 
+ * @brief Surface type at the end of the PTUD specular chain.
  * @note PTUD: Path Tracing Until Diffuse.
  * @details
  *   SURFACE  - chain landed on a diffuse / glossy surface (common ReSTIR case)
@@ -20,16 +23,19 @@
  *   EMISSIVE - chain ray hit an emissive voxel directly (radiance out)
  */
 RS_ENUM(
-    RSE_VisionRestirChainTerminalKind,
+    RSE_VisionRestirChainTerminalType,
     unsigned int,
     (RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE, 0),
     (RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY, 1),
     (RSE_VISION_RESTIR_CHAIN_TERMINAL_EMISSIVE, 2)
 )
 
-namespace rise {
-
-namespace logic {
+RS_ENUM(
+    RSE_CameraType,
+    unsigned int,
+    (RSE_CAMERA_FREE_PERSPECTIVE, 0),
+    (RSE_CAMERA_RIGID_BODY_LINKED_PERSPECTIVE, 1)
+)
 
 union RS_CameraStateUnion {
     RState camera_state_packed;
@@ -53,7 +59,7 @@ class RS_CameraMem {
 
     RIndex rigid_body_sid = RS_NULL_INDEX;
 
-    RSize camera_control_signal_offset = RS_NULL_INDEX;
+    RHandle camera_signal_handle = RS_NULL_HANDLE;
 
     FloatM aspect_ratio = 0;
 
@@ -222,10 +228,10 @@ using RS_CameraAuxScreenMotion = device::RS_Array<RVec2f, 2>;
 using RS_CameraAuxWorldVelocity = device::RS_Array<RVec3f, 2>;
 
 /// PTUD chain bookkeeping AOVs: throughput accumulates Beer-Lambert + Fresnel
-/// along the chain; terminal_kind tags how the chain ended (see
-/// RSE_VisionRestirChainTerminalKind).
+/// along the chain; terminal_type tags how the chain ended (see
+/// RSE_VisionRestirChainTerminalType).
 using RS_CameraAuxChainThroughput   = device::RS_Array<RVec3f, 2>;
-using RS_CameraAuxChainTerminalKind = device::RS_Array<RSE_VisionRestirChainTerminalKind, 2>;
+using RS_CameraAuxChainTerminalType = device::RS_Array<RSE_VisionRestirChainTerminalType, 2>;
 
 using RS_CameraReservoirDI = device::RS_Array<RS_ReservoirDI, 2>;
 using RS_CameraReservoirGI = device::RS_Array<RS_ReservoirGI, 2>;
@@ -250,7 +256,7 @@ using RS_CameraDenoiserVariance      = device::RS_Array<RFloat, 2>;
         type(camera_mem_type),                \
         field(gid),                           \
         field(rigid_body_sid),                \
-        field(camera_control_signal_offset),  \
+        field(camera_signal_handle),          \
         field(aspect_ratio),                  \
         field(image_width),                   \
         field(image_height),                  \

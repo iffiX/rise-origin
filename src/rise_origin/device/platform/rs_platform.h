@@ -4,7 +4,7 @@
 #ifndef RS_PLATFORM_H
 #define RS_PLATFORM_H
 
-#include "rise_origin/utils/rs_memory.h"
+#include "rise_origin/utils/memory/rs_memory.h"
 #include "rs_cpu.h"
 
 #ifdef __CUDACC__
@@ -79,15 +79,16 @@ inline std::shared_ptr<RS_MemoryProvider> getMemoryProvider(const RS_DeviceLocat
 
 template <typename Function>
 void castProviderPtrAndCall(RS_MemoryProvider* provider, Function function) {
-    switch (provider->type) {
+    RS_MemoryProvider* base = provider->base();
+    switch (base->type) {
         case RSE_MEMORY_PROVIDER_TYPE_CUDA:
-            function(dynamic_cast<RS_MemoryCudaProvider*>(provider));
+            function(dynamic_cast<RS_MemoryCudaProvider*>(base));
             break;
         case RSE_MEMORY_PROVIDER_TYPE_CPU:
-            function(dynamic_cast<RS_MemoryCPUProvider*>(provider));
+            function(dynamic_cast<RS_MemoryCPUProvider*>(base));
             break;
         case RSE_MEMORY_PROVIDER_TYPE_DEFAULT:
-            function(dynamic_cast<RS_MemoryDefaultProvider*>(provider));
+            function(dynamic_cast<RS_MemoryDefaultProvider*>(base));
             break;
         default:
             RS_THROW(RS_InvalidArgumentException("Invalid memory provider"));
