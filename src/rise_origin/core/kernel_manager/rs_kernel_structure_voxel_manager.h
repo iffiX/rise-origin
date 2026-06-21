@@ -823,6 +823,9 @@ class RS_KernelStructureVoxelManager {
     /// True while the structure is frozen, so it stays collidable and rendered but stops simulating.
     bool _is_frozen = false;
 
+    /// True when the structure defines any constraint, so the connected-body collision mask is used.
+    bool _is_constrained = false;
+
     /// Live use_count from external consumers (force / camera RBLinked / etc.).
     RSize _use_count = 0;
 

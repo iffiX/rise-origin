@@ -72,6 +72,8 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
 
     RS_Timer timer;
 
+    _is_constrained = !_rsc.is_fixed && !structure_rsc.constraints.empty();
+
     _resolveMaterials();
 
     for (auto &body_rsc : structure_rsc.bodies) {
@@ -553,8 +555,13 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                     rigid_body.body_sid = body_sid;
                     rigid_body.segment_bid = segment_bid;
                     rigid_body.g_orientation = initial_body_orientation;
-                    // A body never collides with itself; connected peers are set later.
-                    rigid_body.connected_body_mask.setOn(rigid_body_sid);
+                    // The mask is read only for constrained structures, which are capped at the
+                    // mask width; an unconstrained structure leaves it zero and may hold far more
+                    // rigid bodies than the mask can index.
+                    if (_is_constrained) {
+                        // A body never collides with itself; connected peers are set later.
+                        rigid_body.connected_body_mask.setOn(rigid_body_sid);
+                    }
 
                     _segment_phys_type_map[{body_sid, segment_bid}] = phys_type;
                     _rigid_bodies.emplace_back(rigid_body);
@@ -926,17 +933,25 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                             role = RSE_VOXEL_FACE_AIR;
                         } else {
                             auto &neighbor = tmp_voxels[*neighbor_voxel];
-                            if (!_rsc.is_fixed && neighbor.segment_bid != voxel.segment_bid) {
+                            bool is_cross_segment =
+                                !_rsc.is_fixed && neighbor.segment_bid != voxel.segment_bid;
+                            if (is_cross_segment) {
                                 is_surface = true;
                             }
                             if (neighbor.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT) {
                                 has_soft_neighbor = true;
                             }
-                            // A face between different segments is always a boundary, even
-                            // when the materials match, since the segments can separate and
-                            // the seam is meant to be visible.
-                            if (neighbor.material_gid == voxel.material_gid &&
-                                neighbor.segment_bid == voxel.segment_bid) {
+                            // Two non-soft segments are separate parts that do not stick
+                            // together, so the face between them is a real air gap. A soft
+                            // neighbor instead bonds across the seam through a link.
+                            bool is_non_soft_air_gap =
+                                is_cross_segment &&
+                                voxel.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT &&
+                                neighbor.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT;
+                            if (is_non_soft_air_gap) {
+                                role = RSE_VOXEL_FACE_AIR;
+                            } else if (neighbor.material_gid == voxel.material_gid &&
+                                       neighbor.segment_bid == voxel.segment_bid) {
                                 role = RSE_VOXEL_FACE_INTERIOR;
                             } else {
                                 role = _mat_props.at(neighbor.material_gid).is_transparent
@@ -1629,8 +1644,7 @@ void RS_KernelStructureVoxelManager::_checkStructureLimits() const {
             _link_num,
             RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_LINK_NUM
         ));
-    bool is_structure_constrained = _joint_num > 0;
-    if (is_structure_constrained) {
+    if (_is_constrained) {
         if (_rigid_body_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM)
             RS_THROW(RS_InvalidCharacterizationException(
                 "Constrained structure \"{}\" has {} rigid bodies, exceeding the constrained limit "
@@ -1828,7 +1842,6 @@ RS_KernelStructureVoxelManager::_getAll() const {
     // timer.reset();
 
     // Only a structure with at least one constraint runs the connected-body collision filter.
-    bool is_structure_constrained = _joint_num > 0;
     if (!_voxels.empty())
         _kernel_manager->getThreadPool()
             ->submitLoop(
@@ -1849,7 +1862,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                     logic::RS_VoxelContactFilterKeyUnion fk{0};
                     fk.contact_filter_key.body_sid = voxel.body_sid;
                     fk.contact_filter_key.constrained_rigid_body_sid =
-                        (is_structure_constrained && voxel.rigid_body_sid != RS_NULL_INDEX)
+                        (_is_constrained && voxel.rigid_body_sid != RS_NULL_INDEX)
                             ? voxel.rigid_body_sid
                             : RS_VOXEL_CONTACT_FILTER_KEY_NULL_CONSTRAINED_RIGID_BODY_SID;
                     fk.contact_filter_key.index_x_res = voxel.index_x & 0xF;
@@ -1889,7 +1902,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                     state.voxel_state.is_static = is_fixed;
                     state.voxel_state.is_rigid = voxel.rigid_body_sid != RS_NULL_INDEX;
                     state.voxel_state.is_fixed = is_fixed;
-                    state.voxel_state.is_structure_constrained = is_structure_constrained;
+                    state.voxel_state.is_structure_constrained = _is_constrained;
 
                     state.voxel_state.has_expansion = voxel.expansion_signal_sid != RS_NULL_INDEX;
                     state.voxel_state.expansion_control_mode = voxel.expansion_control_mode;
