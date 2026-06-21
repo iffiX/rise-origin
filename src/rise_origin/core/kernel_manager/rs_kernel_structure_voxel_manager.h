@@ -25,8 +25,8 @@
 #include "rise_origin/logic/soft/rs_voxel_m.h"
 #include "rise_origin/logic/soft/rs_voxel_material_m.h"
 #include "rise_origin/rsc/entity/rsc_structure.h"
-#include "rise_origin/utils/math/rs_bound.h"
 #include "rise_origin/utils/data/rs_nary.h"
+#include "rise_origin/utils/math/rs_bound.h"
 
 namespace rise {
 
@@ -47,6 +47,66 @@ RS_ENUM(
     (RSE_STRUCTURE_VOXEL_MATERIAL_UNKNOWN, 4)
 )
 
+/** @brief Coordinate key for the voxel hashmap. */
+struct RS_VoxelKey {
+    RIndex x = 0, y = 0, z = 0;
+    RS_VoxelKey() = default;
+    HOST_DEVICE_INLINE_QUALIFIER explicit RS_VoxelKey(const RCoord3 &coord)
+        : x(coord.x - RS_NumTraits<RSignedIndex>::lowest()),
+          y(coord.y - RS_NumTraits<RSignedIndex>::lowest()),
+          z(coord.z - RS_NumTraits<RSignedIndex>::lowest()) {}
+    HOST_DEVICE_INLINE_QUALIFIER RS_VoxelKey(RIndex x, RIndex y, RIndex z) : x(x), y(y), z(z) {}
+    RS_VoxelKey &operator=(const RS_VoxelKey &k) = default;
+
+    // Used to support the hashmap's internal +1 (the all-zero key is the empty sentinel).
+    HOST_DEVICE_INLINE_QUALIFIER RS_VoxelKey operator+(const RIndex &val) const {
+        RS_VoxelKey result;
+        result.x = x + val;
+        result.y = y + (result.x < x ? 1 : 0);
+        result.z = z + (result.y < y ? 1 : 0);
+        return result;
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER bool operator==(const RS_VoxelKey &k) const {
+        return x == k.x && y == k.y && z == k.z;
+    }
+};
+
+/** @brief Hasher and null-key policy for RS_VoxelKey. */
+template <typename InputType, typename OutputType, RIndex HashType>
+struct RS_VoxelKeyHasher {
+    static_assert(std::is_same_v<InputType, RS_VoxelKey>, "InputType must be RS_VoxelKey.");
+    static_assert(std::is_same_v<OutputType, uint32_t>, "OutputType must be uint32_t.");
+    static_assert(HashType == 0 || HashType == 1, "HashType must be 0 or 1.");
+
+    HOST_DEVICE_INLINE_QUALIFIER static bool isValidKey(InputType key) {
+        return key.x < RS_NumTraits<RIndex>::highest() - 1 &&
+               key.y < RS_NumTraits<RIndex>::highest() - 1 &&
+               key.z < RS_NumTraits<RIndex>::highest() - 1;
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER static bool isNullKey(InputType key) {
+        return key.x == 0 && key.y == 0 && key.z == 0;
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER static void setNullKey(InputType &key) { key = {0, 0, 0}; }
+
+    HOST_DEVICE_INLINE_QUALIFIER OutputType operator()(InputType key) const {
+        OutputType result;
+        if constexpr (HashType == 0) {
+            // From VDB paper
+            result = key.x * 73856093 ^ key.y * 19349663 ^ key.z * 83492791;
+        } else if constexpr (HashType == 1) {
+            // Alternative hash function generated with test/generate_hash_constants.py
+            result = key.x * 59735267 ^ key.y * 72177407 ^ key.z * 62296957;
+        }
+        return result;
+    }
+};
+
+/**
+ * @brief Manager for a single structure made of voxels.
+ */
 class RS_KernelStructureVoxelManager {
    public:
     using SupportedRSC = rsc::RSC_StructureVoxel;
@@ -55,7 +115,10 @@ class RS_KernelStructureVoxelManager {
      * @brief Bind to the kernel manager, resolve and reference dependent materials, and build the
      *        voxel/link/rigid-body topology host side.
      */
-    RS_KernelStructureVoxelManager(RS_KernelManager *kernel_manager, const SupportedRSC &structure_rsc);
+    RS_KernelStructureVoxelManager(
+        RS_KernelManager *kernel_manager,
+        const SupportedRSC &structure_rsc
+    );
 
     ~RS_KernelStructureVoxelManager();
 
@@ -312,6 +375,15 @@ class RS_KernelStructureVoxelManager {
      * unused fields keep their preset defaults.
      */
     struct MaterialResolvedData {
+        // Global scope ID of the material
+        RIndex material_gid = RS_NULL_INDEX;
+
+        // Material name (the structure's material reference)
+        std::string name;
+
+        // Material physical type
+        RSE_StructureVoxelMaterialType phys_type = RSE_STRUCTURE_VOXEL_MATERIAL_UNKNOWN;
+
         // Soft / rigid density (unit: kg/m^3)
         RFloat density = 0;
 
@@ -321,6 +393,12 @@ class RS_KernelStructureVoxelManager {
         RFloat elastic_modulus = 0;
         RFloat fail_stress = RS_MAX_FLOAT;
         RFloat poissons_ratio = 0;
+
+        // Atlas (prescribed rigid-body mass/com/inertia, overriding voxel-summed values)
+        bool is_atlas = false;
+        RFloat mass = 0;
+        RVec3rf com_position = RVec3rf::zero();
+        RMat3rf inertia = RMat3rf::zero();
 
         // Optical
         bool is_transparent = false;
@@ -362,8 +440,8 @@ class RS_KernelStructureVoxelManager {
         // Index of this voxel's data within the body's per-voxel arrays
         RIndex array_index;
 
-        // Global scope ID of the material
-        RIndex material_gid;
+        // Structure scope material reference index (index into _mat_resolved_data)
+        RIndex material_sid;
 
         // Material physical type
         RSE_StructureVoxelMaterialType material_type;
@@ -422,7 +500,7 @@ class RS_KernelStructureVoxelManager {
             data.index_y = 0;
             data.index_z = 0;
             data.array_index = RS_NULL_INDEX;
-            data.material_gid = RS_NULL_INDEX;
+            data.material_sid = RS_NULL_INDEX;
             data.material_type = RSE_STRUCTURE_VOXEL_MATERIAL_UNKNOWN;
             data.expansion_signal_sid = RS_NULL_INDEX;
             data.expansion_control_mode = rsc::RSE_STRUCTURE_EXPANSION_CONTROL_MODE_BASIC_POSITION;
@@ -458,11 +536,13 @@ class RS_KernelStructureVoxelManager {
         // Structure scope ID of the positive voxel
         RIndex voxel_pos_sid;
 
-        // Global scope ID of the negative voxel material
-        RIndex voxel_neg_material_gid;
+        // Structure scope material reference index of the negative voxel (index into
+        // _mat_resolved_data)
+        RIndex voxel_neg_material_sid;
 
-        // Global scope ID of the positive voxel material
-        RIndex voxel_pos_material_gid;
+        // Structure scope material reference index of the positive voxel (index into
+        // _mat_resolved_data)
+        RIndex voxel_pos_material_sid;
 
         // Structure scope ID of the link material (index into _link_materials)
         RIndex link_material_sid;
@@ -479,8 +559,8 @@ class RS_KernelStructureVoxelManager {
             data.body_sid = RS_NULL_INDEX;
             data.voxel_neg_sid = RS_NULL_INDEX;
             data.voxel_pos_sid = RS_NULL_INDEX;
-            data.voxel_neg_material_gid = RS_NULL_INDEX;
-            data.voxel_pos_material_gid = RS_NULL_INDEX;
+            data.voxel_neg_material_sid = RS_NULL_INDEX;
+            data.voxel_pos_material_sid = RS_NULL_INDEX;
             data.link_material_sid = RS_NULL_INDEX;
             data.axis = logic::RSE_NO_AXIS;
             return data;
@@ -489,8 +569,8 @@ class RS_KernelStructureVoxelManager {
 
     class VoxelMaterialData {
        public:
-        // Global scope ID of the material
-        RIndex gid;
+        // Structure scope material reference index (index into _mat_resolved_data)
+        RIndex material_sid;
 
         // Body SID (used as dedup key since voxel_size varies per body)
         RIndex body_sid;
@@ -504,7 +584,7 @@ class RS_KernelStructureVoxelManager {
         // Static method to get preset values
         static VoxelMaterialData preset() {
             VoxelMaterialData data;
-            data.gid = RS_NULL_INDEX;
+            data.material_sid = RS_NULL_INDEX;
             data.body_sid = RS_NULL_INDEX;
             data.voxel_size = 0;
             return data;
@@ -513,11 +593,11 @@ class RS_KernelStructureVoxelManager {
 
     class LinkMaterialData {
        public:
-        // Negative voxel material global scope ID
-        RIndex neg_gid;
+        // Negative voxel material reference index (index into _mat_resolved_data)
+        RIndex neg_material_sid;
 
-        // Positive voxel material global scope ID
-        RIndex pos_gid;
+        // Positive voxel material reference index (index into _mat_resolved_data)
+        RIndex pos_material_sid;
 
         // Body SID (used as dedup key since voxel_size varies per body)
         RIndex body_sid;
@@ -531,8 +611,8 @@ class RS_KernelStructureVoxelManager {
         // Static method to get preset values
         static LinkMaterialData preset() {
             LinkMaterialData data;
-            data.neg_gid = RS_NULL_INDEX;
-            data.pos_gid = RS_NULL_INDEX;
+            data.neg_material_sid = RS_NULL_INDEX;
+            data.pos_material_sid = RS_NULL_INDEX;
             data.body_sid = RS_NULL_INDEX;
             data.voxel_size = 0;
             return data;
@@ -580,8 +660,9 @@ class RS_KernelStructureVoxelManager {
         // Contained voxel temporary indices in _addBody()
         std::vector<RIndex> contained_voxel_tmp_indices;
 
-        // Contained material global scope IDs for each internal voxel
-        std::vector<RIndex> contained_material_gid;
+        // Contained material reference index (index into _mat_resolved_data) for each internal
+        // voxel
+        std::vector<RIndex> contained_material_sid;
 
         // Contained material voxel positions relative to the origin, in its own coordinate system
         std::vector<RVec3rf> contained_material_rb_positions;
@@ -595,7 +676,7 @@ class RS_KernelStructureVoxelManager {
         // Default constructor (initializes vectors)
         RigidBodyData()
             : contained_voxel_tmp_indices(),
-              contained_material_gid(),
+              contained_material_sid(),
               contained_material_rb_positions() {}
 
         // Static method to get preset values
@@ -777,12 +858,10 @@ class RS_KernelStructureVoxelManager {
         RIndex z_start, z_end;  // [z_start, z_end)
     };
 
-    using VoxelVDB = device::RS_Sparse3DMap<
-        RIndex,
-        device::RS_Sparse3DHashMapLevel<1024, 8>,
-        device::RS_Sparse3DArrayLevel<8, 8, 8>,
-        device::RS_Sparse3DArrayLevel<8, 8, 8>,
-        device::RS_Sparse3DArrayLevel<32, 32, 32>>;
+    // Single stable flat hashmap mapping a voxel coordinate directly to its temporary index. Each
+    // voxel is one hashmap entry, built at a 50% load factor.
+    using VoxelHashmap =
+        device::RS_HashStableFlatMap<RS_VoxelKey, RIndex, uint32_t, RS_VoxelKeyHasher, 8>;
 
     template <RSE_FloatType FloatMemAccuracy>
     class KernelStructureData {
@@ -813,17 +892,18 @@ class RS_KernelStructureVoxelManager {
     RIndex _structure_gid = RS_NULL_INDEX;
     RIndex _record_gid = RS_NULL_INDEX;
     RIndex _signal_gid = RS_NULL_INDEX;
-    std::vector<RIndex> _dependent_material_gid;
     std::unordered_set<RIndex> _dependent_material_gid_set;
 
     bool _is_kernel_data_inited = false;
 
     SupportedRSC _rsc;
 
-    /// True while the structure is frozen, so it stays collidable and rendered but stops simulating.
+    /// True while the structure is frozen, so it stays collidable and rendered but stops
+    /// simulating.
     bool _is_frozen = false;
 
-    /// True when the structure defines any constraint, so the connected-body collision mask is used.
+    /// True when the structure defines any constraint, so the connected-body collision mask is
+    /// used.
     bool _is_constrained = false;
 
     /// Live use_count from external consumers (force / camera RBLinked / etc.).
@@ -848,21 +928,16 @@ class RS_KernelStructureVoxelManager {
     /// Maps (body_sid, segment_bid) -> physical type derived from material characterization
     std::map<RS_OrderedPair<RIndex, RIndex>, RSE_StructureVoxelMaterialType> _segment_phys_type_map;
 
-    /// Maps material_gid -> physical type
-    std::unordered_map<RIndex, RSE_StructureVoxelMaterialType> _mat_phys_type_map;
-
-    /// Maps material_gid -> material_name
-    std::unordered_map<RIndex, std::string> _mat_gid_to_name;
-
-    /// Maps material_gid -> resolved per-material properties
-    std::unordered_map<RIndex, MaterialResolvedData> _mat_props;
+    /// Resolved per-material data, indexed by material_sid (the structure's material reference
+    /// index, i.e. the value stored in body voxels' material_reference_sid).
+    std::vector<MaterialResolvedData> _mat_resolved_data;
 
     /// For maps with complex keys, tree based map is way more efficient
     /// Maps (body_sid, segment_bid) -> rigid_body_sid
     std::map<RS_OrderedPair<RIndex, RIndex>, RIndex> _rigid_body_sid_map;
 
-    /// Maps (body_sid) -> VDB(x, y, z) -> voxel_tmp_index
-    std::unordered_map<RIndex, VoxelVDB> _voxel_tmp_index_vdb_map;
+    /// Maps (body_sid) -> hashmap(x, y, z) -> voxel_tmp_index
+    std::unordered_map<RIndex, VoxelHashmap> _voxel_tmp_index_map;
 
     /// Structure data
     std::vector<VoxelData> _voxels;
@@ -907,8 +982,8 @@ class RS_KernelStructureVoxelManager {
     device::RS_Array<RHandle, 1> _constraint_joint_record_handles;
 
     /// Resolve every dependent material's physical kind and scalar data via the unified
-    /// material manager's query interface. Populates `_mat_gid_to_name`,
-    /// `_mat_phys_type_map`, and `_mat_props`.
+    /// material manager's query interface. Populates `_mat_resolved_data` (indexed by material_sid)
+    /// and `_dependent_material_gid_set`.
     void _resolveMaterials();
 
     void _addBody(const rsc::RSC_StructureVoxelBody &body_rsc);

@@ -31,15 +31,19 @@ from rise_origin import (
     RSC_MaterialPairPropertyCoulombFriction,
     RSC_MaterialPairPropertyRestitution,
     RSC_MaterialPhysicalPropertyFixed,
-    RSC_MaterialPhysicalPropertyRigid,
     RSC_MaterialPhysicalPropertySoft,
+    RSC_MaterialPhysicalPropertyRigid,
+    RSC_MaterialPhysicalPropertyAtlas,
 )
+
+from rise_origin.rsc._utils import Mat3rf, Vec3rf, _mat3rf, _vec3rf
 
 __all__ = [
     "Material",
     "MaterialPhysicalPropertyFixed",
     "MaterialPhysicalPropertySoft",
     "MaterialPhysicalPropertyRigid",
+    "MaterialPhysicalPropertyAtlas",
     "MaterialOpticalPropertySimpleMicrofacet",
     "MaterialPairPropertyCoulombFriction",
     "MaterialPairPropertyRestitution",
@@ -134,6 +138,41 @@ class MaterialPhysicalPropertyRigid(RSC_MaterialPhysicalPropertyRigid):
         self.name = name
         self.material_reference = material_reference
         self.density = density
+
+
+class MaterialPhysicalPropertyAtlas(RSC_MaterialPhysicalPropertyAtlas):
+    """Rigid-body physics with prescribed mass, center of mass, and inertia.
+
+    Overrides the mass, center of mass, and inertia the engine would otherwise
+    derive by summing per-voxel density, so a body keeps its true inertials at
+    any voxel resolution. Use it for imported bodies whose inertials are known.
+
+    Args:
+        name: Unique property name.
+        material_reference: Name of the material this property applies to.
+        mass: Total mass in kg.
+        com_position: Center of mass in the rigid segment's local frame, with
+            origin at the segment's minimum bounding-box corner, in meters.
+        inertia: 3x3 moment of inertia tensor about the center of mass, in
+            body-local axes (kg m^2); a 3x3 or flat nine-element sequence, or an
+            ``RMat3rf``.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        material_reference: str,
+        mass: float,
+        com_position: Vec3rf,
+        inertia: Mat3rf,
+    ) -> None:
+        super().__init__()
+        self.name = name
+        self.material_reference = material_reference
+        self.mass = mass
+        self.com_position = _vec3rf(com_position)
+        self.inertia = _mat3rf(inertia)
 
 
 class MaterialOpticalPropertySimpleMicrofacet(

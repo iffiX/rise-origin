@@ -53,36 +53,117 @@ inline void initRSPYDefinitions(py::module &m) {
 
     py::class_<RVec3rf>(m, "RVec3rf")
         .def(py::init<>())
-        .def(py::init<RFloat, RFloat, RFloat>())
+        .def(py::init<RFloat, RFloat, RFloat>(), py::arg("x"), py::arg("y"), py::arg("z"))
+        .def_static("zero", &RVec3rf::zero)
+        .def_static("one", &RVec3rf::one)
+        .def_static("full", &RVec3rf::full, py::arg("value"))
         .def_readwrite("x", &RVec3rf::x)
         .def_readwrite("y", &RVec3rf::y)
         .def_readwrite("z", &RVec3rf::z);
 
     py::class_<RQuat3rf>(m, "RQuat3rf")
         .def(py::init<>())
-        .def(py::init<RFloat, RFloat, RFloat, RFloat>())
+        .def(
+            py::init<RFloat, RFloat, RFloat, RFloat>(),
+            py::arg("x"),
+            py::arg("y"),
+            py::arg("z"),
+            py::arg("w")
+        )
+        .def_static("unit", &RQuat3rf::unit)
         .def_readwrite("x", &RQuat3rf::x)
         .def_readwrite("y", &RQuat3rf::y)
         .def_readwrite("z", &RQuat3rf::z)
         .def_readwrite("w", &RQuat3rf::w);
 
+    py::class_<RMat3rf>(m, "RMat3rf")
+        .def(py::init<>())
+        .def(
+            py::init<RFloat, RFloat, RFloat, RFloat, RFloat, RFloat, RFloat, RFloat, RFloat>(),
+            py::arg("m00"),
+            py::arg("m01"),
+            py::arg("m02"),
+            py::arg("m10"),
+            py::arg("m11"),
+            py::arg("m12"),
+            py::arg("m20"),
+            py::arg("m21"),
+            py::arg("m22")
+        )
+        .def_static("zero", &RMat3rf::zero)
+        .def_static("eye", &RMat3rf::eye)
+        .def_static("diagonal", &RMat3rf::diagonal, py::arg("m00"), py::arg("m11"), py::arg("m22"))
+        .def(
+            "__getitem__",
+            [](const RMat3rf &self, std::pair<int, int> idx) {
+                if (idx.first < 0 || idx.first >= 3 || idx.second < 0 || idx.second >= 3) {
+                    throw py::index_error("RMat3rf index out of range");
+                }
+                return self[idx.first][idx.second];
+            }
+        )
+        .def(
+            "__setitem__",
+            [](RMat3rf &self, std::pair<int, int> idx, RFloat v) {
+                if (idx.first < 0 || idx.first >= 3 || idx.second < 0 || idx.second >= 3) {
+                    throw py::index_error("RMat3rf index out of range");
+                }
+                self[idx.first][idx.second] = v;
+            }
+        )
+        .def(
+            "to_list",
+            [](const RMat3rf &self) {
+                std::vector<std::vector<RFloat>> rows(3, std::vector<RFloat>(3));
+                for (int r = 0; r < 3; ++r)
+                    for (int c = 0; c < 3; ++c) rows[r][c] = self[r][c];
+                return rows;
+            }
+        )
+        .def("from_list", [](RMat3rf &self, const std::vector<std::vector<RFloat>> &rows) {
+            if (rows.size() != 3) throw py::value_error("RMat3rf.from_list expects 3 rows");
+            for (int r = 0; r < 3; ++r) {
+                if (rows[r].size() != 3)
+                    throw py::value_error("RMat3rf.from_list expects 3 columns per row");
+                for (int c = 0; c < 3; ++c) self[r][c] = rows[r][c];
+            }
+        });
+
     py::class_<RColor3b>(m, "RColor3b")
         .def(py::init<>())
-        .def(py::init<unsigned char, unsigned char, unsigned char>())
+        .def(
+            py::init<unsigned char, unsigned char, unsigned char>(),
+            py::arg("r"),
+            py::arg("g"),
+            py::arg("b")
+        )
+        .def_static("zero", &RColor3b::zero)
         .def_readwrite("r", &RColor3b::r)
         .def_readwrite("g", &RColor3b::g)
         .def_readwrite("b", &RColor3b::b);
 
     py::class_<RColor3f>(m, "RColor3f")
         .def(py::init<>())
-        .def(py::init<float, float, float>())
+        .def(py::init<float, float, float>(), py::arg("r"), py::arg("g"), py::arg("b"))
+        .def_static("zero", &RColor3f::zero)
         .def_readwrite("r", &RColor3f::r)
         .def_readwrite("g", &RColor3f::g)
         .def_readwrite("b", &RColor3f::b);
 
     py::class_<RBound3rf>(m, "RBound3rf")
         .def(py::init<>())
-        .def(py::init<RFloat, RFloat, RFloat, RFloat, RFloat, RFloat>())
+        .def(
+            py::init<RFloat, RFloat, RFloat, RFloat, RFloat, RFloat>(),
+            py::arg("min_x"),
+            py::arg("min_y"),
+            py::arg("min_z"),
+            py::arg("max_x"),
+            py::arg("max_y"),
+            py::arg("max_z")
+        )
+        .def_static("zero", &RBound3rf::zero)
+        .def_static("lowest", &RBound3rf::lowest)
+        .def_static("highest", &RBound3rf::highest)
         .def_readwrite("min_x", &RBound3rf::min_x)
         .def_readwrite("max_x", &RBound3rf::max_x)
         .def_readwrite("min_y", &RBound3rf::min_y)
@@ -92,7 +173,18 @@ inline void initRSPYDefinitions(py::module &m) {
 
     py::class_<RBound3rui>(m, "RBound3rui")
         .def(py::init<>())
-        .def(py::init<RIndex, RIndex, RIndex, RIndex, RIndex, RIndex>())
+        .def(
+            py::init<RIndex, RIndex, RIndex, RIndex, RIndex, RIndex>(),
+            py::arg("min_x"),
+            py::arg("min_y"),
+            py::arg("min_z"),
+            py::arg("max_x"),
+            py::arg("max_y"),
+            py::arg("max_z")
+        )
+        .def_static("zero", &RBound3rui::zero)
+        .def_static("lowest", &RBound3rui::lowest)
+        .def_static("highest", &RBound3rui::highest)
         .def_readwrite("min_x", &RBound3rui::min_x)
         .def_readwrite("max_x", &RBound3rui::max_x)
         .def_readwrite("min_y", &RBound3rui::min_y)
@@ -109,8 +201,17 @@ inline void initRSPYDefinitions(py::module &m) {
                 RSignedIndex,
                 RSignedIndex,
                 RSignedIndex,
-                RSignedIndex>()
+                RSignedIndex>(),
+            py::arg("min_x"),
+            py::arg("min_y"),
+            py::arg("min_z"),
+            py::arg("max_x"),
+            py::arg("max_y"),
+            py::arg("max_z")
         )
+        .def_static("zero", &RBound3ri::zero)
+        .def_static("lowest", &RBound3ri::lowest)
+        .def_static("highest", &RBound3ri::highest)
         .def_readwrite("min_x", &RBound3ri::min_x)
         .def_readwrite("max_x", &RBound3ri::max_x)
         .def_readwrite("min_y", &RBound3ri::min_y)

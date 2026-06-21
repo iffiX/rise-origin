@@ -8,9 +8,9 @@
 #include <cmath>
 #include <refl.hpp>
 
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_float.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
@@ -29,8 +29,8 @@ struct RS_Mat3DRowAccessor {
 
 template <typename T>
 struct RS_ConstMat3DRowAccessor {
-    T *row;
-    HOST_DEVICE_INLINE_QUALIFIER explicit RS_ConstMat3DRowAccessor(T *row) : row(row){};
+    const T *row;
+    HOST_DEVICE_INLINE_QUALIFIER explicit RS_ConstMat3DRowAccessor(const T *row) : row(row){};
     HOST_DEVICE_INLINE_QUALIFIER const T &operator[](size_t col) {
         assert(col < 3);
         return *(row + col);
@@ -55,8 +55,8 @@ struct RS_Mat3DColAccessor {
 
 template <typename T>
 struct RS_ConstMat3DColAccessor {
-    T *col;
-    HOST_DEVICE_INLINE_QUALIFIER explicit RS_ConstMat3DColAccessor(T *col) : col(col){};
+    const T *col;
+    HOST_DEVICE_INLINE_QUALIFIER explicit RS_ConstMat3DColAccessor(const T *col) : col(col){};
     HOST_DEVICE_INLINE_QUALIFIER const T &operator[](size_t row) {
         assert(row < 3);
         return *(col + row * 3);
@@ -423,6 +423,16 @@ class RS_Mat3D {
         return *this;
     }
 
+    /// Is equal operator
+    HOST_DEVICE_INLINE_QUALIFIER bool operator==(const RS_Mat3D &m) const {
+        return data[0] == m.data[0] && data[1] == m.data[1] && data[2] == m.data[2] &&
+               data[3] == m.data[3] && data[4] == m.data[4] && data[5] == m.data[5] &&
+               data[6] == m.data[6] && data[7] == m.data[7] && data[8] == m.data[8];
+    }
+
+    /// Is not equal operator
+    HOST_DEVICE_INLINE_QUALIFIER bool operator!=(const RS_Mat3D &m) const { return !(*this == m); }
+
     /// Row index operator
     HOST_DEVICE_INLINE_QUALIFIER RS_Mat3DRowAccessor<T> operator[](int row) {
         assert(row < 3);
@@ -598,6 +608,24 @@ class RS_Mat3D {
         }
 
         return e_vec / norm;
+    }
+
+    /**
+     * @brief Generic serialization
+     *
+     * @param s The serializer
+     */
+    template <typename Serializer>
+    void serialize(Serializer &s) {
+        s("0", data[0]);
+        s("1", data[1]);
+        s("2", data[2]);
+        s("3", data[3]);
+        s("4", data[4]);
+        s("5", data[5]);
+        s("6", data[6]);
+        s("7", data[7]);
+        s("8", data[8]);
     }
 };
 

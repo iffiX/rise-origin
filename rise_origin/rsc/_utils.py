@@ -10,12 +10,24 @@ Alias names drop the bound type's leading ``R`` but keep its precision suffix
 (``Vec3rf``, ``Color3b`` vs a future ``Color3f``) so they never collide.
 """
 
-from typing import Tuple, Union
+from typing import Sequence, Tuple, Union
 
-from rise_origin import RBound3ri, RColor3b, RColor3f, RQuat3rf, RVec3rf
+from rise_origin import (
+    RBound3ri,
+    RColor3b,
+    RColor3f,
+    RQuat3rf,
+    RMat3rf,
+    RVec3rf,
+    VecFloat,
+)
 
 #: 3D float vector / position in meters: ``(x, y, z)`` or an ``RVec3rf``.
 Vec3rf = Union[RVec3rf, Tuple[float, float, float]]
+
+#: 3x3 row-major float matrix: a sequence of three ``(x, y, z)`` rows, a flat
+#: nine-element sequence, or an ``RMat3rf``.
+Mat3rf = Union[RMat3rf, Sequence[Sequence[float]], Sequence[float]]
 
 #: Orientation quaternion in ``(x, y, z, w)`` order, or an ``RQuat3rf``.
 Quat3rf = Union[RQuat3rf, Tuple[float, float, float, float]]
@@ -39,6 +51,18 @@ def _vec3rf(value: Vec3rf) -> RVec3rf:
 def _quat3rf(value: Quat3rf) -> RQuat3rf:
     """Coerce a 4-tuple into an ``RQuat3rf`` (pass through if already one)."""
     return value if isinstance(value, RQuat3rf) else RQuat3rf(*value)
+
+
+def _mat3rf(value: Mat3rf) -> RMat3rf:
+    """Coerce a 3x3 or flat nine-element sequence into an ``RMat3rf``."""
+    if isinstance(value, RMat3rf):
+        return value
+    rows = list(value)
+    if len(rows) == 9 and not hasattr(rows[0], "__len__"):
+        rows = [rows[0:3], rows[3:6], rows[6:9]]
+    matrix = RMat3rf()
+    matrix.from_list([VecFloat([float(x) for x in row]) for row in rows])
+    return matrix
 
 
 def _color3b(value: Color3b) -> RColor3b:

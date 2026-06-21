@@ -44,10 +44,12 @@ T rspyDeserializeRSC(const py::bytes &pybuf) {
 
     T rsc;
     RS_MessagePackDeserializer d;
-    d.setData(std::vector<uint8_t>(
-        reinterpret_cast<const uint8_t *>(buffer),
-        reinterpret_cast<const uint8_t *>(buffer) + length
-    ));
+    d.setData(
+        std::vector<uint8_t>(
+            reinterpret_cast<const uint8_t *>(buffer),
+            reinterpret_cast<const uint8_t *>(buffer) + length
+        )
+    );
     d.deserialize(rsc);
     return rsc;
 }
@@ -559,6 +561,24 @@ inline void initRSPYRSC(py::module &m) {
                 },
                 [](py::bytes buffer) {
                     return rspyDeserializeRSC<RSC_MaterialPhysicalPropertyRigid>(buffer);
+                }
+            )
+        );
+
+    py::class_<RSC_MaterialPhysicalPropertyAtlas, RSC_MaterialPhysicalPropertyBase>(
+        m, "RSC_MaterialPhysicalPropertyAtlas"
+    )
+        .def(py::init<>())
+        .def_readwrite("mass", &RSC_MaterialPhysicalPropertyAtlas::mass)
+        .def_readwrite("com_position", &RSC_MaterialPhysicalPropertyAtlas::com_position)
+        .def_readwrite("inertia", &RSC_MaterialPhysicalPropertyAtlas::inertia)
+        .def(
+            py::pickle(
+                [](const RSC_MaterialPhysicalPropertyAtlas &self) {
+                    return rspySerializeRSC(self);
+                },
+                [](py::bytes buffer) {
+                    return rspyDeserializeRSC<RSC_MaterialPhysicalPropertyAtlas>(buffer);
                 }
             )
         );

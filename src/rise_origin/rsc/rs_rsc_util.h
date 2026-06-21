@@ -9,11 +9,13 @@
 #include "rise_origin/rsc/rs_characterization_property_tree.h"
 #include "rise_origin/utils/math/rs_bound.h"
 #include "rise_origin/utils/math/rs_color.h"
+#include "rise_origin/utils/math/rs_mat.h"
+#include "rise_origin/utils/math/rs_quat.h"
+#include "rise_origin/utils/math/rs_vec.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/string/rs_string.h"
-#include "rise_origin/utils/math/rs_vec.h"
+
 namespace rise {
 
 namespace rsc {
@@ -85,7 +87,6 @@ inline RColor3f readColor3f(const std::string &str) {
     RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RColor3f data type", str));
 }
 
-
 inline RVec3rf readVec3rf(const std::string &str) {
     auto split_values = split(str, ",");
 
@@ -123,6 +124,31 @@ inline RQuat3rf readQuat3rf(const std::string &str) {
         }
     }
     RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RQuat3rf data type", str));
+}
+
+inline RMat3rf readMat3rf(const std::string &str) {
+    auto split_values = split(str, ",");
+
+    if (split_values.size() == 9) {
+        try {
+            return {
+                static_cast<RFloat>(std::stod(split_values[0])),
+                static_cast<RFloat>(std::stod(split_values[1])),
+                static_cast<RFloat>(std::stod(split_values[2])),
+                static_cast<RFloat>(std::stod(split_values[3])),
+                static_cast<RFloat>(std::stod(split_values[4])),
+                static_cast<RFloat>(std::stod(split_values[5])),
+                static_cast<RFloat>(std::stod(split_values[6])),
+                static_cast<RFloat>(std::stod(split_values[7])),
+                static_cast<RFloat>(std::stod(split_values[8]))
+            };
+        } catch ([[maybe_unused]] const std::invalid_argument &e) {
+            RS_THROW(
+                RS_InvalidCharacterizationException("Invalid input {} for RMat3rf data type", str)
+            );
+        }
+    }
+    RS_THROW(RS_InvalidCharacterizationException("Invalid input {} for RMat3rf data type", str));
 }
 
 inline RBound3ri readBound3ri(const std::string &str) {

@@ -7,11 +7,11 @@
 #include <string>
 
 #include "rise_origin/rsc/rsc_base.h"
-#include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/math/rs_mat.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/math/rs_color.h"
+#include "rise_origin/utils/math/rs_mat.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rsc_essence_base.h"
 
 namespace rise {
@@ -127,6 +127,36 @@ class RSC_MaterialPhysicalPropertyRigid : public RSC_MaterialPhysicalPropertyBas
     void serialize(Serializer& s) {
         RSC_MaterialPhysicalPropertyBase::serialize(s);
         s("density", density);
+    }
+
+   protected:
+    void _validate() const override;
+    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+};
+
+/**
+ * @brief Atlas (analytic rigid body with prescribed mass/inertia) physical property.
+ */
+class RSC_MaterialPhysicalPropertyAtlas : public RSC_MaterialPhysicalPropertyBase {
+   public:
+    /// Total mass of the rigid body (unit: kg).
+    RFloat mass = 0;
+
+    /// Center of mass in the rigid-body segment's local frame: origin at the segment's minimum
+    /// bounding-box corner, axes the structure frame at identity body orientation (unit: m).
+    RVec3rf com_position = RVec3rf::zero();
+
+    /// 3x3 moment of inertia tensor about the center of mass, in body-local axes (unit: kg m^2).
+    RMat3rf inertia = RMat3rf::zero();
+
+    bool operator==(const RSC_MaterialPhysicalPropertyAtlas& other) const;
+
+    template <typename Serializer>
+    void serialize(Serializer& s) {
+        RSC_MaterialPhysicalPropertyBase::serialize(s);
+        s("mass", mass);
+        s("com_position", com_position);
+        s("inertia", inertia);
     }
 
    protected:

@@ -114,6 +114,14 @@ def test_from_mesh_robust_to_non_watertight(box_mesh):
 
 
 @pytest.mark.importer
+def test_from_vox_palette_to_material(vox_path):
+    structure = StructureVoxel.from_vox(vox_path, voxel_size=VS)
+    body = structure.bodies[0]
+    assert (body.x_voxels, body.y_voxels, body.z_voxels) == (2, 1, 1)
+    assert list(body.material_reference_sid) == [0, 1]
+
+
+@pytest.mark.importer
 def test_from_urdf(urdf_path):
     structure = StructureVoxel.from_urdf(urdf_path, voxel_size=VS)
     assert len(structure.bodies) == 2
@@ -143,8 +151,7 @@ def test_from_gltf_multi_node(glb_path):
 
 
 @pytest.mark.importer
-def test_from_vox_palette_to_material(vox_path):
-    structure = StructureVoxel.from_vox(vox_path, voxel_size=VS)
-    body = structure.bodies[0]
-    assert (body.x_voxels, body.y_voxels, body.z_voxels) == (2, 1, 1)
-    assert list(body.material_reference_sid) == [0, 1]
+def test_from_step_multi_solid(step_path):
+    structure = StructureVoxel.from_step(step_path, voxel_size=VS)
+    assert len(structure.bodies) == 2
+    assert len(structure.constraints) == 0

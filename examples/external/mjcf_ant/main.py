@@ -5,11 +5,13 @@
 What you'll learn:
 
 * Load a whole articulated robot straight from a MuJoCo ``.xml`` with
-  :meth:`rsc.entity.StructureVoxel.from_mjcf`. Every MuJoCo body is voxelized
-  into a rigid segment and every hinge joint becomes a driven hinge constraint.
-* Give the imported structure a single rigid material and wire its hinge
-  signals to a control callback, since the importer leaves motor torque and the
-  driving controller for the caller to set.
+  :meth:`rsc.entity.StructureVoxel.from_mjcf`, asking it to extract per-body
+  materials. Every MuJoCo body is voxelized into a rigid segment with its true
+  mass, center of mass, and inertia as an atlas property and its geom color as
+  an optical property, and every hinge joint becomes a driven hinge constraint.
+* Take the extracted essences and textures back through ``essence_outputs`` and
+  ``resource_outputs``, give the hinges motor torque, and wire their signals to
+  a control callback.
 * Run an alternating four leg gait from that callback.
 
 The ``ant.xml`` next to this script is the classic Gymnasium ant: a free torso
@@ -38,11 +40,6 @@ MJCF_PATH = os.path.join(HERE, "ant.xml")
 # Edge length of one voxel when filling the ant's geoms, in meters.
 VOXEL = 0.01
 
-# One rigid material for the whole ant; every imported voxel references it.
-MATERIAL = "ant"
-
-BODY_COLOR = _common.PALETTE["deep_blue"]
-
 # Motor torque given to each imported hinge, in newton meters.
 HINGE_TORQUE = 4.0
 
@@ -64,27 +61,24 @@ def build():
     Returns:
         The :class:`rsc.World` ready to hand to a viewer.
     """
-    ant = rsc.entity.StructureVoxel.from_mjcf(MJCF_PATH, voxel_size=VOXEL, name="ant")
-    ant.material_references.append(MATERIAL)
+    essences, resources = [], []
+    ant = rsc.entity.StructureVoxel.from_mjcf(
+        MJCF_PATH,
+        voxel_size=VOXEL,
+        name="ant",
+        essence_outputs=essences,
+        resource_outputs=resources,
+    )
     ant.signal.source_controller_name = CONTROLLER
     for constraint in ant.constraints:
         constraint.hinge_max_torque = HINGE_TORQUE
 
-    materials = [
-        _common.MaterialSpec(
-            MATERIAL,
-            color=BODY_COLOR,
-            kind="rigid",
-            roughness=0.12,
-            metalness=1.0,
-        )
-    ]
-
     return _common.make_world(
         "mjcf_ant",
-        materials=materials,
         structures=[ant],
         controllers=[rsc.controller.ControllerCallback(CONTROLLER)],
+        essences=essences,
+        resources=resources,
     )
 
 

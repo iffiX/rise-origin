@@ -22,8 +22,9 @@ from rise_origin.rsc.essence.material import (
     MaterialPairPropertyCoulombFriction,
     MaterialPairPropertyRestitution,
     MaterialPhysicalPropertyFixed,
-    MaterialPhysicalPropertyRigid,
     MaterialPhysicalPropertySoft,
+    MaterialPhysicalPropertyRigid,
+    MaterialPhysicalPropertyAtlas,
 )
 
 #: Abstract base of every essence characterization (carries name).
@@ -51,6 +52,7 @@ __all__ = [
     "MaterialPhysicalPropertyFixed",
     "MaterialPhysicalPropertySoft",
     "MaterialPhysicalPropertyRigid",
+    "MaterialPhysicalPropertyAtlas",
     "MaterialOpticalPropertySimpleMicrofacet",
     "MaterialPairPropertyCoulombFriction",
     "MaterialPairPropertyRestitution",

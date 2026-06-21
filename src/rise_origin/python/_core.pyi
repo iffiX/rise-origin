@@ -31,6 +31,15 @@ class RVec3rf:
     @overload
     def __init__(self, x: float, y: float, z: float) -> None: ...
 
+    @staticmethod
+    def zero() -> "RVec3rf": ...
+
+    @staticmethod
+    def one() -> "RVec3rf": ...
+
+    @staticmethod
+    def full(value: float) -> "RVec3rf": ...
+
     x: float
     y: float
     z: float
@@ -47,10 +56,45 @@ class RQuat3rf:
     @overload
     def __init__(self, x: float, y: float, z: float, w: float) -> None: ...
 
+    @staticmethod
+    def unit() -> "RQuat3rf": ...
+
     x: float
     y: float
     z: float
     w: float
+
+
+class RMat3rf:
+    """3x3 float matrix (row-major)"""
+
+    @overload
+    def __init__(self) -> None: ...
+
+    @overload
+    def __init__(
+            self,
+            m00: float, m01: float, m02: float,
+            m10: float, m11: float, m12: float,
+            m20: float, m21: float, m22: float,
+    ) -> None: ...
+
+    @staticmethod
+    def zero() -> "RMat3rf": ...
+
+    @staticmethod
+    def eye() -> "RMat3rf": ...
+
+    @staticmethod
+    def diagonal(m00: float, m11: float, m22: float) -> "RMat3rf": ...
+
+    def __getitem__(self, idx: tuple[int, int]) -> float: ...
+
+    def __setitem__(self, idx: tuple[int, int], value: float) -> None: ...
+
+    def to_list(self) -> list[list[float]]: ...
+
+    def from_list(self, rows: list[list[float]]) -> None: ...
 
 
 class RColor3b:
@@ -61,6 +105,9 @@ class RColor3b:
 
     @overload
     def __init__(self, r: int, g: int, b: int) -> None: ...
+
+    @staticmethod
+    def zero() -> "RColor3b": ...
 
     r: int
     g: int
@@ -75,6 +122,9 @@ class RColor3f:
 
     @overload
     def __init__(self, r: float, g: float, b: float) -> None: ...
+
+    @staticmethod
+    def zero() -> "RColor3f": ...
 
     r: float
     g: float
@@ -93,6 +143,15 @@ class RBound3rf:
             min_x: float, min_y: float, min_z: float,
             max_x: float, max_y: float, max_z: float,
     ) -> None: ...
+
+    @staticmethod
+    def zero() -> "RBound3rf": ...
+
+    @staticmethod
+    def lowest() -> "RBound3rf": ...
+
+    @staticmethod
+    def highest() -> "RBound3rf": ...
 
     min_x: float
     min_y: float
@@ -115,6 +174,15 @@ class RBound3rui:
             max_x: int, max_y: int, max_z: int,
     ) -> None: ...
 
+    @staticmethod
+    def zero() -> "RBound3rui": ...
+
+    @staticmethod
+    def lowest() -> "RBound3rui": ...
+
+    @staticmethod
+    def highest() -> "RBound3rui": ...
+
     min_x: int
     min_y: int
     min_z: int
@@ -135,6 +203,15 @@ class RBound3ri:
             min_x: int, min_y: int, min_z: int,
             max_x: int, max_y: int, max_z: int,
     ) -> None: ...
+
+    @staticmethod
+    def zero() -> "RBound3ri": ...
+
+    @staticmethod
+    def lowest() -> "RBound3ri": ...
+
+    @staticmethod
+    def highest() -> "RBound3ri": ...
 
     min_x: int
     min_y: int
@@ -541,6 +618,14 @@ class RSC_MaterialPhysicalPropertyRigid(RSC_MaterialPhysicalPropertyBase):
     density: float
 
 
+class RSC_MaterialPhysicalPropertyAtlas(RSC_MaterialPhysicalPropertyBase):
+    def __init__(self) -> None: ...
+
+    mass: float
+    com_position: RVec3rf
+    inertia: RMat3rf
+
+
 class RSC_MaterialOpticalPropertyBase(RSC_MaterialUnaryProperty): ...
 
 
@@ -926,9 +1011,10 @@ _RSC_ResourceAlt = Union[RSC_TextureConstant, RSC_TextureGrid]
 
 _RSC_EssenceAlt = Union[
     RSC_Material,
-    RSC_MaterialPhysicalPropertySoft,
     RSC_MaterialPhysicalPropertyFixed,
+    RSC_MaterialPhysicalPropertySoft,
     RSC_MaterialPhysicalPropertyRigid,
+    RSC_MaterialPhysicalPropertyAtlas,
     RSC_MaterialOpticalPropertySimpleMicrofacet,
     RSC_MaterialPairPropertyCoulombFriction,
     RSC_MaterialPairPropertyRestitution,

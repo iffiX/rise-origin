@@ -20,9 +20,9 @@
 #include "rise_origin/rsc/essence/rsc_material_pair_property.h"
 #include "rise_origin/rsc/essence/rsc_material_unary_property.h"
 #include "rise_origin/utils/data/rs_any.h"
+#include "rise_origin/utils/data/rs_variant.h"
 #include "rise_origin/utils/math/rs_color.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/data/rs_variant.h"
 
 namespace rise {
 
@@ -44,6 +44,10 @@ class RS_KernelManager;
  *     Return type: Union[bool, RS_NoneType]
  *     Detail: Whether the material is rigid (i.e. mass and inertia are computed
  *             from the voxel composition), return RS_NONE if not defined
+ * - "atlas" :
+ *     Return type: Union[bool, RS_NoneType]
+ *     Detail: Whether the material is an atlas rigid body (prescribed mass, COM
+ *             and inertia), return RS_NONE if not defined
  * - "soft" :
  *     Return type: Union[RS_Tuple[RFloat, RFloat, RFloat, RFloat, RFloat], RS_NoneType]
  *     Detail: A tuple containing:
@@ -67,6 +71,18 @@ class RS_KernelManager;
  *                Range: [0, 0.5],
  *                Detail: Poisson's ratio of the material,
  *             return RS_NONE if not defined
+ * - "mass" :
+ *     Return type: Union[RFloat, RS_NoneType]
+ *     Detail: Mass of the atlas rigid body (unit: kg), return RS_NONE if not defined
+ * - "com_position" :
+ *     Return type: Union[RVec3rf, RS_NoneType]
+ *     Detail: Center of mass of the atlas rigid body in the rigid-body segment's local frame
+ *             (origin at the segment's minimum bounding-box corner, body-local axes, unit: m),
+ *             return RS_NONE if not defined
+ * - "inertia" :
+ *     Return type: Union[RMat3rf, RS_NoneType]
+ *     Detail: 3x3 moment of inertia tensor of the atlas rigid body about its center of mass,
+ *             in body-local axes (unit: kg m^2), return RS_NONE if not defined
  * - "is_transparent" :
  *     Return type: bool
  *     Detail: True iff the material's optical SimpleMicrofacet property is transparent,
@@ -109,6 +125,7 @@ class RS_KernelMaterialManager {
     using UnaryPropertyVariant = RS_Variant<
         rsc::RSC_MaterialPhysicalPropertyFixed,
         rsc::RSC_MaterialPhysicalPropertyRigid,
+        rsc::RSC_MaterialPhysicalPropertyAtlas,
         rsc::RSC_MaterialPhysicalPropertySoft,
         rsc::RSC_MaterialOpticalPropertySimpleMicrofacet>;
 
@@ -216,8 +233,8 @@ class RS_KernelMaterialManager {
     std::vector<rsc::RSC_Material> getMaterialRSCs() const;
 
     /**
-     * @brief Get the snapshot of every registered unary property characterization (variant-wrapped),
-     * for getWorld().
+     * @brief Get the snapshot of every registered unary property characterization
+     * (variant-wrapped), for getWorld().
      */
     std::vector<UnaryPropertyVariant> getMaterialUnaryPropertyRSCs() const;
 

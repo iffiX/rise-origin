@@ -232,7 +232,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             A populated :class:`StructureVoxelBody`.
         """
         return cls.from_grid(
-            cls._sphere_mask(radius_voxels),
+            cls._make_sphere_mask(radius_voxels),
             material_sid=material_sid,
             segment_sid=segment_sid,
             voxel_size=voxel_size,
@@ -270,7 +270,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             A populated :class:`StructureVoxelBody`.
         """
         return cls.from_grid(
-            cls._cylinder_mask(radius_voxels, height_voxels, axis),
+            cls._make_cylinder_mask(radius_voxels, height_voxels, axis),
             material_sid=material_sid,
             segment_sid=segment_sid,
             voxel_size=voxel_size,
@@ -311,7 +311,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             A populated :class:`StructureVoxelBody`.
         """
         return cls.from_grid(
-            cls._capsule_mask(radius_voxels, height_voxels, axis),
+            cls._make_capsule_mask(radius_voxels, height_voxels, axis),
             material_sid=material_sid,
             segment_sid=segment_sid,
             voxel_size=voxel_size,
@@ -483,7 +483,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         return np.asarray(grid).transpose(order).ravel(order="C")
 
     @staticmethod
-    def _sphere_mask(radius: int) -> np.ndarray:
+    def _make_sphere_mask(radius: int) -> np.ndarray:
         """Solid-sphere occupancy of the given voxel radius, shape (2r, 2r, 2r)."""
         n = 2 * radius
         coords = np.arange(n) + 0.5 - radius
@@ -491,7 +491,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         return (gx * gx + gy * gy + gz * gz) <= float(radius) ** 2
 
     @staticmethod
-    def _cylinder_mask(radius: int, length: int, axis: str) -> np.ndarray:
+    def _make_cylinder_mask(radius: int, length: int, axis: str) -> np.ndarray:
         """Solid-cylinder occupancy of ``length`` voxels along ``axis`` (x/y/z)."""
         n = 2 * radius
         coords = np.arange(n) + 0.5 - radius
@@ -510,7 +510,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         raise ValueError(f"axis must be 'x', 'y', or 'z', got {axis!r}")
 
     @staticmethod
-    def _capsule_mask(radius: int, length: int, axis: str) -> np.ndarray:
+    def _make_capsule_mask(radius: int, length: int, axis: str) -> np.ndarray:
         """Solid-capsule occupancy: a ``length``-voxel cylinder with hemispherical caps."""
         n = 2 * radius
         total = length + 2 * radius
@@ -769,6 +769,13 @@ class StructureVoxel(RSC_StructureVoxel):
     # Dict key selecting the fallback voxel size for unlisted parts.
     _VOXEL_SIZE_DEFAULT_KEY = "*"
 
+    # Surface color samples drawn per surface voxel, so each voxel's color is the
+    # majority over its patch rather than one aliased point on a thin feature.
+    _VOXEL_COLOR_SAMPLE_NUM = 12
+
+    # Plain white clay (albedo, roughness, metalness) for the geometry-only look.
+    _WHITE_SIGNATURE = ((0.8, 0.8, 0.8), 0.7, 0.0)
+
     # URDF joint type -> constraint type (unsupported types are skipped).
     _URDF_JOINT_TYPE = {
         "revolute": RSE_StructureVoxelConstraintType.RSE_STRUCTURE_VOXEL_HINGE_JOINT,
@@ -897,15 +904,27 @@ class StructureVoxel(RSC_StructureVoxel):
         voxel_size: VoxelSizeSpec,
         name: Optional[str] = None,
         mesh_dir: Optional[str] = None,
+        essence_outputs: Optional[list] = None,
+        resource_outputs: Optional[list] = None,
+        is_prefer_visual_mesh: bool = True,
+        is_mimic_visual_signature: bool = True,
+        visual_signature_num: int = 8,
     ) -> "StructureVoxel":
         """A multi-body articulated structure loaded from a URDF robot.
 
-        Each link's collision geometry is voxelized into a rigid body placed at
-        the link's pose (zero configuration); each joint becomes a constraint
-        wiring its parent and child bodies (revolute/continuous -> hinge,
-        prismatic -> prismatic, fixed -> fixed). Unsupported joint types and
-        links without collision geometry are skipped. Only collision meshes are
-        loaded.
+        Each link's geometry is voxelized into a rigid body placed at the link's
+        pose (zero configuration); each joint becomes a constraint wiring its
+        parent and child bodies (revolute/continuous -> hinge, prismatic ->
+        prismatic, fixed -> fixed). Unsupported joint types and links without
+        geometry are skipped.
+
+        When ``essence_outputs`` is given, each link gets its own materials: the
+        link's true mass, center of mass, and inertia become a shared atlas
+        physical property, and its visual color and roughness/metalness become
+        optical properties. The ``Material`` and property essences are appended
+        to ``essence_outputs`` and the color textures to ``resource_outputs``, so
+        the caller can hand both to the world. Otherwise every voxel keeps
+        material id 0 and the caller supplies a material.
 
         Args:
             path: Filesystem path to the ``.urdf`` file.
@@ -915,14 +934,33 @@ class StructureVoxel(RSC_StructureVoxel):
             name: Unique structure name. Defaults to the robot's URDF name.
             mesh_dir: Directory the link mesh paths resolve against. Defaults to
                 the directory holding the ``.urdf`` file.
+            essence_outputs: List that receives the per-link ``Material`` and
+                physical and optical property essences. ``None`` keeps every
+                voxel at material id 0.
+            resource_outputs: List that receives the per-link color textures the
+                optical essences reference. Required when ``essence_outputs`` is
+                given.
+            is_prefer_visual_mesh: Voxelize the visual geometry when present,
+                falling back to the collision geometry; collision first if false.
+            is_mimic_visual_signature: Sample each link's texture into per-voxel
+                colors when true; give every link one plain white clay material
+                when false, for a geometry-only look.
+            visual_signature_num: Maximum number of distinct visual signatures
+                (color plus roughness and metalness) sampled per link.
 
         Returns:
             A multi-body :class:`StructureVoxel` with joints wired.
         """
         import yourdfpy
 
+        is_extracting_materials = essence_outputs is not None
+        if is_extracting_materials and resource_outputs is None:
+            raise ValueError(
+                "resource_outputs is required when essence_outputs is given"
+            )
+
         base_dir = mesh_dir or os.path.dirname(os.path.abspath(path))
-        resolve = cls._make_mesh_resolver(base_dir)
+        resolve = cls._get_urdf_mesh_resolver(base_dir)
         robot = yourdfpy.URDF.load(
             path,
             build_scene_graph=True,
@@ -931,11 +969,13 @@ class StructureVoxel(RSC_StructureVoxel):
             filename_handler=resolve,
         )
         base = robot.base_link
+        structure_name = name or robot.robot.name
 
         bodies = []
         body_of_link = {}
+        material_references = []
         for link_name, link in robot.link_map.items():
-            mesh = cls._link_collision_mesh(link, resolve)
+            mesh = cls._get_urdf_link_mesh(link, resolve, is_prefer_visual_mesh)
             if mesh is None:
                 continue
             transform = np.asarray(
@@ -943,8 +983,47 @@ class StructureVoxel(RSC_StructureVoxel):
             )
             placed = mesh.copy()
             placed.apply_transform(transform)
-            body = StructureVoxelBody.from_mesh(
-                placed, voxel_size=cls._resolve_size(voxel_size, link_name)
+            link_voxel_size = cls._resolve_size(voxel_size, link_name)
+
+            if not is_extracting_materials:
+                body = StructureVoxelBody.from_mesh(placed, voxel_size=link_voxel_size)
+                bodies.append(body)
+                body_of_link[link_name] = body
+                continue
+
+            occupancy, min_corner = _voxelize_mesh(placed, link_voxel_size)
+            occupied_min = np.argwhere(occupancy).min(axis=0)
+            com_corner = np.asarray(min_corner) + occupied_min * link_voxel_size
+            inertial = cls._get_urdf_inertial(robot, link_name, base)
+            if is_mimic_visual_signature:
+                palette, index_grid = cls._get_voxel_signatures(
+                    placed,
+                    occupancy,
+                    min_corner,
+                    link_voxel_size,
+                    cls._get_urdf_signature(robot, link),
+                    visual_signature_num,
+                )
+            else:
+                palette = [cls._WHITE_SIGNATURE]
+                index_grid = np.zeros(occupancy.shape, dtype=np.int64)
+            base_id = len(material_references)
+            material_references.extend(
+                cls._make_signature_materials(
+                    f"{structure_name}/{link_name}",
+                    inertial,
+                    com_corner,
+                    palette,
+                    essence_outputs,
+                    resource_outputs,
+                )
+            )
+            material_grid = np.where(occupancy, base_id + index_grid, RS_NULL_INDEX)
+            body = StructureVoxelBody.from_grid(
+                occupancy,
+                material_grid=material_grid,
+                voxel_size=link_voxel_size,
+                relative_origin_position=min_corner,
             )
             bodies.append(body)
             body_of_link[link_name] = body
@@ -1030,14 +1109,17 @@ class StructureVoxel(RSC_StructureVoxel):
                     )
                 )
 
-        structure_name = name or robot.robot.name
         signal = StructureVoxelSignal(
             structure_name + "_signal",
             hinge_signal_num=hinge_count,
             prismatic_signal_num=prismatic_count,
         )
         return cls(
-            structure_name, bodies=bodies, constraints=constraints, signal=signal
+            structure_name,
+            material_references=material_references,
+            bodies=bodies,
+            constraints=constraints,
+            signal=signal,
         )
 
     @classmethod
@@ -1047,14 +1129,26 @@ class StructureVoxel(RSC_StructureVoxel):
         *,
         voxel_size: VoxelSizeSpec,
         name: str = "mjcf",
+        essence_outputs: Optional[list] = None,
+        resource_outputs: Optional[list] = None,
+        is_prefer_visual_mesh: bool = True,
+        is_mimic_visual_signature: bool = True,
+        visual_signature_num: int = 8,
     ) -> "StructureVoxel":
         """A multi-body articulated structure loaded from a MuJoCo MJCF model.
 
         Each MuJoCo body's geoms are voxelized into a rigid body placed at the
         body's pose (zero configuration); each joint becomes a constraint wiring
         its body to its parent (hinge -> hinge, slide -> prismatic, ball ->
-        ball-and-socket). Free joints, plane geoms, and bodies without geoms are
-        skipped.
+        ball-and-socket), and a jointless body is welded to its parent. Free
+        joints, plane geoms, and bodies without geoms are skipped.
+
+        When ``essence_outputs`` is given, each body gets its own materials: its
+        mass, center of mass, and inertia become a shared atlas physical
+        property, and its color and roughness/metalness become optical
+        properties, appended to ``essence_outputs`` and ``resource_outputs``.
+        Otherwise every voxel keeps material id 0 and the caller supplies a
+        material.
 
         Args:
             path: Filesystem path to the ``.xml`` MJCF file.
@@ -1062,12 +1156,31 @@ class StructureVoxel(RSC_StructureVoxel):
                 name to its voxel edge length in meters; in the ``dict`` form the
                 ``"*"`` key sets the default for unlisted bodies.
             name: Unique structure name.
+            essence_outputs: List that receives the per-body ``Material`` and
+                physical and optical property essences. ``None`` keeps every
+                voxel at material id 0.
+            resource_outputs: List that receives the per-body color textures the
+                optical essences reference. Required when ``essence_outputs`` is
+                given.
+            is_prefer_visual_mesh: Voxelize the visual geoms (no contact) when
+                present, falling back to the collision geoms; collision first if
+                false.
+            is_mimic_visual_signature: Sample each body's color into per-voxel
+                signatures when true; give every body one plain white clay
+                material when false, for a geometry-only look.
+            visual_signature_num: Maximum number of distinct visual signatures
+                sampled per body.
 
         Returns:
             A multi-body :class:`StructureVoxel` with joints wired.
         """
         import mujoco
-        import trimesh
+
+        is_extracting_materials = essence_outputs is not None
+        if is_extracting_materials and resource_outputs is None:
+            raise ValueError(
+                "resource_outputs is required when essence_outputs is given"
+            )
 
         model = mujoco.MjModel.from_xml_path(path)
         data = mujoco.MjData(model)
@@ -1075,22 +1188,55 @@ class StructureVoxel(RSC_StructureVoxel):
 
         bodies = []
         body_of_id = {}
+        material_references = []
         for body_id in range(1, model.nbody):  # body 0 is the world
-            parts = [
-                cls._mjcf_geom_mesh(model, geom_id)
-                for geom_id in range(model.ngeom)
-                if model.geom_bodyid[geom_id] == body_id
-            ]
-            parts = [part for part in parts if part is not None]
-            if not parts:
-                continue
-            mesh = trimesh.util.concatenate(parts)
-            mesh.apply_transform(
-                cls._pose_matrix(data.xpos[body_id], data.xquat[body_id])
+            mesh, geom_ids = cls._get_mjcf_body_mesh(
+                model, data, body_id, is_prefer_visual_mesh
             )
-            body = StructureVoxelBody.from_mesh(
-                mesh,
-                voxel_size=cls._resolve_size(voxel_size, model.body(body_id).name),
+            if mesh is None:
+                continue
+            body_name = model.body(body_id).name or f"body{body_id}"
+            body_voxel_size = cls._resolve_size(voxel_size, body_name)
+
+            if not is_extracting_materials:
+                body = StructureVoxelBody.from_mesh(mesh, voxel_size=body_voxel_size)
+                bodies.append(body)
+                body_of_id[body_id] = body
+                continue
+
+            occupancy, min_corner = _voxelize_mesh(mesh, body_voxel_size)
+            occupied_min = np.argwhere(occupancy).min(axis=0)
+            com_corner = np.asarray(min_corner) + occupied_min * body_voxel_size
+            inertial = cls._get_mjcf_inertial(model, data, body_id)
+            if is_mimic_visual_signature:
+                palette, index_grid = cls._get_voxel_signatures(
+                    mesh,
+                    occupancy,
+                    min_corner,
+                    body_voxel_size,
+                    cls._get_mjcf_signature(model, geom_ids),
+                    visual_signature_num,
+                )
+            else:
+                palette = [cls._WHITE_SIGNATURE]
+                index_grid = np.zeros(occupancy.shape, dtype=np.int64)
+            base_id = len(material_references)
+            material_references.extend(
+                cls._make_signature_materials(
+                    f"{name}/{body_name}",
+                    inertial,
+                    com_corner,
+                    palette,
+                    essence_outputs,
+                    resource_outputs,
+                )
+            )
+            material_grid = np.where(occupancy, base_id + index_grid, RS_NULL_INDEX)
+            body = StructureVoxelBody.from_grid(
+                occupancy,
+                material_grid=material_grid,
+                voxel_size=body_voxel_size,
+                relative_origin_position=min_corner,
             )
             bodies.append(body)
             body_of_id[body_id] = body
@@ -1124,7 +1270,9 @@ class StructureVoxel(RSC_StructureVoxel):
                 continue
             parent_body = body_of_id[parent_id]
             child_body = body_of_id[child_id]
-            child_world = cls._pose_matrix(data.xpos[child_id], data.xquat[child_id])
+            child_world = cls._make_pose_matrix(
+                data.xpos[child_id], data.xquat[child_id]
+            )
 
             # In the absence of joints the body is welded to its parent.
             if not joint_ids:
@@ -1194,7 +1342,13 @@ class StructureVoxel(RSC_StructureVoxel):
             hinge_signal_num=hinge_count,
             prismatic_signal_num=prismatic_count,
         )
-        return cls(name, bodies=bodies, constraints=constraints, signal=signal)
+        return cls(
+            name,
+            material_references=material_references,
+            bodies=bodies,
+            constraints=constraints,
+            signal=signal,
+        )
 
     @classmethod
     def from_gltf(
@@ -1203,12 +1357,24 @@ class StructureVoxel(RSC_StructureVoxel):
         *,
         voxel_size: VoxelSizeSpec,
         name: str = "gltf",
+        essence_outputs: Optional[list] = None,
+        resource_outputs: Optional[list] = None,
+        is_mimic_visual_signature: bool = True,
+        visual_signature_num: int = 8,
     ) -> "StructureVoxel":
         """A structure voxelized from a glTF / GLB scene.
 
-        Each mesh node in the scene becomes a rigid body voxelized at its node
-        transform; a single-mesh file yields one body. Skeleton/skin animation is
-        not interpreted -- the meshes are imported as static rigid bodies.
+        Each mesh node becomes its own rigid body voxelized at the node
+        transform; the bodies are unconnected, since glTF carries no joints (its
+        skeleton and skin are bones and per-vertex weights for mesh deformation,
+        not kinematic constraints, and are not interpreted). glTF has no inertials
+        either, so the engine derives each body's mass from its voxels.
+
+        When ``essence_outputs`` is given, each node gets its own materials: its
+        texture color is sampled into per-voxel optical materials over a rigid
+        physical property, appended to ``essence_outputs`` and
+        ``resource_outputs``. Otherwise every voxel keeps material id 0 and the
+        caller supplies a material.
 
         Args:
             path: Filesystem path to the ``.gltf`` / ``.glb`` file.
@@ -1216,23 +1382,78 @@ class StructureVoxel(RSC_StructureVoxel):
                 name to its voxel edge length in meters; in the ``dict`` form the
                 ``"*"`` key sets the default for unlisted nodes.
             name: Unique structure name.
+            essence_outputs: List that receives the per-node ``Material`` and
+                physical and optical property essences. ``None`` keeps every
+                voxel at material id 0.
+            resource_outputs: List that receives the per-node color textures the
+                optical essences reference. Required when ``essence_outputs`` is
+                given.
+            is_mimic_visual_signature: Sample each node's texture into per-voxel
+                signatures when true; give every node one plain white clay
+                material when false, for a geometry-only look.
+            visual_signature_num: Maximum number of distinct visual signatures
+                sampled per node.
 
         Returns:
             A :class:`StructureVoxel` with one body per mesh node.
         """
         import trimesh
 
+        is_extracting_materials = essence_outputs is not None
+        if is_extracting_materials and resource_outputs is None:
+            raise ValueError(
+                "resource_outputs is required when essence_outputs is given"
+            )
+
         scene = trimesh.load(path, force="scene")
         bodies = []
+        material_references = []
         for node_name in scene.graph.nodes_geometry:
             transform, geometry_name = scene.graph[node_name]
             mesh = scene.geometry[geometry_name].copy()
             mesh.apply_transform(transform)
-            body = StructureVoxelBody.from_mesh(
-                mesh, voxel_size=cls._resolve_size(voxel_size, node_name)
+            node_voxel_size = cls._resolve_size(voxel_size, node_name)
+
+            if not is_extracting_materials:
+                bodies.append(
+                    StructureVoxelBody.from_mesh(mesh, voxel_size=node_voxel_size)
+                )
+                continue
+
+            occupancy, min_corner = _voxelize_mesh(mesh, node_voxel_size)
+            if is_mimic_visual_signature:
+                palette, index_grid = cls._get_voxel_signatures(
+                    mesh,
+                    occupancy,
+                    min_corner,
+                    node_voxel_size,
+                    cls._get_gltf_signature(mesh),
+                    visual_signature_num,
+                )
+            else:
+                palette = [cls._WHITE_SIGNATURE]
+                index_grid = np.zeros(occupancy.shape, dtype=np.int64)
+            base_id = len(material_references)
+            material_references.extend(
+                cls._make_signature_materials(
+                    f"{name}/{node_name}",
+                    None,
+                    None,
+                    palette,
+                    essence_outputs,
+                    resource_outputs,
+                )
             )
-            bodies.append(body)
-        return cls(name, bodies=bodies)
+            material_grid = np.where(occupancy, base_id + index_grid, RS_NULL_INDEX)
+            bodies.append(
+                StructureVoxelBody.from_grid(
+                    occupancy,
+                    material_grid=material_grid,
+                    voxel_size=node_voxel_size,
+                    relative_origin_position=min_corner,
+                )
+            )
+        return cls(name, material_references=material_references, bodies=bodies)
 
     @classmethod
     def from_step(
@@ -1246,9 +1467,11 @@ class StructureVoxel(RSC_StructureVoxel):
         """A structure voxelized from a STEP CAD file.
 
         Each solid in the (possibly assembly) STEP is tessellated to a mesh and
-        voxelized into its own rigid body; STEP carries no kinematics, so the
-        bodies are unconnected (wire joints afterward with the ``a`` / ``b`` body
-        refs). Requires the ``[cad]`` extra (OpenCASCADE via cadquery).
+        voxelized into its own unconnected rigid body; STEP carries no joints, so
+        the bodies are left unwired (add joints afterward with the ``a`` / ``b``
+        body refs). Only geometry is imported: per-solid color and appearance are
+        not read, so the caller supplies materials. STEP carries no inertials, so
+        the engine derives each body's mass from its voxels.
 
         Args:
             path: Filesystem path to the ``.step`` / ``.stp`` file.
@@ -1261,12 +1484,7 @@ class StructureVoxel(RSC_StructureVoxel):
         Returns:
             A :class:`StructureVoxel` with one body per STEP solid.
         """
-        try:
-            import cadquery
-        except ImportError as error:
-            raise ImportError(
-                "STEP import requires the [cad] extra: pip install 'rise-origin[cad]'"
-            ) from error
+        import cadquery
         import trimesh
 
         solids = cadquery.importers.importStep(path).solids().vals()
@@ -1282,31 +1500,6 @@ class StructureVoxel(RSC_StructureVoxel):
             )
             bodies.append(body)
         return cls(name, bodies=bodies)
-
-    @staticmethod
-    def _resolve_endpoint(ref: BodyRef, index: dict) -> Tuple[int, int]:
-        """Resolve a constraint endpoint body ref to ``(body_sid, segment_bid)``."""
-        body, segment_bid = ref if isinstance(ref, tuple) else (ref, 0)
-        body_sid = index.get(id(body))
-        if body_sid is None:
-            raise ValueError(
-                "constraint endpoint references a body not in this structure's bodies"
-            )
-        return body_sid, segment_bid
-
-    @staticmethod
-    def _resolve_size(voxel_size: VoxelSizeSpec, name: str) -> float:
-        """Resolve a per-body voxel size from a scalar or a name-keyed dict."""
-        if isinstance(voxel_size, dict):
-            if name in voxel_size:
-                return voxel_size[name]
-            default_key = StructureVoxel._VOXEL_SIZE_DEFAULT_KEY
-            if default_key in voxel_size:
-                return voxel_size[default_key]
-            raise KeyError(
-                f"voxel_size has no entry for {name!r} and no {default_key!r} default"
-            )
-        return voxel_size
 
     @staticmethod
     def _parse_vox(path: str):
@@ -1335,7 +1528,32 @@ class StructureVoxel(RSC_StructureVoxel):
         raise ValueError(f"{path!r} contains no voxel data")
 
     @staticmethod
-    def _make_mesh_resolver(mesh_dir: str) -> Callable[[str], str]:
+    def _resolve_endpoint(ref: BodyRef, index: dict) -> Tuple[int, int]:
+        """Resolve a constraint endpoint body ref to ``(body_sid, segment_bid)``."""
+        body, segment_bid = ref if isinstance(ref, tuple) else (ref, 0)
+        body_sid = index.get(id(body))
+        if body_sid is None:
+            raise ValueError(
+                "constraint endpoint references a body not in this structure's bodies"
+            )
+        return body_sid, segment_bid
+
+    @staticmethod
+    def _resolve_size(voxel_size: VoxelSizeSpec, name: str) -> float:
+        """Resolve a per-body voxel size from a scalar or a name-keyed dict."""
+        if isinstance(voxel_size, dict):
+            if name in voxel_size:
+                return voxel_size[name]
+            default_key = StructureVoxel._VOXEL_SIZE_DEFAULT_KEY
+            if default_key in voxel_size:
+                return voxel_size[default_key]
+            raise KeyError(
+                f"voxel_size has no entry for {name!r} and no {default_key!r} default"
+            )
+        return voxel_size
+
+    @staticmethod
+    def _get_urdf_mesh_resolver(mesh_dir: str) -> Callable[[str], str]:
         """Return a handler that resolves a URDF mesh path against ``mesh_dir``.
 
         The whole path after any ``package://`` directive is kept and joined with
@@ -1351,13 +1569,37 @@ class StructureVoxel(RSC_StructureVoxel):
         return resolve
 
     @staticmethod
-    def _link_collision_mesh(link, resolve: Callable[[str], str]):
-        """Combine a URDF link's collision geometries into one trimesh, or None."""
+    def _get_urdf_link_mesh(link, resolve, is_prefer_visual: bool):
+        """Return a link's preferred mesh, falling back to the other geometry set.
+
+        Tries visual or collision geometry first per ``is_prefer_visual``, then
+        the other, so a link missing the preferred geometry, or whose preferred
+        mesh files are absent, still yields a body.
+        """
+        primary = link.visuals if is_prefer_visual else link.collisions
+        fallback = link.collisions if is_prefer_visual else link.visuals
+        for items in (primary, fallback):
+            try:
+                mesh = StructureVoxel._get_urdf_geometries_mesh(items, resolve)
+            except Exception:
+                mesh = None
+            if mesh is not None:
+                return mesh
+        return None
+
+    @staticmethod
+    def _get_urdf_geometries_mesh(items, resolve: Callable[[str], str]):
+        """Combine a list of URDF visual or collision geometries into one trimesh.
+
+        Returns ``None`` when the list holds no usable geometry. Both visual and
+        collision items expose ``geometry`` and ``origin``, so the same builder
+        serves either.
+        """
         import trimesh
 
         parts = []
-        for collision in link.collisions:
-            geometry = collision.geometry
+        for item in items:
+            geometry = item.geometry
             if geometry.box is not None:
                 primitive = trimesh.creation.box(extents=tuple(geometry.box.size))
             elif geometry.cylinder is not None:
@@ -1372,16 +1614,332 @@ class StructureVoxel(RSC_StructureVoxel):
                     primitive.apply_scale(geometry.mesh.scale)
             else:
                 continue
-            if collision.origin is not None:
+            if item.origin is not None:
                 primitive = primitive.copy()
-                primitive.apply_transform(np.asarray(collision.origin))
+                primitive.apply_transform(np.asarray(item.origin))
             parts.append(primitive)
         if not parts:
             return None
         return trimesh.util.concatenate(parts)
 
     @staticmethod
-    def _pose_matrix(position, quat_wxyz) -> np.ndarray:
+    def _get_urdf_inertial(robot, link_name, base):
+        """Return a link's ``(mass, com, inertia)`` in the structure frame, or None.
+
+        ``com`` is the center of mass and ``inertia`` the 3x3 tensor about it,
+        both transformed from the link frame into the structure frame at the zero
+        configuration.
+        """
+        inertial = getattr(robot.link_map[link_name], "inertial", None)
+        if inertial is None:
+            return None
+        link_transform = np.asarray(
+            robot.get_transform(frame_to=link_name, frame_from=base)
+        )
+        com_transform = link_transform @ np.asarray(inertial.origin)
+        com = com_transform[:3, 3]
+        rotation = com_transform[:3, :3]
+        inertia = rotation @ np.asarray(inertial.inertia) @ rotation.T
+        return float(inertial.mass), com, inertia
+
+    @staticmethod
+    def _get_urdf_signature(robot, link):
+        """Return a link's ``(albedo, roughness, metalness)`` visual signature.
+
+        URDF materials carry only a base color, so roughness defaults to a matte
+        value and metalness to zero. Named materials are resolved through the
+        robot's material map.
+        """
+        albedo = (0.7, 0.7, 0.7)
+        named = {material.name: material for material in robot.robot.materials}
+        for visual in link.visuals:
+            material = visual.material
+            if material is None:
+                continue
+            if material.color is None and material.name in named:
+                material = named[material.name]
+            if material.color is not None:
+                rgba = material.color.rgba
+                albedo = (float(rgba[0]), float(rgba[1]), float(rgba[2]))
+                break
+        return albedo, 0.7, 0.0
+
+    @staticmethod
+    def _get_mjcf_body_mesh(model, data, body_id, is_prefer_visual):
+        """Return a body's preferred geom mesh and the geom ids it used, or None.
+
+        Geoms split into visual-only (no contact) and collision sets; the
+        preferred set is tried first and the other as a fallback, and the merged
+        mesh is placed at the body's world pose.
+        """
+        import trimesh
+
+        visual, collision = [], []
+        for geom_id in range(model.ngeom):
+            if int(model.geom_bodyid[geom_id]) != body_id:
+                continue
+            is_visual = (
+                int(model.geom_contype[geom_id]) == 0
+                and int(model.geom_conaffinity[geom_id]) == 0
+            )
+            (visual if is_visual else collision).append(geom_id)
+        for geom_ids in (
+            (visual, collision) if is_prefer_visual else (collision, visual)
+        ):
+            parts = [
+                StructureVoxel._make_mjcf_geom_mesh(model, geom_id)
+                for geom_id in geom_ids
+            ]
+            parts = [part for part in parts if part is not None]
+            if not parts:
+                continue
+            mesh = trimesh.util.concatenate(parts)
+            mesh.apply_transform(
+                StructureVoxel._make_pose_matrix(
+                    data.xpos[body_id], data.xquat[body_id]
+                )
+            )
+            return mesh, geom_ids
+        return None, []
+
+    @staticmethod
+    def _get_mjcf_inertial(model, data, body_id):
+        """Return a body's ``(mass, com, inertia)`` in the structure frame, or None.
+
+        MuJoCo already resolves the world-frame center of mass and principal
+        inertia frame, so the tensor about the center of mass follows from
+        rotating the diagonal inertia into that frame.
+        """
+        mass = float(model.body_mass[body_id])
+        if mass <= 0:
+            return None
+        com = np.asarray(data.xipos[body_id])
+        rotation = np.asarray(data.ximat[body_id]).reshape(3, 3)
+        inertia = rotation @ np.diag(model.body_inertia[body_id]) @ rotation.T
+        return mass, com, inertia
+
+    @staticmethod
+    def _get_mjcf_signature(model, geom_ids):
+        """Return a body's ``(albedo, roughness, metalness)`` visual signature.
+
+        Color comes from the body's material or geom rgba; a material's shininess
+        and reflectance map to roughness and metalness, with a matte default
+        otherwise.
+        """
+        for geom_id in geom_ids:
+            material_id = int(model.geom_matid[geom_id])
+            if material_id >= 0:
+                rgba = model.mat_rgba[material_id]
+                roughness = float(1.0 - model.mat_shininess[material_id])
+                metalness = float(model.mat_reflectance[material_id])
+                return (
+                    (float(rgba[0]), float(rgba[1]), float(rgba[2])),
+                    roughness,
+                    metalness,
+                )
+            rgba = model.geom_rgba[geom_id]
+            return (float(rgba[0]), float(rgba[1]), float(rgba[2])), 0.7, 0.0
+        return (0.7, 0.7, 0.7), 0.7, 0.0
+
+    @staticmethod
+    def _get_gltf_signature(mesh):
+        """Return a mesh's ``(albedo, roughness, metalness)`` PBR fallback.
+
+        Used when the mesh carries no texture; the base color and the roughness
+        and metalness factors come from its glTF material, with a matte default
+        otherwise.
+        """
+        material = getattr(getattr(mesh, "visual", None), "material", None)
+        albedo = (0.7, 0.7, 0.7)
+        roughness = 0.7
+        metalness = 0.0
+        if material is not None:
+            base = getattr(material, "baseColorFactor", None)
+            if base is None:
+                base = getattr(material, "main_color", None)
+            if base is not None:
+                base = np.asarray(base, dtype=np.float64)
+                if base.max() > 1.0:
+                    base = base / 255.0
+                albedo = (float(base[0]), float(base[1]), float(base[2]))
+            if getattr(material, "roughnessFactor", None) is not None:
+                roughness = float(material.roughnessFactor)
+            if getattr(material, "metallicFactor", None) is not None:
+                metalness = float(material.metallicFactor)
+        return albedo, roughness, metalness
+
+    @staticmethod
+    def _get_mesh_texture(mesh):
+        """Return a textured mesh's ``(uv, image)``, or None when it has none.
+
+        Only a real texture image with vertex UVs counts; an untextured or
+        primitive mesh returns None so the caller keeps the material's flat color.
+        """
+        visual = getattr(mesh, "visual", None)
+        uv = getattr(visual, "uv", None)
+        material = getattr(visual, "material", None)
+        image = getattr(material, "image", None) if material is not None else None
+        if image is None and material is not None:
+            image = getattr(material, "baseColorTexture", None)
+        if uv is None or image is None:
+            return None
+        return np.asarray(uv), image
+
+    @staticmethod
+    def _get_image_palette(image, count):
+        """Return up to ``count`` median-cut palette colors of a texture, 0-1 RGB.
+
+        The palette is read from a downsampled copy, which is far cheaper than
+        quantizing the full image and gives the same dominant colors. Snapping
+        samples to this palette keeps anti-aliased edges crisp.
+        """
+        thumbnail = image.convert("RGB")
+        thumbnail.thumbnail((256, 256))
+        quantized = thumbnail.quantize(colors=count)
+        indices = sorted(index for _, index in quantized.getcolors())
+        palette = np.asarray(quantized.getpalette(), dtype=np.float64).reshape(-1, 3)
+        return palette[indices] / 255.0
+
+    @staticmethod
+    def _get_surface_samples(mesh, uv, image, count):
+        """Draw ``count`` area-uniform surface points with their texture colors.
+
+        Points are spread across the mesh in proportion to face area, and the
+        texture is read at each point's barycentric-interpolated UV, so the
+        samples represent the whole visible surface rather than the vertices.
+        """
+        import trimesh
+
+        points, face = mesh.sample(count, return_index=True)
+        barycentric = trimesh.triangles.points_to_barycentric(
+            mesh.triangles[face], points
+        )
+        point_uv = (barycentric[:, :, None] * uv[mesh.faces[face]]).sum(axis=1)
+        colors = np.asarray(trimesh.visual.uv_to_color(point_uv, image))
+        return points, colors[:, :3].astype(np.float64) / 255.0
+
+    @staticmethod
+    def _get_voxel_signatures(
+        mesh, occupancy, min_corner, voxel_size, default_signature, signature_num
+    ):
+        """Return a body's signature palette and its per-voxel palette-index grid.
+
+        The palette lists up to ``signature_num`` distinct ``(albedo, roughness,
+        metalness)`` signatures the body's voxels reference, ordered most common
+        first; the grid holds each voxel's palette index. The texture is first
+        quantized to that many colors, then a textured mesh paints each voxel with
+        the majority color of the surface samples that fall in it, leaving hidden
+        interior voxels at the dominant signature 0; otherwise one flat signature
+        covers the body.
+        """
+        _, roughness, metalness = default_signature
+        texture = StructureVoxel._get_mesh_texture(mesh)
+        if texture is None or signature_num <= 1:
+            return [default_signature], np.zeros(occupancy.shape, dtype=np.int64)
+        uv, image = texture
+        palette_colors = StructureVoxel._get_image_palette(image, signature_num)
+        sample_num = max(
+            int(mesh.area / (voxel_size * voxel_size))
+            * StructureVoxel._VOXEL_COLOR_SAMPLE_NUM,
+            signature_num,
+        )
+        points, colors = StructureVoxel._get_surface_samples(
+            mesh, uv, image, sample_num
+        )
+
+        # Snap each sample to its nearest palette color, then keep only the
+        # palette colors this body actually uses, most common first.
+        distances = ((colors[:, None, :] - palette_colors[None, :, :]) ** 2).sum(axis=2)
+        labels = distances.argmin(axis=1)
+        order = np.argsort(-np.bincount(labels, minlength=len(palette_colors)))
+        order = order[np.bincount(labels, minlength=len(palette_colors))[order] > 0]
+        palette_colors = palette_colors[order]
+        remap = np.zeros(len(distances[0]), dtype=np.int64)
+        remap[order] = np.arange(len(order))
+        labels = remap[labels]
+
+        voxel = np.clip(
+            ((points - np.asarray(min_corner)) / voxel_size).astype(np.int64),
+            0,
+            np.asarray(occupancy.shape) - 1,
+        )
+        flat = np.ravel_multi_index(voxel.T, occupancy.shape)
+        unique_voxels, inverse = np.unique(flat, return_inverse=True)
+        votes = np.zeros((len(unique_voxels), len(palette_colors)), dtype=np.int64)
+        np.add.at(votes, (inverse, labels), 1)
+        index_grid = np.zeros(occupancy.shape, dtype=np.int64)
+        index_grid.flat[unique_voxels] = votes.argmax(axis=1)
+
+        palette = [
+            ((float(red), float(green), float(blue)), roughness, metalness)
+            for red, green, blue in palette_colors
+        ]
+        return palette, index_grid
+
+    @staticmethod
+    def _make_signature_materials(
+        name, inertial, com_corner, palette, essence_outputs, resource_outputs
+    ):
+        """Append one material per signature to the out-lists and return the names.
+
+        Every signature of a body shares the same atlas (or rigid) physical
+        property, so the voxels fuse into one rigid segment, while each gets its
+        own albedo and roughness/metalness texture.
+        """
+        from rise_origin.rsc import essence, resource
+
+        names = []
+        is_multi = len(palette) > 1
+        for index, (albedo, roughness, metalness) in enumerate(palette):
+            material_name = f"{name}#{index}" if is_multi else name
+            names.append(material_name)
+            essence_outputs.append(essence.Material(material_name))
+            if inertial is not None:
+                mass, com, inertia = inertial
+                com_local = com - com_corner
+                essence_outputs.append(
+                    essence.MaterialPhysicalPropertyAtlas(
+                        material_name + "#phys",
+                        material_reference=material_name,
+                        mass=mass,
+                        com_position=(
+                            float(com_local[0]),
+                            float(com_local[1]),
+                            float(com_local[2]),
+                        ),
+                        inertia=inertia,
+                    )
+                )
+            else:
+                essence_outputs.append(
+                    essence.MaterialPhysicalPropertyRigid(
+                        material_name + "#phys",
+                        material_reference=material_name,
+                        density=1000.0,
+                    )
+                )
+            albedo_texture = material_name + "#albedo"
+            resource_outputs.append(
+                resource.TextureConstant(albedo_texture, value=tuple(albedo))
+            )
+            roughness_metalness_texture = material_name + "#rm"
+            resource_outputs.append(
+                resource.TextureConstant(
+                    roughness_metalness_texture, value=(roughness, metalness, 0.0)
+                )
+            )
+            essence_outputs.append(
+                essence.MaterialOpticalPropertySimpleMicrofacet(
+                    material_name + "#optic",
+                    material_reference=material_name,
+                    albedo_texture_reference=albedo_texture,
+                    roughness_metalness_texture_reference=roughness_metalness_texture,
+                )
+            )
+        return names
+
+    @staticmethod
+    def _make_pose_matrix(position, quat_wxyz) -> np.ndarray:
         """Compose a position and a ``(w, x, y, z)`` quaternion into a 4x4 transform."""
         import trimesh
 
@@ -1390,7 +1948,7 @@ class StructureVoxel(RSC_StructureVoxel):
         return transform
 
     @staticmethod
-    def _mjcf_geom_mesh(model, geom_id: int):
+    def _make_mjcf_geom_mesh(model, geom_id: int):
         """Build a MuJoCo geom's trimesh in body-local frame, or None to skip."""
         import mujoco
         import trimesh
@@ -1420,7 +1978,7 @@ class StructureVoxel(RSC_StructureVoxel):
         else:
             return None
         primitive.apply_transform(
-            StructureVoxel._pose_matrix(
+            StructureVoxel._make_pose_matrix(
                 model.geom_pos[geom_id], model.geom_quat[geom_id]
             )
         )

@@ -54,6 +54,14 @@ void RS_KernelMaterialManager::_createLutTables() {
           [](const UnaryPropertiesMap& m) {
               return m.find(typeid(RSC_MaterialPhysicalPropertyRigid)) != m.end();
           }}},
+        {"atlas",
+         {[](const UnaryPropertiesMap& m) -> RS_Any {
+              if (m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)) != m.end()) return true;
+              return RS_NONE;
+          },
+          [](const UnaryPropertiesMap& m) {
+              return m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)) != m.end();
+          }}},
         {"soft",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertySoft)); it != m.end()) {
@@ -71,11 +79,42 @@ void RS_KernelMaterialManager::_createLutTables() {
           [](const UnaryPropertiesMap& m) {
               return m.find(typeid(RSC_MaterialPhysicalPropertySoft)) != m.end();
           }}},
+        {"mass",
+         {[](const UnaryPropertiesMap& m) -> RS_Any {
+              if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)); it != m.end()) {
+                  return it->second.as<RSC_MaterialPhysicalPropertyAtlas>().mass;
+              }
+              return RS_NONE;
+          },
+          [](const UnaryPropertiesMap& m) {
+              return m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)) != m.end();
+          }}},
+        {"com_position",
+         {[](const UnaryPropertiesMap& m) -> RS_Any {
+              if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)); it != m.end()) {
+                  return it->second.as<RSC_MaterialPhysicalPropertyAtlas>().com_position;
+              }
+              return RS_NONE;
+          },
+          [](const UnaryPropertiesMap& m) {
+              return m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)) != m.end();
+          }}},
+        {"inertia",
+         {[](const UnaryPropertiesMap& m) -> RS_Any {
+              if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)); it != m.end()) {
+                  return it->second.as<RSC_MaterialPhysicalPropertyAtlas>().inertia;
+              }
+              return RS_NONE;
+          },
+          [](const UnaryPropertiesMap& m) {
+              return m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)) != m.end();
+          }}},
         {"is_transparent",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet));
                   it != m.end()) {
-                  return it->second.as<RSC_MaterialOpticalPropertySimpleMicrofacet>().is_transparent;
+                  return it->second.as<RSC_MaterialOpticalPropertySimpleMicrofacet>()
+                      .is_transparent;
               }
               return false;
           },
@@ -181,7 +220,8 @@ void RS_KernelMaterialManager::addMaterial(const RSC_Material& material) {
     _material_registrations.emplace(material.name, std::move(registration));
     _material_use_count[material_gid] = 0;
 
-    // Tables grow to fit this gid at the next commit; the vision slot waits for the first reference.
+    // Tables grow to fit this gid at the next commit; the vision slot waits for the first
+    // reference.
     _pending_table_dim = RS_MAX(_pending_table_dim, static_cast<RSize>(material_gid + 1));
     _is_tables_dirty = true;
 }
@@ -310,7 +350,7 @@ void RS_KernelMaterialManager::commit() {
         _resizeKernelTablesData(_pending_table_dim);
         // Reapply every pair property over the resized tables.
         for (auto& [key, props_map] : _pair_properties) {
-            // Note: Structured bindings cannot be captured by a lambda 
+            // Note: Structured bindings cannot be captured by a lambda
             // before C++20, so bind to a plain variable first.
             const auto& pair_key = key;
             for (auto& [ti, prop_variant] : props_map) {
@@ -411,7 +451,8 @@ void RS_KernelMaterialManager::addMaterialProperty(const UnaryPropertyVariant& p
             const std::string* tex_refs[] = {
                 &p.albedo_texture_reference,
                 &p.roughness_metalness_texture_reference,
-                &p.emission_texture_reference};
+                &p.emission_texture_reference
+            };
             for (const std::string* tex_ref_ptr : tex_refs) {
                 const std::string& tex_ref = *tex_ref_ptr;
                 if (!tex_ref.empty() && !tex_mgr.hasTexture(tex_ref)) {
@@ -645,7 +686,8 @@ bool RS_KernelMaterialManager::has(
     }
     auto a_it = _material_registrations.find(first_material);
     auto b_it = _material_registrations.find(second_material);
-    if (a_it == _material_registrations.end() || b_it == _material_registrations.end()) return false;
+    if (a_it == _material_registrations.end() || b_it == _material_registrations.end())
+        return false;
     auto props_it = _pair_properties.find(makePairKey(a_it->second.gid(), b_it->second.gid()));
     if (props_it == _pair_properties.end()) return false;
     return lut_it->second.has_fn(props_it->second);
@@ -671,9 +713,9 @@ void RS_KernelMaterialManager::_resolveVisionSlot(RIndex material_gid) {
 
     // Forbid post-init changes to emissive status. Structure managers cache their emissive
     // voxel set at structure init and would not observe a flip here.
-    const bool current_is_emissive =
-        optical != nullptr && !optical->emission_texture_reference.empty() &&
-        optical->emission_intensity > 0;
+    const bool current_is_emissive = optical != nullptr &&
+                                     !optical->emission_texture_reference.empty() &&
+                                     optical->emission_intensity > 0;
     auto init_it = _material_is_emissive_at_init.find(material_gid);
     if (init_it == _material_is_emissive_at_init.end()) {
         _material_is_emissive_at_init.emplace(material_gid, current_is_emissive);
@@ -686,21 +728,28 @@ void RS_KernelMaterialManager::_resolveVisionSlot(RIndex material_gid) {
     // Reassigning each channel releases the previously-held texture reference.
     if (optical != nullptr) {
         slot.albedo = _resolveVisionSampleInput(
-            optical->albedo_texture_reference, RColor3f::zero(),
-            RSE_TEXTURE_COLOR_SPACE_SRGB, RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
+            optical->albedo_texture_reference,
+            RColor3f::zero(),
+            RSE_TEXTURE_COLOR_SPACE_SRGB,
+            RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
         );
         slot.roughness_metalness = _resolveVisionSampleInput(
-            optical->roughness_metalness_texture_reference, RColor3f(1.0f, 0.0f, 0.0f),
-            RSE_TEXTURE_COLOR_SPACE_LINEAR, RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
+            optical->roughness_metalness_texture_reference,
+            RColor3f(1.0f, 0.0f, 0.0f),
+            RSE_TEXTURE_COLOR_SPACE_LINEAR,
+            RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
         );
         slot.emission = _resolveVisionSampleInput(
-            optical->emission_texture_reference, RColor3f::zero(),
-            RSE_TEXTURE_COLOR_SPACE_SRGB, RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
+            optical->emission_texture_reference,
+            RColor3f::zero(),
+            RSE_TEXTURE_COLOR_SPACE_SRGB,
+            RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
         );
     } else {
         slot.albedo = MaterialVisionTextureReference{};
-        slot.roughness_metalness =
-            MaterialVisionTextureReference{RSE_VISION_SAMPLE_INPUT_CONSTANT, RColor3f(1.0f, 0.0f, 0.0f), {}};
+        slot.roughness_metalness = MaterialVisionTextureReference{
+            RSE_VISION_SAMPLE_INPUT_CONSTANT, RColor3f(1.0f, 0.0f, 0.0f), {}
+        };
         slot.emission = MaterialVisionTextureReference{};
     }
 }
@@ -753,7 +802,8 @@ void RS_KernelMaterialManager::_initKernelVisionSlotData(RIndex material_gid) {
         }
     }
 
-    // Read each channel's device payload host side; grid handles resolve by name post texture commit.
+    // Read each channel's device payload host side; grid handles resolve by name post texture
+    // commit.
     auto& tex_mgr = _kernel_manager->getKernelTextureManager();
     RS_VisionSampleInputMem<RColor3f> albedo =
         slot.albedo.input_type == RSE_VISION_SAMPLE_INPUT_CONSTANT
@@ -969,7 +1019,8 @@ RS_KernelMaterialReference::RS_KernelMaterialReference(RS_KernelMaterialReferenc
     other._kernel_manager = nullptr;
 }
 
-RS_KernelMaterialReference& RS_KernelMaterialReference::operator=(RS_KernelMaterialReference&& other
+RS_KernelMaterialReference& RS_KernelMaterialReference::operator=(
+    RS_KernelMaterialReference&& other
 ) noexcept {
     if (this != &other) {
         _release();

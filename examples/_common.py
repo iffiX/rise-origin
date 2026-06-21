@@ -110,6 +110,8 @@ def make_world(
     signals: Sequence = (),
     controllers: Sequence = (),
     records: Sequence = (),
+    essences: Sequence = (),
+    resources: Sequence = (),
     gravity: float = -9.81,
     control_hz: float = 30.0,
     record_hz: float = 30.0,
@@ -129,6 +131,9 @@ def make_world(
         signals: Signal builders for the world.
         controllers: Controller builders for the world.
         records: Record builders for the world.
+        essences: Pre-built essences to add alongside the material specs (e.g.
+            the per-link materials an importer extracted).
+        resources: Pre-built resources to add alongside the material textures.
         gravity: Gravitational acceleration along Z in m/s^2 (negative is down).
         control_hz: Control callback frequency in Hz.
         record_hz: Record sampling frequency in Hz.
@@ -143,8 +148,8 @@ def make_world(
     Returns:
         A populated :class:`rsc.World`.
     """
-    resources = []
-    essences = []
+    resources = list(resources)
+    essences = list(essences)
     entities = [sky if sky is not None else _default_sky()]
 
     specs = list(materials)
@@ -208,7 +213,7 @@ def make_world(
         rigid_body=rigid_body,
         contact=contact,
         vision=rsc.simulation.Vision(
-            #restir=rsc.simulation.VisionReSTIR(is_enabled=False),
+            # restir=rsc.simulation.VisionReSTIR(is_enabled=False),
             denoise=rsc.simulation.VisionDenoiseSVGF(),
         ),
         runtime=rsc.simulation.Runtime(log_level="trace"),

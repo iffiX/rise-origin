@@ -1,20 +1,21 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Muhan Li (iffi/iffiX)
-"""URDF Franka — import a Panda arm and sweep it through a slow pose.
+"""URDF Franka — import a Panda arm with its true inertials and texture.
 
 What you'll learn:
 
 * Load an articulated robot from a ``.urdf`` with
-  :meth:`rsc.entity.StructureVoxel.from_urdf`. Each link's collision mesh is
-  voxelized into a rigid segment and each joint becomes a constraint, so the
-  seven revolute arm joints arrive as hinges and the two finger joints as
-  prismatic slides.
-* Anchor the base link with a fixed material so the arm has a static frame to
-  push against, give the imported joints motor torque, and drive them from a
-  control callback.
+  :meth:`rsc.entity.StructureVoxel.from_urdf`, asking it to extract per-link
+  materials. Each link's true mass, center of mass, and inertia become a shared
+  atlas physical property, and its textured visual color is sampled into per
+  voxel optical materials, so the arm keeps its real dynamics and look.
+* Take the extracted essences and textures back through ``essence_outputs`` and
+  ``resource_outputs`` and hand them to the world.
+* Anchor the base by giving the root link's materials a fixed property, give the
+  imported joints motor torque, and drive them from a control callback.
 
-The ``panda.urdf`` and its collision meshes next to this script come from the
-Bullet Franka Panda description.
+The ``panda.urdf`` and its meshes next to this script come from the Bullet
+Franka Panda description.
 
 Run it::
 
@@ -38,12 +39,8 @@ URDF_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "panda.urdf
 # Edge length of one voxel when filling each link mesh, in meters.
 VOXEL = 0.005
 
-# Two materials: a bolted down base and the movable arm and gripper.
-BASE_MATERIAL = "base"
-ARM_MATERIAL = "arm"
-
-BASE_COLOR = _common.PALETTE["deep_blue"]
-ARM_COLOR = _common.PALETTE["white"]
+# Maximum number of distinct colors sampled from each link's texture.
+VISUAL_SIGNATURES = 4
 
 # Motor limits given to the imported joints.
 HINGE_TORQUE = 120.0
@@ -62,16 +59,20 @@ ARM_REACH = 0.6
 GRIPPER_OPEN = 0.04
 
 
-def _root_body_sid(structure):
-    """Return the structure scope id of the kinematic root body.
+def _get_root_materials(structure):
+    """Return the material names referenced by the kinematic root body.
 
-    The root is the one body that drives a joint but is never driven by one,
-    found as the body id that is a constraint parent but never a constraint
+    The root is the one body that is a constraint parent but never a constraint
     child.
     """
     children = {constraint.b_body_sid for constraint in structure.constraints}
     parents = {constraint.a_body_sid for constraint in structure.constraints}
-    return next(iter(parents - children))
+    root_sid = next(iter(parents - children))
+    return {
+        structure.material_references[voxel]
+        for voxel in structure.bodies[root_sid].material_reference_sid
+        if voxel != rs.RS_NULL_INDEX
+    }
 
 
 def build():
@@ -80,20 +81,16 @@ def build():
     Returns:
         The :class:`rsc.World` ready to hand to a viewer.
     """
+    essences, resources = [], []
     panda = rsc.entity.StructureVoxel.from_urdf(
-        URDF_PATH, voxel_size=VOXEL, name="panda"
+        URDF_PATH,
+        voxel_size=VOXEL,
+        name="panda",
+        essence_outputs=essences,
+        resource_outputs=resources,
+        is_prefer_visual_mesh=True,
+        visual_signature_num=VISUAL_SIGNATURES,
     )
-
-    for material in (BASE_MATERIAL, ARM_MATERIAL):
-        panda.material_references.append(material)
-    root_sid = _root_body_sid(panda)
-    for body_sid, body in enumerate(panda.bodies):
-        material_sid = 0 if body_sid == root_sid else 1
-        voxels = body.material_reference_sid
-        for index in range(len(voxels)):
-            if voxels[index] != rs.RS_NULL_INDEX:
-                voxels[index] = material_sid
-
     panda.signal.source_controller_name = CONTROLLER
     for constraint in panda.constraints:
         constraint.hinge_max_torque = HINGE_TORQUE
@@ -101,22 +98,21 @@ def build():
         constraint.hinge_min = max(constraint.hinge_min, -HINGE_LIMIT)
         constraint.hinge_max = min(constraint.hinge_max, HINGE_LIMIT)
 
-    materials = [
-        _common.MaterialSpec(
-            BASE_MATERIAL,
-            color=BASE_COLOR,
-            kind="rigid_fixed",
-            roughness=0.12,
-            metalness=1.0,
-        ),
-        _common.MaterialSpec(ARM_MATERIAL, color=ARM_COLOR, kind="rigid"),
-    ]
+    # Anchor the base: a fixed property turns the root link's atlas materials
+    # into anchored rigid bodies.
+    for material in _get_root_materials(panda):
+        essences.append(
+            rsc.essence.MaterialPhysicalPropertyFixed(
+                material + "#fixed", material_reference=material
+            )
+        )
 
     return _common.make_world(
         "urdf_franka",
-        materials=materials,
         structures=[panda],
         controllers=[rsc.controller.ControllerCallback(CONTROLLER)],
+        essences=essences,
+        resources=resources,
     )
 
 

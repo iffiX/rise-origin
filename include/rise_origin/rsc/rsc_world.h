@@ -7,8 +7,8 @@
 #include <string>
 #include <vector>
 
-#include "rise_origin/utils/serialization/rs_mp_serialization.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/serialization/rs_mp_serialization.h"
 #include "rsc_base.h"
 #include "rsc_simulation.h"
 
@@ -57,6 +57,7 @@ using RSC_EssenceVariant = RS_Variant<
     RSC_MaterialPhysicalPropertySoft,
     RSC_MaterialPhysicalPropertyFixed,
     RSC_MaterialPhysicalPropertyRigid,
+    RSC_MaterialPhysicalPropertyAtlas,
     RSC_MaterialOpticalPropertySimpleMicrofacet,
     RSC_MaterialPairPropertyCoulombFriction,
     RSC_MaterialPairPropertyRestitution>;

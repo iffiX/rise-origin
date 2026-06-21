@@ -71,6 +71,29 @@ void RSC_MaterialPhysicalPropertyRigid::_read(const RS_CharacterizationPropertyT
     density = rsc_tree.get("Density", density);
 }
 
+bool RSC_MaterialPhysicalPropertyAtlas::operator==(
+    const RSC_MaterialPhysicalPropertyAtlas& other
+) const {
+    return RSC_MaterialPhysicalPropertyBase::operator==(other) && mass == other.mass &&
+           com_position == other.com_position && inertia == other.inertia;
+}
+
+void RSC_MaterialPhysicalPropertyAtlas::_validate() const {
+    RSC_EssenceBase::_validate();
+    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, mass, 0);
+    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[0][0], 0);
+    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[1][1], 0);
+    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[2][2], 0);
+}
+
+void RSC_MaterialPhysicalPropertyAtlas::_read(const RS_CharacterizationPropertyTree& rsc_tree) {
+    RSC_EssenceBase::_read(rsc_tree);
+    material_reference = rsc_tree.get("MaterialReference", material_reference);
+    mass = rsc_tree.get("Mass", mass);
+    com_position = readVec3rf(rsc_tree.get("COMPosition", string("0,0,0")));
+    inertia = readMat3rf(rsc_tree.get("Inertia", string("0,0,0,0,0,0,0,0,0")));
+}
+
 bool RSC_MaterialOpticalPropertySimpleMicrofacet::operator==(
     const RSC_MaterialOpticalPropertySimpleMicrofacet& other
 ) const {
@@ -88,9 +111,8 @@ void RSC_MaterialOpticalPropertySimpleMicrofacet::_read(
     RSC_EssenceBase::_read(rsc_tree);
     material_reference = rsc_tree.get("MaterialReference", material_reference);
     albedo_texture_reference = rsc_tree.get("AlbedoTextureReference", albedo_texture_reference);
-    roughness_metalness_texture_reference = rsc_tree.get(
-        "RoughnessMetalnessTextureReference", roughness_metalness_texture_reference
-    );
+    roughness_metalness_texture_reference =
+        rsc_tree.get("RoughnessMetalnessTextureReference", roughness_metalness_texture_reference);
     is_transparent = rsc_tree.get("IsTransparent", is_transparent);
     ior = rsc_tree.get("IOR", ior);
     emission_texture_reference =

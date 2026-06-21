@@ -21,9 +21,9 @@ void validateNamed(const char *ctx, const T &v) {
     try {
         v.validate();
     } catch (RS_InvalidCharacterizationException &ex) {
-        RS_THROW(
-            RS_InvalidCharacterizationException("while validating {} {}: {}", ctx, v.name, ex.what())
-        );
+        RS_THROW(RS_InvalidCharacterizationException(
+            "while validating {} {}: {}", ctx, v.name, ex.what()
+        ));
     }
 }
 
@@ -151,7 +151,9 @@ void RSC_World::_parseSettings() {
                         e.read(child, false);
                         resources.emplace_back(e);
                     } else {
-                        RS_THROW(RS_InvalidCharacterizationException("Unknown resource tag: {}", tag));
+                        RS_THROW(
+                            RS_InvalidCharacterizationException("Unknown resource tag: {}", tag)
+                        );
                     }
                 }
             }
@@ -173,6 +175,10 @@ void RSC_World::_parseSettings() {
                         RSC_MaterialPhysicalPropertyRigid e;
                         e.read(child, false);
                         essences.emplace_back(e);
+                    } else if (tag == "MaterialPhysicalPropertyAtlas") {
+                        RSC_MaterialPhysicalPropertyAtlas e;
+                        e.read(child, false);
+                        essences.emplace_back(e);
                     } else if (tag == "MaterialOpticalPropertySimpleMicrofacet") {
                         RSC_MaterialOpticalPropertySimpleMicrofacet e;
                         e.read(child, false);
@@ -186,7 +192,9 @@ void RSC_World::_parseSettings() {
                         e.read(child, false);
                         essences.emplace_back(e);
                     } else {
-                        RS_THROW(RS_InvalidCharacterizationException("Unknown essence tag: {}", tag));
+                        RS_THROW(
+                            RS_InvalidCharacterizationException("Unknown essence tag: {}", tag)
+                        );
                     }
                 }
             }
@@ -225,7 +233,9 @@ void RSC_World::_parseSettings() {
                         e.read(child, false);
                         entities.emplace_back(e);
                     } else {
-                        RS_THROW(RS_InvalidCharacterizationException("Unknown entity tag: {}", tag));
+                        RS_THROW(
+                            RS_InvalidCharacterizationException("Unknown entity tag: {}", tag)
+                        );
                     }
                 }
             }
@@ -244,7 +254,9 @@ void RSC_World::_parseSettings() {
                         e.read(child, false);
                         records.emplace_back(e);
                     } else {
-                        RS_THROW(RS_InvalidCharacterizationException("Unknown record tag: {}", tag));
+                        RS_THROW(
+                            RS_InvalidCharacterizationException("Unknown record tag: {}", tag)
+                        );
                     }
                 }
             }
@@ -259,7 +271,9 @@ void RSC_World::_parseSettings() {
                         e.read(child, false);
                         signals.emplace_back(e);
                     } else {
-                        RS_THROW(RS_InvalidCharacterizationException("Unknown signal tag: {}", tag));
+                        RS_THROW(
+                            RS_InvalidCharacterizationException("Unknown signal tag: {}", tag)
+                        );
                     }
                 }
             }
@@ -270,7 +284,9 @@ void RSC_World::_parseSettings() {
                         e.read(child, false);
                         recorders.emplace_back(e);
                     } else {
-                        RS_THROW(RS_InvalidCharacterizationException("Unknown recorder tag: {}", tag));
+                        RS_THROW(
+                            RS_InvalidCharacterizationException("Unknown recorder tag: {}", tag)
+                        );
                     }
                 }
             }

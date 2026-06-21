@@ -20,6 +20,21 @@ def box_mesh():
 
 
 @pytest.fixture(scope="session")
+def vox_path(tmp_path_factory):
+    """A 2x1x1 MagicaVoxel file: two voxels with palette indices 1 and 2."""
+
+    def chunk(chunk_id, content):
+        return chunk_id + struct.pack("<ii", len(content), 0) + content
+
+    size = chunk(b"SIZE", struct.pack("<iii", 2, 1, 1))
+    voxels = chunk(b"XYZI", struct.pack("<i", 2) + bytes([0, 0, 0, 1, 1, 0, 0, 2]))
+    main = chunk(b"MAIN", b"") + size + voxels
+    path = tmp_path_factory.mktemp("assets") / "blob.vox"
+    path.write_bytes(b"VOX " + struct.pack("<i", 150) + main)
+    return str(path)
+
+
+@pytest.fixture(scope="session")
 def urdf_path(tmp_path_factory):
     """A two-link revolute-jointed URDF (box base + cylinder upper arm)."""
     path = tmp_path_factory.mktemp("assets") / "arm.urdf"
@@ -89,15 +104,14 @@ def glb_path(tmp_path_factory):
 
 
 @pytest.fixture(scope="session")
-def vox_path(tmp_path_factory):
-    """A 2x1x1 MagicaVoxel file: two voxels with palette indices 1 and 2."""
-
-    def chunk(chunk_id, content):
-        return chunk_id + struct.pack("<ii", len(content), 0) + content
-
-    size = chunk(b"SIZE", struct.pack("<iii", 2, 1, 1))
-    voxels = chunk(b"XYZI", struct.pack("<i", 2) + bytes([0, 0, 0, 1, 1, 0, 0, 2]))
-    main = chunk(b"MAIN", b"") + size + voxels
-    path = tmp_path_factory.mktemp("assets") / "blob.vox"
-    path.write_bytes(b"VOX " + struct.pack("<i", 150) + main)
+def step_path(tmp_path_factory):
+    """A two-solid STEP file: a box and an offset sphere."""
+    cq = pytest.importorskip("cadquery")
+    assembly = cq.Assembly()
+    assembly.add(cq.Workplane().box(0.1, 0.1, 0.1), name="box")
+    assembly.add(
+        cq.Workplane().transformed(offset=(0.3, 0, 0)).sphere(0.05), name="ball"
+    )
+    path = tmp_path_factory.mktemp("assets") / "parts.step"
+    assembly.export(str(path))
     return str(path)
