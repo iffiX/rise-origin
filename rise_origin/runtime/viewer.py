@@ -165,7 +165,6 @@ class Viewer:
         title: str = "Rise Origin Viewer",
         width: int = 1280,
         height: int = 720,
-        fps: int = 60,
         samples_per_pixel: int = 4,
         max_depth: int = 3,
         field_of_view: float = 60.0,
@@ -192,7 +191,6 @@ class Viewer:
             title: Window title.
             width: Frame / window width in pixels.
             height: Frame / window height in pixels.
-            fps: Window refresh / mp4 playback rate.
             samples_per_pixel: Ray-tracing samples per pixel; higher is cleaner
                 but slower.
             max_depth: Maximum ray bounces.
@@ -210,7 +208,6 @@ class Viewer:
         self._title = title
         self._width = width
         self._height = height
-        self._fps = fps
         self._samples_per_pixel = samples_per_pixel
         self._max_depth = max_depth
         self._field_of_view = field_of_view
@@ -230,8 +227,8 @@ class Viewer:
         # Headless recording state.
         self._writer = None
         self._is_collecting_frames = False
-        self._is_record_orbit = True
-        self._record_elevation = 0.0
+        self._video_fps: int = 0
+        self._video_frame_count: int = 0
 
     @property
     def handle(self) -> Optional["rs.RS_WorldHandle"]:
@@ -244,12 +241,16 @@ class Viewer:
         """Whether a key is currently held, for reading input from a hud callback."""
         return int(key) in self._keys
 
-    def run_interactive(self) -> None:
+    def run_interactive(self, *, display_fps: int = 60) -> None:
         """Open a live window and run until it is closed (blocking).
 
         The world runs detached on a background thread; this call owns the main
         thread for the Qt event loop and returns only when the window closes.
         Control the world from your ``callback`` or :attr:`handle`.
+
+        Args:
+            display_fps: Window refresh rate. Independent of the simulation
+                control frequency.
         """
         from PySide6 import QtCore, QtGui, QtWidgets
 
@@ -257,7 +258,7 @@ class Viewer:
         self._ensure_frequencies()
 
         app = QtWidgets.QApplication.instance() or QtWidgets.QApplication([])
-        window = self._make_window(QtCore, QtGui, QtWidgets)
+        window = self._make_window(QtCore, QtGui, QtWidgets, display_fps)
         window.show()
         self._instance.hello(self._world, self._interactive_step)
         app.exec()
@@ -268,38 +269,34 @@ class Viewer:
         ):
             self._instance.handle.terminate()
 
-    def run_record(
-        self,
-        path: str,
-        duration: float,
-        *,
-        orbit: bool = True,
-        elevation_deg: float = 25.0,
-    ) -> None:
+    def run_record(self, path: str, duration: float, *, video_fps: int = 60) -> None:
         """Start a headless run streaming frames to an mp4 (non-blocking).
 
         Frames are written as rendered; the file is finalized by :meth:`wait`.
+
+        Args:
+            path: Output mp4 path.
+            duration: Simulation time in seconds to record.
+            video_fps: Output video frame rate. Independent of the simulation
+                control frequency: the writer time-locks each captured frame to
+                ``sim_time`` and emits as many video frames as needed so the
+                video plays back in real time regardless of control rate.
         """
         import imageio
 
+        self._video_fps = video_fps
         self._is_collecting_frames = True
-        self._writer = imageio.get_writer(path, fps=self._fps, macro_block_size=8)
-        self._start_headless(duration, orbit, elevation_deg)
+        self._writer = imageio.get_writer(path, fps=video_fps, macro_block_size=8)
+        self._start_headless(duration)
 
-    def run_headless(
-        self,
-        duration: Optional[float] = None,
-        *,
-        orbit: bool = True,
-        elevation_deg: float = 25.0,
-    ) -> None:
+    def run_headless(self, duration: Optional[float] = None) -> None:
         """Start a headless run with no window and no file output (non-blocking).
 
         The current frame is refreshed each step so a ``callback`` can call
         :meth:`snapshot` on demand. Call :meth:`wait` to block until it ends.
         """
         self._is_collecting_frames = False
-        self._start_headless(duration, orbit, elevation_deg)
+        self._start_headless(duration)
 
     def snapshot(self, path: str) -> None:
         """Save the most recent rendered frame to an image file."""
@@ -341,15 +338,12 @@ class Viewer:
             )
         raise TypeError(f"unsupported instance spec: {type(instance)!r}")
 
-    def _start_headless(
-        self, duration: Optional[float], orbit: bool, elevation_deg: float
-    ) -> None:
+    def _start_headless(self, duration: Optional[float]) -> None:
         """Shared launcher for :meth:`run_record` and :meth:`run_headless`."""
         self._inject_camera()
         self._ensure_frequencies()
         self.frame_index = 0
-        self._is_record_orbit = orbit
-        self._record_elevation = float(np.deg2rad(elevation_deg))
+        self._video_frame_count = 0
         if duration is not None:
             self._world.simulation.runtime.max_time = duration
         self._instance.hello(self._world, self._headless_step)
@@ -413,7 +407,7 @@ class Viewer:
                 handle.terminate()
 
     def _headless_step(self, world_name, sim_time, controllers) -> None:
-        """Per-step callback for headless modes: actuate, auto-frame, capture."""
+        """Per-step callback for headless modes: actuate, then capture."""
         self.time = sim_time
         if self._user_callback is not None:
             self._user_callback(
@@ -422,28 +416,19 @@ class Viewer:
         controller = self._find_controller(controllers)
         if controller is None:
             return
-        eye, quaternion = self._record_pose()
-        self._drive_camera(controller, eye, quaternion)
+        self._camera.apply_pending()
+        self._drive_camera(controller, self._camera.position, self._camera.quaternion)
         if self._capture(controller):
             self.frame_index += 1
             if self._is_collecting_frames and self._writer is not None:
+                # Time-lock: emit as many video frames as sim_time has elapsed,
+                # regardless of control frequency.  Uses integer division
+                # (count / fps) to avoid floating-point drift across many steps.
                 with self._frame_lock:
-                    self._writer.append_data(self._frame)
-
-    def _record_pose(self):
-        """Compute an auto-orbit camera pose for headless recording."""
-        center = np.asarray(self._camera.focus, dtype=np.float64)
-        radius = max(self._camera.distance, 0.3)
-        azimuth = self.frame_index * 0.01 if self._is_record_orbit else 0.7
-        elevation = self._record_elevation
-        eye = center + radius * np.array(
-            [
-                np.cos(azimuth) * np.cos(elevation),
-                np.sin(azimuth) * np.cos(elevation),
-                np.sin(elevation),
-            ]
-        )
-        return eye.tolist(), _look_at_quaternion(eye, center)
+                    frame = self._frame
+                while self._video_frame_count / self._video_fps <= sim_time:
+                    self._writer.append_data(frame)
+                    self._video_frame_count += 1
 
     def _capture(self, controller) -> bool:
         """Read the camera RGB into the shared frame buffer; return True if updated."""
@@ -466,7 +451,7 @@ class Viewer:
         """The step's controllers minus the viewer's own injected camera one."""
         return [c for c in controllers if c.name() != self._controller_name]
 
-    def _make_window(self, QtCore, QtGui, QtWidgets):
+    def _make_window(self, QtCore, QtGui, QtWidgets, display_fps: int):
         """Build the interactive window (defined here to keep PySide6 lazy)."""
         viewer = self
 
@@ -480,7 +465,7 @@ class Viewer:
                 # Poll the shared frame at the display rate (main-thread repaint).
                 self._timer = QtCore.QTimer(self)
                 self._timer.timeout.connect(self._refresh)
-                self._timer.start(max(1, 1000 // viewer._fps))
+                self._timer.start(max(1, 1000 // display_fps))
 
             def _refresh(self) -> None:
                 with viewer._frame_lock:
