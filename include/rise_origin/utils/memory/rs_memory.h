@@ -8,13 +8,13 @@
 #include <memory>
 #include <vector>
 
-#include "rise_origin/utils/rs_def.h"
+#include "rise_origin/utils/concurrency/rs_cpu_block.h"
+#include "rise_origin/utils/concurrency/rs_thread_pool.h"
 #include "rise_origin/utils/memory/rs_device.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_env_var.h"
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/string/rs_format.h"
-#include "rise_origin/utils/concurrency/rs_cpu_block.h"
-#include "rise_origin/utils/concurrency/rs_thread_pool.h"
 
 namespace rise {
 
@@ -44,7 +44,7 @@ class RS_MemoryProvider {
         RSize thread_num = RS_MAX_SIZE;
         RSize block_size = RS_AUTO_BLOCK_SIZE;
         bool sync = true;
-        RSize shared_mem_size = 0;
+        RBigSize shared_mem_size = 0;
 
         [[nodiscard]] bool validate() const {
             return thread_num != RS_MAX_SIZE &&
@@ -72,7 +72,7 @@ class RS_MemoryProvider {
         RSize block_dim_y = RS_MAX_SIZE;
         RSize block_dim_z = RS_MAX_SIZE;
         bool sync = true;
-        RSize shared_mem_size = 0;
+        RBigSize shared_mem_size = 0;
 
         [[nodiscard]] bool validate() const {
             return grid_dim_x != RS_MAX_SIZE && grid_dim_y != RS_MAX_SIZE &&
@@ -101,22 +101,27 @@ class RS_MemoryProvider {
     virtual RS_MemoryProvider* base() { return this; }
 
     virtual void free() = 0;
-    virtual RS_MemoryPtr allocate(size_t size, bool sync = true) = 0;
-    virtual RS_MemoryPtr allocateHost(size_t size, bool sync = true) = 0;
+    virtual RS_MemoryPtr allocate(RBigSize size, bool sync = true) = 0;
+    virtual RS_MemoryPtr allocateHost(RBigSize size, bool sync = true) = 0;
     virtual void deallocate(const RS_MemoryPtr& ptr, bool sync = true) = 0;
-    virtual void
-    set(const RS_MemoryPtr& ptr, int value, size_t size, size_t offset = 0, bool sync = true) = 0;
+    virtual void set(
+        const RS_MemoryPtr& ptr,
+        int value,
+        RBigSize size,
+        RBigSize offset = 0,
+        bool sync = true
+    ) = 0;
     void copy(
         const RS_MemoryPtr& dst,
         const RS_MemoryPtr& src,
-        size_t size,
+        RBigSize size,
         bool sync = true,
         bool ordered = true
     );
     virtual void copy(
         const RS_MemoryPtr& dst,
         const RS_ConstMemoryPtr& src,
-        size_t size,
+        RBigSize size,
         bool sync = true,
         bool ordered = true
     ) = 0;
@@ -185,11 +190,11 @@ class RS_MemoryPtrBase {
         std::is_same_v<PtrType, void*> || std::is_same_v<PtrType, const void*>,
         "PtrType must be non-const/const void*"
     );
-    using ByteType = std::conditional_t<IsConst, const std::byte*, std::byte*>;
+    using ByteType = std::conditional_t<IsConst, const RByte*, RByte*>;
 
-    PtrType data = nullptr;   /// Pointer to the memory
-    size_t bytes = 0;         /// Size of the memory from current pointer to allocated end in bytes
-    size_t offset_bytes = 0;  /// Offset of the data pointer relative to base address in bytes
+    PtrType data = nullptr;  /// Pointer to the memory
+    RBigSize bytes = 0;      /// Size of the memory from current pointer to allocated end in bytes
+    RBigSize offset_bytes = 0;  /// Offset of the data pointer relative to base address in bytes
     RS_DeviceLocation mem_device = {
         RSE_DEVICE_TYPE_UNKNOWN,
         RS_NULL_INDEX
@@ -200,8 +205,8 @@ class RS_MemoryPtrBase {
 
     HOST_DEVICE_INLINE_QUALIFIER RS_MemoryPtrBase(
         PtrType ptr,
-        size_t size,
-        size_t offset,
+        RBigSize size,
+        RBigSize offset,
         const RS_DeviceLocation& device = {RSE_DEVICE_TYPE_CPU, 0},
         RS_MemoryProvider* provider = nullptr
     )
@@ -215,9 +220,9 @@ class RS_MemoryPtrBase {
 
     HOST_DEVICE_INLINE_QUALIFIER PtrType ptr() const { return data; }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize size() const { return bytes; }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize size() const { return bytes; }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize offset() const { return offset_bytes; }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize offset() const { return offset_bytes; }
 
     HOST_DEVICE_INLINE_QUALIFIER bool empty() const { return bytes == 0; }
 
@@ -245,7 +250,7 @@ class RS_MemoryPtrBase {
 
     HOST_DEVICE_INLINE_QUALIFIER bool operator!=(void* other) const { return data != other; }
 
-    HOST_DEVICE_INLINE_QUALIFIER DerivedType operator+(size_t offset) const {
+    HOST_DEVICE_INLINE_QUALIFIER DerivedType operator+(RBigSize offset) const {
         assert((data != nullptr || offset == 0) && "Cannot add non-zero offset to nullptr");
         assert(bytes >= offset && "Cannot add offset greater than memory size");
         return {
@@ -257,7 +262,7 @@ class RS_MemoryPtrBase {
         };
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER DerivedType& operator+=(size_t offset) {
+    HOST_DEVICE_INLINE_QUALIFIER DerivedType& operator+=(RBigSize offset) {
         assert((data != nullptr || offset == 0) && "Cannot add non-zero offset to nullptr");
         assert(bytes >= offset && "Cannot add offset greater than memory size");
         data = static_cast<ByteType>(data) + offset;
@@ -266,7 +271,7 @@ class RS_MemoryPtrBase {
         return *reinterpret_cast<DerivedType*>(this);
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER DerivedType operator-(size_t offset) const {
+    HOST_DEVICE_INLINE_QUALIFIER DerivedType operator-(RBigSize offset) const {
         assert((data != nullptr || offset == 0) && "Cannot subtract non-zero offset from nullptr");
         assert(offset_bytes >= offset && "Cannot subtract offset greater than memory size");
         return {
@@ -278,7 +283,7 @@ class RS_MemoryPtrBase {
         };
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER DerivedType& operator-=(size_t offset) {
+    HOST_DEVICE_INLINE_QUALIFIER DerivedType& operator-=(RBigSize offset) {
         assert((data != nullptr || offset == 0) && "Cannot subtract non-zero offset from nullptr");
         assert(offset_bytes >= offset && "Cannot subtract offset greater than memory size");
         data = static_cast<ByteType>(data) - offset;
@@ -289,20 +294,15 @@ class RS_MemoryPtrBase {
 
     template <typename T, typename Index>
     HOST_DEVICE_INLINE_QUALIFIER T& get(Index index) const {
-        assert(sizeof(T) * index < bytes && "Index out of bounds");
+        assert(RBIG_SIZE(sizeof(T)) * index < bytes && "Index out of bounds");
         return static_cast<T*>(data)[index];
     }
 
     HOST_DEVICE_INLINE_QUALIFIER bool isWeak() const { return mem_provider == nullptr; }
 
-    void set(
-        int value,
-        size_t size = std::numeric_limits<size_t>::max(),
-        size_t offset = 0,
-        bool sync = true
-    ) {
+    void set(int value, RBigSize size = RS_MAX_BIG_SIZE, RBigSize offset = 0, bool sync = true) {
         if (size == 0) return;
-        if (size == std::numeric_limits<size_t>::max()) size = bytes;
+        if (size == RS_MAX_BIG_SIZE) size = bytes;
         if (mem_provider == nullptr)
             RS_THROW(RS_UninitializedException(
                 "Provider is nullptr, cannot set memory with unknown provider"
@@ -318,12 +318,13 @@ class RS_MemoryPtrBase {
     }
 
     template <typename MemoryPtr>
-    void copyFrom(const MemoryPtr& src, size_t size, bool sync = true, bool ordered = true) const {
+    void
+    copyFrom(const MemoryPtr& src, RBigSize size, bool sync = true, bool ordered = true) const {
         _resolveCopy(*reinterpret_cast<const DerivedType*>(this), src, size, sync, ordered);
     }
 
     template <typename MemoryPtr>
-    void copyTo(const MemoryPtr& dst, size_t size, bool sync = true, bool ordered = true) const {
+    void copyTo(const MemoryPtr& dst, RBigSize size, bool sync = true, bool ordered = true) const {
         _resolveCopy(dst, *reinterpret_cast<const DerivedType*>(this), size, sync, ordered);
     }
 
@@ -332,7 +333,7 @@ class RS_MemoryPtrBase {
     static void _resolveCopy(
         const MemoryPtrDst& dst,
         const MemoryPtrSrc& src,
-        size_t size,
+        RBigSize size,
         bool sync = true,
         bool ordered = true
     ) {
@@ -430,8 +431,8 @@ class RS_MemoryPtr : public RS_MemoryPtrBase<RS_MemoryPtr, void*> {
      */
     HOST_DEVICE_INLINE_QUALIFIER RS_MemoryPtr(
         void* ptr,
-        size_t size,
-        size_t offset = 0,
+        RBigSize size,
+        RBigSize offset = 0,
         const RS_DeviceLocation& device = {RSE_DEVICE_TYPE_CPU, 0},
         RS_MemoryProvider* provider = nullptr
     )
@@ -473,8 +474,8 @@ class RS_ConstMemoryPtr : public RS_MemoryPtrBase<RS_ConstMemoryPtr, const void*
      */
     HOST_DEVICE_INLINE_QUALIFIER RS_ConstMemoryPtr(
         const void* ptr,
-        size_t size,
-        size_t offset = 0,
+        RBigSize size,
+        RBigSize offset = 0,
         const RS_DeviceLocation& device = {RSE_DEVICE_TYPE_CPU, 0},
         RS_MemoryProvider* provider = nullptr
     )
@@ -484,7 +485,7 @@ class RS_ConstMemoryPtr : public RS_MemoryPtrBase<RS_ConstMemoryPtr, const void*
 inline void RS_MemoryProvider::copy(
     const RS_MemoryPtr& dst,
     const RS_MemoryPtr& src,
-    size_t size,
+    RBigSize size,
     bool sync,
     bool ordered
 ) {
@@ -507,7 +508,7 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
 
     void free() override {}
 
-    RS_MemoryPtr allocate(size_t size, bool sync) override {
+    RS_MemoryPtr allocate(RBigSize size, bool sync) override {
         if (size == 0) return {nullptr, 0, 0, device, this};
 
         void* ptr = std::malloc(size);
@@ -519,7 +520,7 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
         return {ptr, size, 0, device, this};
     }
 
-    RS_MemoryPtr allocateHost(size_t size, bool sync = true) override {
+    RS_MemoryPtr allocateHost(RBigSize size, bool sync = true) override {
         if (size == 0) return {nullptr, 0, 0, device, this};
 
         void* ptr = std::malloc(size);
@@ -543,8 +544,8 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
     void set(
         const RS_MemoryPtr& ptr,
         int value,
-        size_t size,
-        size_t offset = 0,
+        RBigSize size,
+        RBigSize offset = 0,
         bool sync = true
     ) override {
         if (ptr.provider() != this)
@@ -559,7 +560,7 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
     void copy(
         const RS_MemoryPtr& dst,
         const RS_ConstMemoryPtr& src,
-        size_t size,
+        RBigSize size,
         bool sync = true,
         bool ordered = true
     ) override {
@@ -601,8 +602,9 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
                 "Compute function is not supported by the default provider"
             ));
         } else {
-            config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE ? RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE
-                                                                        : config.block_size;
+            config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE
+                                    ? RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE
+                                    : config.block_size;
 
             RSize block_num = RS_CEIL_DIV(config.thread_num, config.block_size);
 
@@ -613,8 +615,9 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
                 true
             );
 
-            auto host_stack_mem =
-                allocate(RS_DEVICE_CPU_FIBER_STACK_SIZE * config.block_size * parallel_block_num, true);
+            auto host_stack_mem = allocate(
+                RS_DEVICE_CPU_FIBER_STACK_SIZE * config.block_size * parallel_block_num, true
+            );
 
             pool.submitLoop(
                     0, block_num, [=](RSize b) {
@@ -629,8 +632,8 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
                                     config.block_size, config.thread_num - b * config.block_size
                                 ),
                                 RS_DEVICE_CPU_FIBER_STACK_SIZE,
-                                (host_stack_mem +
-                                 worker_thread_index * config.block_size * RS_DEVICE_CPU_FIBER_STACK_SIZE)
+                                (host_stack_mem + worker_thread_index * config.block_size *
+                                                      RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                     .ptr(),
                                 (host_shared_mem + worker_thread_index * config.block_size *
                                                        ComputeFunction::sharedMemLayoutSize())
@@ -645,8 +648,8 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
                                     config.block_size, config.thread_num - b * config.block_size
                                 ),
                                 RS_DEVICE_CPU_FIBER_STACK_SIZE,
-                                (host_stack_mem +
-                                 worker_thread_index * config.block_size * RS_DEVICE_CPU_FIBER_STACK_SIZE)
+                                (host_stack_mem + worker_thread_index * config.block_size *
+                                                      RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                     .ptr(),
                                 static_cast<void*>(nullptr),
                                 args...
@@ -699,13 +702,13 @@ class RS_MemoryScopedProvider final : public RS_MemoryProvider {
 
     void free() override { _real->free(); }
 
-    RS_MemoryPtr allocate(size_t size, bool sync = true) override {
+    RS_MemoryPtr allocate(RBigSize size, bool sync = true) override {
         RS_MemoryPtr p = _real->allocate(size, sync);
         if (p.data != nullptr) _tracked.push_back(p);
         return _rebind(p);
     }
 
-    RS_MemoryPtr allocateHost(size_t size, bool sync = true) override {
+    RS_MemoryPtr allocateHost(RBigSize size, bool sync = true) override {
         RS_MemoryPtr p = _real->allocateHost(size, sync);
         if (p.data != nullptr) _tracked.push_back(p);
         return _rebind(p);
@@ -716,23 +719,28 @@ class RS_MemoryScopedProvider final : public RS_MemoryProvider {
         _real->deallocate(_unbind(ptr), sync);
     }
 
-    void set(const RS_MemoryPtr& ptr, int value, size_t size, size_t offset = 0, bool sync = true)
-        override {
+    void set(
+        const RS_MemoryPtr& ptr,
+        int value,
+        RBigSize size,
+        RBigSize offset = 0,
+        bool sync = true
+    ) override {
         _real->set(_unbind(ptr), value, size, offset, sync);
     }
 
     void copy(
         const RS_MemoryPtr& dst,
         const RS_ConstMemoryPtr& src,
-        size_t size,
+        RBigSize size,
         bool sync = true,
         bool ordered = true
     ) override {
         _real->copy(_unbind(dst), _unbindConst(src), size, sync, ordered);
     }
 
-    void sync(bool sync_main = true, bool sync_copy_to = true, bool sync_copy_from = true)
-        override {
+    void
+    sync(bool sync_main = true, bool sync_copy_to = true, bool sync_copy_from = true) override {
         _real->sync(sync_main, sync_copy_to, sync_copy_from);
     }
 
@@ -743,7 +751,10 @@ class RS_MemoryScopedProvider final : public RS_MemoryProvider {
     RS_MemoryPtr _rebind(const RS_MemoryPtr& p) const {
         if (p.data == nullptr) return p;
         return RS_MemoryPtr(
-            p.data, p.bytes, p.offset_bytes, p.mem_device,
+            p.data,
+            p.bytes,
+            p.offset_bytes,
+            p.mem_device,
             const_cast<RS_MemoryScopedProvider*>(this)
         );
     }

@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "rise_origin/utils/data/rs_any.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 

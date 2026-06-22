@@ -700,7 +700,7 @@ void RS_SimulationExecutor::_runRigidbodyContactAndConstraintUpdate() {
             RSize max_rb_per_structure = k_ptr->host_data->max_rigid_body_per_structure;
             RSize block_size = RS_ALIGN(max_cj_per_structure, 32);
             RSize total_threads = block_size * num_blocks;
-            RSize shared_bytes = max_rb_per_structure * sizeof(SharedRBState);
+            RBigSize shared_bytes = RBIG_SIZE(max_rb_per_structure) * sizeof(SharedRBState);
 
             p_ptr->template run<RSCF_LaunchDirect<
                 typename RS_ConstraintCompute<ComputeAccuracy>::RSCF_PGSUpdateJoint,
@@ -2017,7 +2017,7 @@ void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
     });
 }
 
-void RS_SimulationExecutor::_resizeReduceBufferIfNeeded(RSize needed_size) {
+void RS_SimulationExecutor::_resizeReduceBufferIfNeeded(RBigSize needed_size) {
     if (_reduce_input_buffer.mem_provider == nullptr || _reduce_input_buffer.size() < needed_size) {
         // Just allocate same amount of memory for both input and output, simpler
         // Output size is always smaller or equal to input size

@@ -12,8 +12,8 @@
 #include "rise_origin/device/platform/rs_platform.h"
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/device/rs_cooperative_group.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rs_search.h"
 
 #define RS_REDUCE_MAX_GROUP_REDUCE_LEVEL 5
@@ -316,7 +316,12 @@ class RS_Reduce {
      * @note reduce implicitly synchronizes execution before returning results.
      */
     template <typename ReduceOp, typename T>
-    T reduce(const T *in, RSize in_len, T init_value = 0, RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE) {
+    T reduce(
+        const T *in,
+        RSize in_len,
+        T init_value = 0,
+        RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE
+    ) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         return reduce<T, ReduceOp>(
             RS_ConstMemoryPtr(in, sizeof(T) * in_len, mem_provider->device, mem_provider),
@@ -379,7 +384,12 @@ class RS_Reduce {
     std::enable_if_t<
         std::is_same_v<MemoryPtr, RS_MemoryPtr> || std::is_same_v<MemoryPtr, RS_ConstMemoryPtr>,
         T>
-    reduce(MemoryPtr in, RSize in_len, T init_value = 0, RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE) {
+    reduce(
+        MemoryPtr in,
+        RSize in_len,
+        T init_value = 0,
+        RSize block_size = RS_DEVICE_MAX_BLOCK_SIZE
+    ) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         RS_DATA_ASSERT_ARGUMENT(
             in.device() == device(), "Input memory device must be the same as the reducer device"
@@ -404,7 +414,7 @@ class RS_Reduce {
         }
 
         // Size buffers after block size is final (smaller block => more blocks)
-        if (RSize buffer_size = _getBufferSize(sizeof(T), in_len, block_size);
+        if (RBigSize buffer_size = _getBufferSize(sizeof(T), in_len, block_size);
             reduce_buffer1.size() < buffer_size) {
             reduce_buffer1.free();
             reduce_buffer2.free();
@@ -429,11 +439,11 @@ class RS_Reduce {
     }
 
    private:
-    static RSize _getBufferSize(RSize elem_size, RSize elem_num, RSize block_size) {
+    static RBigSize _getBufferSize(RSize elem_size, RSize elem_num, RSize block_size) {
         // One reduced value per block; the level 0 output bounds both buffers
         RSize max_elems_per_block = block_size * 2;
 
-        return elem_size * RS_CEIL_DIV(elem_num, max_elems_per_block);
+        return RBIG_SIZE(elem_size) * RS_CEIL_DIV(elem_num, max_elems_per_block);
     }
 
     template <typename T, typename ReduceOp, typename MemoryProvider>
@@ -730,7 +740,7 @@ class RS_ReduceByGroup {
         }
 
         // Size buffers after block size is final (smaller block => more blocks)
-        if (RSize buffer_size = _getReduceByGroupBufferSize(sizeof(T), group_len, block_size);
+        if (RBigSize buffer_size = _getReduceByGroupBufferSize(sizeof(T), group_len, block_size);
             reduce_buffer1.size() < buffer_size) {
             reduce_buffer1.free();
             reduce_buffer2.free();
@@ -811,7 +821,7 @@ class RS_ReduceByGroup {
         }
 
         // Size buffers after block size is final (smaller block => more blocks)
-        if (RSize buffer_size = _getReduceByGroupBufferSize(sizeof(T), group_len, block_size);
+        if (RBigSize buffer_size = _getReduceByGroupBufferSize(sizeof(T), group_len, block_size);
             reduce_buffer1.size() < buffer_size) {
             reduce_buffer1.free();
             reduce_buffer2.free();
@@ -835,8 +845,10 @@ class RS_ReduceByGroup {
     }
 
    private:
-    static RSize _getReduceByGroupBufferSize(
-        RSize elem_size, const std::vector<RSize> &group_elem_num, RSize block_size
+    static RBigSize _getReduceByGroupBufferSize(
+        RSize elem_size,
+        const std::vector<RSize> &group_elem_num,
+        RSize block_size
     ) {
         RSize total = 0;
 
@@ -844,7 +856,7 @@ class RS_ReduceByGroup {
         RSize max_elems_per_block = block_size * 2;
 
         for (auto elem_num : group_elem_num) total += RS_CEIL_DIV(elem_num, max_elems_per_block);
-        return elem_size * total;
+        return RBIG_SIZE(elem_size) * total;
     }
 
     void _updateReduceSizes(RSize block_size, const std::vector<RSize> &group_sizes) {
@@ -868,7 +880,7 @@ class RS_ReduceByGroup {
         bool is_all_reduced = true;
 
         // Store order: current group sizes, input group offsets, output group offsets
-        RSize needed_host_sizes_bytes =
+        RBigSize needed_host_sizes_bytes =
             sizeof(RSize) * group_sizes.size() * 3 * RS_REDUCE_MAX_GROUP_REDUCE_LEVEL;
         if (host_sizes_buffer.size() < needed_host_sizes_bytes) {
             host_sizes_buffer = mem_provider->allocateHost(needed_host_sizes_bytes, true);

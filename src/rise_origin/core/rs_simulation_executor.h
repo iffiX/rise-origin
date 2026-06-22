@@ -119,7 +119,7 @@ class RS_SimulationExecutor {
     device::RS_Vector<RHandle> _getLaunchHandles(const std::string &name);
     bool _resolveVoxelMobilityPartitionIfNeeded();
     void _resolveVoxelBVHDynamicPartition();
-    void _resizeReduceBufferIfNeeded(RSize needed_size);
+    void _resizeReduceBufferIfNeeded(RBigSize needed_size);
 
     /**
      * @brief Base-step count a subsystem runs on: max(1, floor(needed / time_step)).

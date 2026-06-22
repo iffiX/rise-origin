@@ -203,10 +203,10 @@ class RS_BitMask {
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return elem_num == 0; }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const { return data.size(); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const { return data.size(); }
 
     /// @brief Return the total number of set bits in this mask.
     HOST_DEVICE_INLINE_QUALIFIER RSize count() const {
@@ -538,9 +538,9 @@ class RS_StaticBitMask {
     /// @brief Return true if the mask is empty.
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return Bits == 0; }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const { return 0; }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const { return 0; }
 
     /// @brief Return the total number of set bits in this mask.
     HOST_DEVICE_INLINE_QUALIFIER RSize count() const {

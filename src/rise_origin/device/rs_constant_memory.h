@@ -37,9 +37,9 @@ class RS_ConstantMemory {
 #endif
     }
 
-    static constexpr RSize size() { return RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE; }
+    static constexpr RBigSize size() { return RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE; }
 
-    static void write(void* src, RS_DeviceLocation device, RSize size, RSize offset = 0) {
+    static void write(void* src, RS_DeviceLocation device, RBigSize size, RBigSize offset = 0) {
         if (size == 0) return;
         if (size + offset > RS_DEVICE_CONSTANT_MEMORY_MAX_SIZE) {
             RS_THROW(RS_OutOfBoundsException(

@@ -225,9 +225,9 @@ class RS_MemArrayPool {
     /// @brief Returns whether the memory pool is empty.
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return chunks.empty(); }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
         return chunk_mask.extraBytes() + chunks.extraBytes();
     }
 };
@@ -301,7 +301,7 @@ class RS_MemPool {
         chunk_ptrs.resize({chunk_num});
 
         // Allocate new memory using the provider
-        size_t region_size = new_chunks * ChunkBytes;
+        RBigSize region_size = RBIG_SIZE(new_chunks) * ChunkBytes;
         RS_MemoryPtr mem_ptr = mem_provider->allocate(region_size, /*sync=*/true);
 
         // Store the new memory region
@@ -312,7 +312,7 @@ class RS_MemPool {
         void* base_ptr = mem_ptr.data;
         auto new_ptrs = new void*[new_chunks];
         for (RSize i = 0; i < new_chunks; ++i) {
-            void* chunk_ptr = static_cast<std::byte*>(base_ptr) + i * ChunkBytes;
+            void* chunk_ptr = static_cast<RByte*>(base_ptr) + RBIG_SIZE(i) * ChunkBytes;
             new_ptrs[i] = chunk_ptr;
         }
         chunk_ptrs.writeSlice(new_ptrs, new_chunks, old_chunk_num);
@@ -386,13 +386,13 @@ class RS_MemPool {
         mem_pool.chunk_ptrs = RS_Array<void*, 1>(chunk_num, provider);
 
         // Allocate one new memory region
-        RSize total_size = chunk_num * ChunkBytes;
+        RBigSize total_size = RBIG_SIZE(chunk_num) * ChunkBytes;
         RS_MemoryPtr new_mem_ptr = provider->allocate(total_size, /*sync=*/true);
 
         // Update chunk_ptrs
         auto new_chunk_ptrs = new void*[chunk_num];
         for (RSize i = 0; i < chunk_num; ++i) {
-            new_chunk_ptrs[i] = static_cast<std::byte*>(new_mem_ptr.data) + i * ChunkBytes;
+            new_chunk_ptrs[i] = static_cast<RByte*>(new_mem_ptr.data) + RBIG_SIZE(i) * ChunkBytes;
         }
         mem_pool.chunk_ptrs.write(new_chunk_ptrs);
         delete[] new_chunk_ptrs;
@@ -401,7 +401,7 @@ class RS_MemPool {
         mem_pool.host_memory_regions = new std::vector<RS_MemoryPtr>();
         mem_pool.host_memory_regions->push_back(new_mem_ptr);
 
-        RSize offset = 0;
+        RBigSize offset = 0;
         for (auto& region : *host_memory_regions) {
             region.copyTo(new_mem_ptr + offset, region.size());
             offset += region.size();
@@ -492,9 +492,9 @@ class RS_MemPool {
     /// @brief Returns whether the memory pool is empty.
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return chunk_num == 0; }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
         return chunk_mask.extraBytes() + chunk_ptrs.extraBytes();
     }
 };

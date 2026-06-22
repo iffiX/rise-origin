@@ -4,11 +4,11 @@
 #ifndef RS_WORLD_SIGNAL_H
 #define RS_WORLD_SIGNAL_H
 
-#include "rise_origin/utils/rs_conf.h"
-#include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/memory/rs_device.h"
 #include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/memory/rs_device.h"
+#include "rise_origin/utils/rs_conf.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
@@ -24,8 +24,7 @@ HOST_DEVICE_INLINE_QUALIFIER RBigSize align(SizeType needed_size) {
 template <typename T1, typename T2, typename SizeType>
 HOST_DEVICE_INLINE_QUALIFIER void setPtr(T1*& current, T2* previous_start, SizeType previous_size) {
     current = reinterpret_cast<T1*>(
-        reinterpret_cast<std::byte*>(previous_start) +
-        RS_ALIGN(previous_size, SIM_SIGNAL_ALIGN_SIZE)
+        reinterpret_cast<RByte*>(previous_start) + RS_ALIGN(previous_size, SIM_SIGNAL_ALIGN_SIZE)
     );
 }
 
@@ -187,19 +186,14 @@ class RS_WorldStructureVoxelSignal : public RS_WorldStructureSignalBase {
 
     RS_WorldStructureVoxelSignal() = default;
 
-    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
-        RBigSize expansion_num,
-        RBigSize hinge_num,
-        RBigSize prismatic_num
-    ) {
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize
+    getRequiredMemorySize(RBigSize expansion_num, RBigSize hinge_num, RBigSize prismatic_num) {
         RBigSize base_size = RS_WorldRootSignal::getRequiredMemorySize();
         RBigSize expansion_size = Expansion::getRequiredMemorySize(expansion_num);
         RBigSize hinge_size = Hinge::getRequiredMemorySize(hinge_num);
-        RBigSize prismatic_size =
-            Prismatic::getRequiredMemorySize(prismatic_num);
+        RBigSize prismatic_size = Prismatic::getRequiredMemorySize(prismatic_num);
 
-        RBigSize total_size =
-            base_size + expansion_size + hinge_size + prismatic_size;
+        RBigSize total_size = base_size + expansion_size + hinge_size + prismatic_size;
 #ifdef RS_DEBUG_ENABLE_WORLD_SIGNAL
         printf(
             "Required memory sizes for voxel structure signal:\n  Base: %u\n  Expansion: %u\n "
@@ -231,18 +225,15 @@ class RS_WorldStructureVoxelSignal : public RS_WorldStructureSignalBase {
 
         void* expansion_start = memory;
         memory = expansion_signals.initFromMemory(memory, expansion_num);
-        RBigSize expansion_size =
-            static_cast<char*>(memory) - static_cast<char*>(expansion_start);
+        RBigSize expansion_size = static_cast<char*>(memory) - static_cast<char*>(expansion_start);
 
         void* hinge_start = memory;
         memory = hinge_signals.initFromMemory(memory, hinge_num);
-        RBigSize hinge_size =
-            static_cast<char*>(memory) - static_cast<char*>(hinge_start);
+        RBigSize hinge_size = static_cast<char*>(memory) - static_cast<char*>(hinge_start);
 
         void* prismatic_start = memory;
         memory = prismatic_signals.initFromMemory(memory, prismatic_num);
-        RBigSize prismatic_size =
-            static_cast<char*>(memory) - static_cast<char*>(prismatic_start);
+        RBigSize prismatic_size = static_cast<char*>(memory) - static_cast<char*>(prismatic_start);
 
         RBigSize total_size = static_cast<char*>(memory) - static_cast<char*>(start_memory);
 

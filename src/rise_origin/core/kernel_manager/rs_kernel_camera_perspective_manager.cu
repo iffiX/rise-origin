@@ -166,7 +166,7 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     _camera_prev_denoiser_history_length.fill(RFloat(0), false);
 
     // create record buffer
-    RSize frame_size = RS_WorldCameraPerspectiveRecord::getRequiredMemorySize(pixel_num);
+    RBigSize frame_size = RS_WorldCameraPerspectiveRecord::getRequiredMemorySize(pixel_num);
     _recorder_buffer.init(buffer_frame_num, buffer_frame_num * frame_size, memory_provider);
 
     // Note: for rigid body linked perspective camera, it is special, it needs to have a controller
@@ -177,7 +177,6 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     if (hasControllerSignal()) {
         _addSignals();
     }
-
 }
 
 void RS_KernelCameraPerspectiveManager::commit() {
@@ -280,8 +279,7 @@ RS_WorldCameraPerspectiveSignal RS_KernelCameraPerspectiveManager::getController
 }
 
 bool RS_KernelCameraPerspectiveManager::hasControllerRecord() {
-    return _rsc.is<RSC_CameraPerspectiveFree>() ||
-           _rsc.is<RSC_CameraPerspectiveRigidBodyLinked>();
+    return _rsc.is<RSC_CameraPerspectiveFree>() || _rsc.is<RSC_CameraPerspectiveRigidBodyLinked>();
 }
 
 void RS_KernelCameraPerspectiveManager::syncControllerRecord() {
@@ -315,26 +313,28 @@ std::string RS_KernelCameraPerspectiveManager::getSignalName() const {
 }
 
 std::string RS_KernelCameraPerspectiveManager::getRecordControllerName() const {
-    return _rsc.visit([](auto& c) -> std::string {
-        return c.record.target_controller_reference;
-    });
+    return _rsc.visit([](auto& c) -> std::string { return c.record.target_controller_reference; });
 }
 
 std::string RS_KernelCameraPerspectiveManager::getRecordRecorderName() const {
-    return _rsc.visit([](auto& c) -> std::string {
-        return c.record.target_recorder_reference;
-    });
+    return _rsc.visit([](auto& c) -> std::string { return c.record.target_recorder_reference; });
 }
 
 std::string RS_KernelCameraPerspectiveManager::getSignalControllerName() const {
     return _rsc.visit([](auto& c) -> std::string { return c.signal.source_controller_name; });
 }
 
-RIndex RS_KernelCameraPerspectiveManager::getEntityGid() const { return _entity_registration.gid(); }
+RIndex RS_KernelCameraPerspectiveManager::getEntityGid() const {
+    return _entity_registration.gid();
+}
 
-RIndex RS_KernelCameraPerspectiveManager::getRecordGid() const { return _record_registration.gid(); }
+RIndex RS_KernelCameraPerspectiveManager::getRecordGid() const {
+    return _record_registration.gid();
+}
 
-RIndex RS_KernelCameraPerspectiveManager::getSignalGid() const { return _signal_registration.gid(); }
+RIndex RS_KernelCameraPerspectiveManager::getSignalGid() const {
+    return _signal_registration.gid();
+}
 
 std::string RS_KernelCameraPerspectiveManager::getStructureName() const {
     if (!_rsc.is<RSC_CameraPerspectiveRigidBodyLinked>()) return "";
@@ -353,7 +353,6 @@ RS_KernelCameraPerspectiveManager::getRSC() const {
 
 void RS_KernelCameraPerspectiveManager::_initKernelData() {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
-
         // Sync to make sure all operations in memory provider stream are finished
         _kernel_manager->getDeviceProvider()->sync();
 
@@ -413,7 +412,8 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
             camera.image_width * camera.image_height, _entity_registration.gid()
         );
         ctx.host_data->camera_rgb_ray_layout.add(
-            camera.image_width * camera.image_height * camera.samples_per_pixel, _entity_registration.gid()
+            camera.image_width * camera.image_height * camera.samples_per_pixel,
+            _entity_registration.gid()
         );
         ctx.host_data->camera_record_layout.add(1, _entity_registration.gid());
         ctx.host_data->camera_pixel_record_layout.add(
@@ -493,7 +493,8 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
                 using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
 
                 p_ptr->template run<RSCF_LaunchDirect<
-                    RSCF_ResolveRigidBodyLinkedPerspectiveCameraDependency, KernelType>>(
+                    RSCF_ResolveRigidBodyLinkedPerspectiveCameraDependency,
+                    KernelType>>(
                     {1},
                     ctx.cameras.size() - 1,
                     ctx.host_data->structure_rigid_body_layout.segmentOffset(
@@ -557,7 +558,9 @@ void RS_KernelCameraPerspectiveManager::_freeKernelData() {
         ctx.camera_prev_denoiser_history_length.erase(camera_index);
 
         // Update host layout
-        ctx.host_data->camera_layout.remove(ctx.host_data->camera_layout.find(_entity_registration.gid()));
+        ctx.host_data->camera_layout.remove(
+            ctx.host_data->camera_layout.find(_entity_registration.gid())
+        );
         ctx.host_data->camera_info_ray_layout.remove(
             ctx.host_data->camera_info_ray_layout.find(_entity_registration.gid())
         );

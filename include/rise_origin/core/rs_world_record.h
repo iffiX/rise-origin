@@ -6,12 +6,12 @@
 #include <cassert>
 
 #include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_conf.h"
-#include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/memory/rs_device.h"
-#include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/memory/rs_device.h"
+#include "rise_origin/utils/rs_conf.h"
+#include "rise_origin/utils/rs_def.h"
+#include "rise_origin/utils/rs_exception.h"
 
 namespace rise {
 
@@ -27,8 +27,7 @@ HOST_DEVICE_INLINE_QUALIFIER RBigSize align(SizeType needed_size) {
 template <typename T1, typename T2, typename SizeType>
 HOST_DEVICE_INLINE_QUALIFIER void setPtr(T1*& current, T2* previous_start, SizeType previous_size) {
     current = reinterpret_cast<T1*>(
-        reinterpret_cast<std::byte*>(previous_start) +
-        RS_ALIGN(previous_size, SIM_RECORD_ALIGN_SIZE)
+        reinterpret_cast<RByte*>(previous_start) + RS_ALIGN(previous_size, SIM_RECORD_ALIGN_SIZE)
     );
 }
 
@@ -514,12 +513,8 @@ class RS_WorldStructureRecordBase : public RS_WorldRootRecord {
             setPtr(hinge_angle, hinge_max, object_num * sizeof(RFloat));
             setPtr(hinge_torque, hinge_angle, object_num * sizeof(RFloat));
             // Prismatic fields
-            setPtr(
-                prismatic_signal_sid, hinge_torque, object_num * sizeof(RFloat)
-            );
-            setPtr(
-                prismatic_min, prismatic_signal_sid, object_num * sizeof(RIndex)
-            );
+            setPtr(prismatic_signal_sid, hinge_torque, object_num * sizeof(RFloat));
+            setPtr(prismatic_min, prismatic_signal_sid, object_num * sizeof(RIndex));
             setPtr(prismatic_max, prismatic_min, object_num * sizeof(RFloat));
             setPtr(prismatic_distance, prismatic_max, object_num * sizeof(RFloat));
             setPtr(prismatic_force, prismatic_distance, object_num * sizeof(RFloat));
@@ -530,7 +525,6 @@ class RS_WorldStructureRecordBase : public RS_WorldRootRecord {
             return end;
         }
     };
-
 };
 
 class RS_WorldStructureVoxelRecord : public RS_WorldStructureRecordBase {
@@ -863,7 +857,8 @@ class RS_WorldIntersectRegionRecord : public RS_WorldIntersectRegionRecordBase {
         return total_size;
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize membership_object_num) {
+    HOST_DEVICE_INLINE_QUALIFIER void*
+    initFromMemory(void* memory, RBigSize membership_object_num) {
         is_valid = true;
 
 #ifdef RS_DEBUG_ENABLE_WORLD_RECORD

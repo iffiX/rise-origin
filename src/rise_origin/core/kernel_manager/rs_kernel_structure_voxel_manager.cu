@@ -2654,7 +2654,7 @@ void RS_KernelStructureVoxelManager::_initKernelRecordData() {
     }
 
     // Record buffers
-    RSize frame_size = RS_WorldStructureVoxelRecord::getRequiredMemorySize(
+    RBigSize frame_size = RS_WorldStructureVoxelRecord::getRequiredMemorySize(
         _voxel_record_num, _link_record_num, _rigid_body_record_num, _joint_record_num
     );
     _recorder_buffer.init(buffer_frame_num, buffer_frame_num * frame_size, memory_provider);

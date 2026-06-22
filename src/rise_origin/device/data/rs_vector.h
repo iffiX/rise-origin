@@ -423,10 +423,10 @@ class RS_Vector {
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return used_elem_num == 0; }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
-
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
+    
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const { return sizeof(T) * elem_num; }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const { return sizeof(T) * elem_num; }
 
     HOST_DEVICE_INLINE_QUALIFIER T& back() {
         assert(used_elem_num > 1 && "Cannot get the last element of an empty vector");

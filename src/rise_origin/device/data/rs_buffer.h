@@ -27,10 +27,10 @@ class RS_BufferIndex {
     /// size).
     RS_MemoryPtr chunk_num;
 
-    /// @brief Memory pointer for an array (max_chunk_num) of RSize chunk offsets.
+    /// @brief Memory pointer for an array (max_chunk_num) of RBigSize chunk offsets.
     RS_MemoryPtr chunk_data_offset;
 
-    /// @brief Memory pointer for an array (max_chunk_num) of RSize chunk sizes.
+    /// @brief Memory pointer for an array (max_chunk_num) of RBigSize chunk sizes.
     RS_MemoryPtr chunk_data_size;
 
     /// @brief The contiguous data region to which these offsets refer.
@@ -40,7 +40,7 @@ class RS_BufferIndex {
     RSize max_chunk_num = 0;
 
     /// @brief Maximum total data size, in bytes.
-    RSize max_data_size = 0;
+    RBigSize max_data_size = 0;
 
     /// @brief True if this index is allocated in device memory (otherwise host memory).
     bool is_on_device = false;
@@ -63,7 +63,7 @@ class RS_BufferIndex {
     RS_BufferIndex(
         RS_MemoryProvider* provider,
         RSize max_chunk_num,
-        RSize max_data_size,
+        RBigSize max_data_size,
         bool is_on_device
     ) {
         init(provider, max_chunk_num, max_data_size, is_on_device);
@@ -78,8 +78,12 @@ class RS_BufferIndex {
      * @param max_data_size Maximum total data bytes.
      * @param is_on_device  Whether the index is allocated on device.
      */
-    void
-    init(RS_MemoryProvider* provider, RSize max_chunk_num, RSize max_data_size, bool is_on_device) {
+    void init(
+        RS_MemoryProvider* provider,
+        RSize max_chunk_num,
+        RBigSize max_data_size,
+        bool is_on_device
+    ) {
         RS_DATA_EXPECT_PROVIDER_NOT_NULL(provider);
 
         this->max_chunk_num = max_chunk_num;
@@ -96,7 +100,7 @@ class RS_BufferIndex {
         chunk_num.set(0, chunk_num.size(), 0, true);
 
         // 2) chunk_data_offset & chunk_data_size: each has max_chunk_num elements
-        RSize array_bytes = max_chunk_num * sizeof(RSize);
+        RBigSize array_bytes = RBIG_SIZE(max_chunk_num) * sizeof(RBigSize);
         if (is_on_device) {
             chunk_data_offset = provider->allocate(array_bytes, false);
             chunk_data_size = provider->allocate(array_bytes, false);
@@ -165,19 +169,19 @@ class RS_BufferIndex {
     /**
      * @brief Returns the total bytes used by all chunks (sum of their sizes).
      */
-    HOST_DEVICE_INLINE_QUALIFIER RSize usedDataSize() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize usedDataSize() const {
         RSize cn = chunkNum();
         if (cn == 0) return 0;
         // last chunk => index (cn - 1)
-        RSize last_offset = chunk_data_offset.get<RSize>(cn - 1);
-        RSize last_size = chunk_data_size.get<RSize>(cn - 1);
+        RBigSize last_offset = chunk_data_offset.get<RBigSize>(cn - 1);
+        RBigSize last_size = chunk_data_size.get<RBigSize>(cn - 1);
         return last_offset + last_size;
     }
 
     /**
      * @brief Whether a new chunk of size 'chunk_size' can be pushed without overflow.
      */
-    HOST_DEVICE_INLINE_QUALIFIER bool canPushChunk(RSize chunk_size) const {
+    HOST_DEVICE_INLINE_QUALIFIER bool canPushChunk(RBigSize chunk_size) const {
         RSize cn = chunkNum();
         if (cn >= max_chunk_num) {
             return false;
@@ -191,17 +195,18 @@ class RS_BufferIndex {
      *
      * @param chunk_size Number of bytes for this new chunk
      */
-    HOST_DEVICE_INLINE_QUALIFIER void pushChunk(RSize chunk_size) {
+    HOST_DEVICE_INLINE_QUALIFIER void pushChunk(RBigSize chunk_size) {
         RSize cn = chunkNum();
         assert(canPushChunk(chunk_size) && "Cannot push chunk, no capacity");
 
         // offset for new chunk
-        RSize offset =
-            (cn == 0) ? 0
-                      : (chunk_data_offset.get<RSize>(cn - 1) + chunk_data_size.get<RSize>(cn - 1));
+        RBigSize offset =
+            (cn == 0)
+                ? 0
+                : (chunk_data_offset.get<RBigSize>(cn - 1) + chunk_data_size.get<RBigSize>(cn - 1));
 
-        chunk_data_offset.get<RSize>(cn) = offset;
-        chunk_data_size.get<RSize>(cn) = chunk_size;
+        chunk_data_offset.get<RBigSize>(cn) = offset;
+        chunk_data_size.get<RBigSize>(cn) = chunk_size;
 
         chunk_num.get<RSize>(0) = cn + 1;
     }
@@ -224,8 +229,8 @@ class RS_BufferIndex {
      */
     HOST_DEVICE_INLINE_QUALIFIER RS_MemoryPtr getChunk(RIndex chunk_index) const {
         assert(chunk_index < chunkNum() && "Chunk index out of bounds");
-        RSize offset = chunk_data_offset.get<RSize>(chunk_index);
-        RSize size = chunk_data_size.get<RSize>(chunk_index);
+        RBigSize offset = chunk_data_offset.get<RBigSize>(chunk_index);
+        RBigSize size = chunk_data_size.get<RBigSize>(chunk_index);
         auto ptr = root_data + offset;
         ptr.bytes = size;
         return ptr;
@@ -244,8 +249,8 @@ class RS_BufferIndex {
      */
     HOST_DEVICE_INLINE_QUALIFIER void clearDevice() {
         for (RSize i = 0; i < max_chunk_num; i++) {
-            chunk_data_offset.get<RSize>(i) = 0;
-            chunk_data_size.get<RSize>(i) = 0;
+            chunk_data_offset.get<RBigSize>(i) = 0;
+            chunk_data_size.get<RBigSize>(i) = 0;
         }
         chunk_num.get<RSize>(0) = 0;
     }
@@ -318,7 +323,7 @@ class RS_DoubleBuffer {
      * @param max_data_size  Maximum bytes per buffer.
      * @param provider       Memory provider.
      */
-    RS_DoubleBuffer(RSize max_chunk_num, RSize max_data_size, RS_MemoryProvider* provider) {
+    RS_DoubleBuffer(RSize max_chunk_num, RBigSize max_data_size, RS_MemoryProvider* provider) {
         init(max_chunk_num, max_data_size, provider);
     }
 
@@ -329,7 +334,7 @@ class RS_DoubleBuffer {
      * @param max_data_size  Maximum bytes per buffer
      * @param provider       Memory provider
      */
-    void init(RSize max_chunk_num, RSize max_data_size, RS_MemoryProvider* provider) {
+    void init(RSize max_chunk_num, RBigSize max_data_size, RS_MemoryProvider* provider) {
         RS_DATA_EXPECT_PROVIDER_NOT_NULL(provider);
 
         this->mem_provider = provider;
@@ -415,13 +420,13 @@ class RS_DoubleBuffer {
 
         if (device_to_host) {
             new_h_index_inactive.copyChunkData(new_d_index_inactive, true);
-            RSize sync_size = new_h_index_inactive.usedDataSize();
+            RBigSize sync_size = new_h_index_inactive.usedDataSize();
             if (sync_size > 0) {
                 new_h_inactive.copyFrom(new_d_inactive, sync_size, sync, ordered);
             }
         } else {
             new_d_index_inactive.copyChunkData(new_h_index_inactive, true);
-            RSize sync_size = new_h_index_inactive.usedDataSize();
+            RBigSize sync_size = new_h_index_inactive.usedDataSize();
             if (sync_size > 0) {
                 new_d_inactive.copyFrom(new_h_inactive, sync_size, sync, ordered);
             }
@@ -454,7 +459,7 @@ class RS_DoubleBuffer {
      * @return RS_MemoryPtr pointing to the newly allocated region,
      *         or an empty (null) pointer if push fails.
      */
-    RS_MemoryPtr pushHost(RSize chunk_size) {
+    RS_MemoryPtr pushHost(RBigSize chunk_size) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         RS_BufferIndex& h_index = (is_a_active_host ? host_index_a : host_index_b);
         RS_MemoryPtr& h_buffer = (is_a_active_host ? host_a : host_b);
@@ -462,7 +467,7 @@ class RS_DoubleBuffer {
         if (!h_index.canPushChunk(chunk_size)) {
             return {};
         }
-        RSize offset = h_index.usedDataSize();
+        RBigSize offset = h_index.usedDataSize();
         h_index.pushChunk(chunk_size);
 
         auto mem_ptr = h_buffer + offset;
@@ -526,7 +531,7 @@ class RS_DoubleBuffer {
      * @param chunk_size  Bytes requested
      * @return RS_MemoryPtr (device pointer) or an empty pointer if fail
      */
-    HOST_DEVICE_INLINE_QUALIFIER RS_MemoryPtr pushDevice(RSize chunk_size) {
+    HOST_DEVICE_INLINE_QUALIFIER RS_MemoryPtr pushDevice(RBigSize chunk_size) {
         bool is_a_active = is_a_active_device.get();
 
         RS_BufferIndex& d_index = (is_a_active ? device_index_a : device_index_b);
@@ -536,7 +541,7 @@ class RS_DoubleBuffer {
             return {};
         }
 
-        RSize offset = d_index.usedDataSize();
+        RBigSize offset = d_index.usedDataSize();
         d_index.pushChunk(chunk_size);
 
         auto mem_ptr = d_buffer + offset;
@@ -606,7 +611,7 @@ class RS_DirectBuffer {
     RS_MemoryPtr device;
 
     /// @brief Maximum total data size
-    RSize max_data_size = 0;
+    RBigSize max_data_size = 0;
 
     /*****************************************************************
      * Methods
@@ -621,7 +626,7 @@ class RS_DirectBuffer {
      * @param max_data_size  Maximum bytes per buffer.
      * @param provider       Memory provider.
      */
-    RS_DirectBuffer(RSize max_data_size, RS_MemoryProvider* provider) {
+    RS_DirectBuffer(RBigSize max_data_size, RS_MemoryProvider* provider) {
         init(max_data_size, provider);
     }
 
@@ -631,7 +636,7 @@ class RS_DirectBuffer {
      * @param max_data_size  Maximum bytes per buffer
      * @param provider       Memory provider
      */
-    void init(RSize max_data_size, RS_MemoryProvider* provider) {
+    void init(RBigSize max_data_size, RS_MemoryProvider* provider) {
         RS_DATA_EXPECT_PROVIDER_NOT_NULL(provider);
 
         mem_provider = provider;
@@ -683,7 +688,7 @@ class RS_DirectBuffer {
      * @return RS_MemoryPtr pointing to newly allocated region,
      *         or empty pointer if push fails.
      */
-    RS_MemoryPtr pushHost(RSize chunk_size) {
+    RS_MemoryPtr pushHost(RBigSize chunk_size) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         if (chunk_size > max_data_size) {
             return {};
@@ -736,7 +741,7 @@ class RS_DirectBuffer {
      * @param chunk_size  Bytes requested
      * @return RS_MemoryPtr (device pointer) or empty pointer if fail
      */
-    HOST_DEVICE_INLINE_QUALIFIER RS_MemoryPtr pushDevice(RSize chunk_size) {
+    HOST_DEVICE_INLINE_QUALIFIER RS_MemoryPtr pushDevice(RBigSize chunk_size) {
         if (chunk_size > max_data_size) {
             return {};
         }

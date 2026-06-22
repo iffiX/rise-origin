@@ -411,10 +411,10 @@ class RS_Array {
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return elem_num == 0; }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const { return sizeof(T) * elem_num; }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const { return sizeof(T) * elem_num; }
 
     /**
      * @brief Checks if the given index is out of bounds.
@@ -893,10 +893,10 @@ class RS_StaticArray<T, RS_StaticArraySizeConfig<DimensionSizes...>, IsRowMajor_
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return ElemNum == 0; }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const { return 0; }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const { return 0; }
 
     /**
      * @brief Checks if the given coordinates are out of bounds.

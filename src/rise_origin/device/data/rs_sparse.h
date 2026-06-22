@@ -610,9 +610,9 @@ class RS_Sparse3DMap {
             if (i == level) {
                 auto& mem_pool = rs_device_std::get<i - 1>(descendant_mem_pools);
                 if (copy) {
-                    RSize old_mem_size = mem_pool.chunks.data.size();
+                    RBigSize old_mem_size = mem_pool.chunks.data.size();
                     mem_pool.resize(mem_pool_size);
-                    RSize new_mem_size = mem_pool.chunks.data.size();
+                    RBigSize new_mem_size = mem_pool.chunks.data.size();
                     mem_pool.chunks.data.set(0, new_mem_size - old_mem_size, old_mem_size, sync);
                 } else {
                     mem_pool.resize(mem_pool_size, false);
@@ -672,11 +672,11 @@ class RS_Sparse3DMap {
     [[nodiscard]] RS_DeviceLocation device() const { return root.device(); }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
-
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
+    
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
-        RSize extra_bytes = 0;
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
+        RBigSize extra_bytes = 0;
         extra_bytes += root.extraBytes();
         sparse_helper::for_each_in_tuple_hd(descendant_mem_pools, [&extra_bytes](auto& pool) {
             extra_bytes += pool.extraBytes();

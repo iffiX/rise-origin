@@ -583,10 +583,10 @@ class RS_List {
     }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
         return header.extraBytes() + lock.extraBytes() + mem_pool.extraBytes();
     }
 

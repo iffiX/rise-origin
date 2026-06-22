@@ -7,26 +7,26 @@
 #include <map>
 #include <string>
 
+#include "rise_origin/utils/concurrency/rs_cpu_block.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/concurrency/rs_cpu_block.h"
 
-#define RS_COMPUTE_FUNCTION_CHECK_HAS(something)                                       \
-    template <typename T, typename = void>                                             \
-    struct Has##something : std::false_type {};                                        \
-    template <typename T>                                                              \
+#define RS_COMPUTE_FUNCTION_CHECK_HAS(something) \
+    template <typename T, typename = void>       \
+    struct Has##something : std::false_type {};  \
+    template <typename T>                        \
     struct Has##something<T, std::void_t<typename T::something>> : std::true_type {}
 
-#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_FALSE(something)                               \
-    template <typename T, typename = void>                                             \
-    struct ValueOf##something : std::false_type {};                                    \
-    template <typename T>                                                              \
+#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_FALSE(something) \
+    template <typename T, typename = void>               \
+    struct ValueOf##something : std::false_type {};      \
+    template <typename T>                                \
     struct ValueOf##something<T, std::void_t<typename T::something>> : T::something {}
 
-#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_TRUE(something)                                \
-    template <typename T, typename = void>                                            \
-    struct ValueOf##something : std::true_type {};                                     \
-    template <typename T>                                                              \
+#define RS_COMPUTE_FUNCTION_CHECK_IS_OR_TRUE(something) \
+    template <typename T, typename = void>              \
+    struct ValueOf##something : std::true_type {};      \
+    template <typename T>                               \
     struct ValueOf##something<T, std::void_t<typename T::something>> : T::something {}
 
 // Does not check templates
@@ -64,8 +64,8 @@ class RS_ComputeFunctionBase {
     DEVICE_INLINE_QUALIFIER static RIndex threadIdxY() { return threadIdx.y; }
     DEVICE_INLINE_QUALIFIER static RIndex threadIdxZ() { return threadIdx.z; }
 
-    DEVICE_INLINE_QUALIFIER static std::byte* sharedMem() {
-        extern __shared__ std::byte sharedMemPtr[];
+    DEVICE_INLINE_QUALIFIER static RByte* sharedMem() {
+        extern __shared__ RByte sharedMemPtr[];
         return sharedMemPtr;
     }
 
@@ -122,9 +122,9 @@ class RS_ComputeFunctionBase {
     static RIndex threadIdxY() { return thread_idx_y; }
     static RIndex threadIdxZ() { return thread_idx_z; }
 
-    static std::byte* sharedMem() {
+    static RByte* sharedMem() {
         assert(shared_mem_ptr != nullptr);
-        return static_cast<std::byte*>(shared_mem_ptr);
+        return static_cast<RByte*>(shared_mem_ptr);
     }
 
     static void setIndicesAndBlockSize(
@@ -170,7 +170,7 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
     /*****************************************************************
      * Attribute query methods
      *****************************************************************/
-    static constexpr size_t sharedMemLayoutSize() {
+    static constexpr RBigSize sharedMemLayoutSize() {
         if constexpr (HasSharedMemLayout<DerivedComputeFunction>::value) {
             return sizeof(typename DerivedComputeFunction::SharedMemLayout);
         } else {
@@ -262,8 +262,10 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
     }
 
     template <typename StructType, typename MemberType>
-    HOST_DEVICE_INLINE_QUALIFIER static constexpr size_t offsetOf(MemberType StructType::*member) {
-        return reinterpret_cast<std::size_t>(&(static_cast<StructType*>(nullptr)->*member));
+    HOST_DEVICE_INLINE_QUALIFIER static constexpr RBigSize offsetOf(
+        MemberType StructType::* member
+    ) {
+        return reinterpret_cast<RBigSize>(&(static_cast<StructType*>(nullptr)->*member));
     }
 
     /**
@@ -271,46 +273,46 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
      */
     template <typename StructType, typename MemberType>
     HOST_DEVICE_INLINE_QUALIFIER static MemberType&
-    sharedMemAt(MemberType StructType::*member, RSize block_size, RIndex index) {
+    sharedMemAt(MemberType StructType::* member, RSize block_size, RIndex index) {
         static_assert(
             HasSharedMemLayout<DerivedComputeFunction>::value,
             "Compute kernel must define a valid SharedMemLayout."
         );
-        size_t member_offset = offsetOf(member) * block_size;
-        size_t index_offset = index * sizeof(MemberType);
+        RBigSize member_offset = offsetOf(member) * block_size;
+        RBigSize index_offset = index * sizeof(MemberType);
         return *reinterpret_cast<MemberType*>(sharedMem() + member_offset + index_offset);
     }
 
     template <typename StructType, typename MemberType>
-    HOST_DEVICE_INLINE_QUALIFIER static MemberType& sharedMemAt1D(MemberType StructType::*member) {
+    HOST_DEVICE_INLINE_QUALIFIER static MemberType& sharedMemAt1D(MemberType StructType::* member) {
         static_assert(
             HasSharedMemLayout<DerivedComputeFunction>::value,
             "Compute kernel must define a valid SharedMemLayout."
         );
-        size_t member_offset = offsetOf(member) * blockSize1D();
-        size_t index_offset = threadIndex1D() * sizeof(MemberType);
+        RBigSize member_offset = offsetOf(member) * blockSize1D();
+        RBigSize index_offset = threadIndex1D() * sizeof(MemberType);
         return *reinterpret_cast<MemberType*>(sharedMem() + member_offset + index_offset);
     }
 
     template <typename StructType, typename MemberType>
-    HOST_DEVICE_INLINE_QUALIFIER static MemberType& sharedMemAt2D(MemberType StructType::*member) {
+    HOST_DEVICE_INLINE_QUALIFIER static MemberType& sharedMemAt2D(MemberType StructType::* member) {
         static_assert(
             HasSharedMemLayout<DerivedComputeFunction>::value,
             "Compute kernel must define a valid SharedMemLayout."
         );
-        size_t member_offset = offsetOf(member) * blockSize2D();
-        size_t index_offset = threadIndex2D() * sizeof(MemberType);
+        RBigSize member_offset = offsetOf(member) * blockSize2D();
+        RBigSize index_offset = threadIndex2D() * sizeof(MemberType);
         return *reinterpret_cast<MemberType*>(sharedMem() + member_offset + index_offset);
     }
 
     template <typename StructType, typename MemberType>
-    HOST_DEVICE_INLINE_QUALIFIER static MemberType& sharedMemAt3D(MemberType StructType::*member) {
+    HOST_DEVICE_INLINE_QUALIFIER static MemberType& sharedMemAt3D(MemberType StructType::* member) {
         static_assert(
             HasSharedMemLayout<DerivedComputeFunction>::value,
             "Compute kernel must define a valid SharedMemLayout."
         );
-        size_t member_offset = offsetOf(member) * blockSize3D();
-        size_t index_offset = threadIndex3D() * sizeof(MemberType);
+        RBigSize member_offset = offsetOf(member) * blockSize3D();
+        RBigSize index_offset = threadIndex3D() * sizeof(MemberType);
         return *reinterpret_cast<MemberType*>(sharedMem() + member_offset + index_offset);
     }
     /**

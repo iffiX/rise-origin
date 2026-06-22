@@ -213,8 +213,9 @@ class RS_HashSet {
 
             // Clear new part if new size is larger than old size
             if (bucket_num_per_table > old_bucket_num) {
-                RSize key_clear_size = (bucket_num_per_table - old_bucket_num) * sizeof(BucketKeys);
-                RSize key_clear_offset = old_bucket_num * sizeof(BucketKeys);
+                RBigSize key_clear_size =
+                    (bucket_num_per_table - old_bucket_num) * sizeof(BucketKeys);
+                RBigSize key_clear_offset = old_bucket_num * sizeof(BucketKeys);
                 tables[0].bucket_keys.data.set(0, key_clear_size, key_clear_offset);
                 tables[1].bucket_keys.data.set(0, key_clear_size, key_clear_offset);
             }
@@ -315,10 +316,10 @@ class RS_HashSet {
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return bucket_num_per_table == 0; }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
         return tables[0].bucket_keys.extraBytes() + tables[0].bucket_locks.extraBytes() +
                tables[1].bucket_keys.extraBytes() + tables[1].bucket_locks.extraBytes();
     }
@@ -783,11 +784,12 @@ class RS_HashFlatMap {
 
             // Clear new part if new size is larger than old size
             if (bucket_num_per_table > old_bucket_num) {
-                RSize key_clear_size = (bucket_num_per_table - old_bucket_num) * sizeof(BucketKeys);
-                RSize key_clear_offset = old_bucket_num * sizeof(BucketKeys);
-                RSize value_clear_size =
+                RBigSize key_clear_size =
+                    (bucket_num_per_table - old_bucket_num) * sizeof(BucketKeys);
+                RBigSize key_clear_offset = old_bucket_num * sizeof(BucketKeys);
+                RBigSize value_clear_size =
                     (bucket_num_per_table - old_bucket_num) * sizeof(BucketValues);
-                RSize value_clear_offset = old_bucket_num * sizeof(BucketValues);
+                RBigSize value_clear_offset = old_bucket_num * sizeof(BucketValues);
                 tables[0].bucket_keys.data.set(0, key_clear_size, key_clear_offset);
                 tables[0].bucket_values.data.set(0, value_clear_size, value_clear_offset);
                 tables[1].bucket_keys.data.set(0, key_clear_size, key_clear_offset);
@@ -894,10 +896,10 @@ class RS_HashFlatMap {
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return bucket_num_per_table == 0; }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
         return tables[0].bucket_keys.extraBytes() + tables[0].bucket_values.extraBytes() +
                tables[0].bucket_locks.extraBytes() + tables[1].bucket_keys.extraBytes() +
                tables[1].bucket_values.extraBytes() + tables[1].bucket_locks.extraBytes();
@@ -1565,11 +1567,11 @@ class RS_HashMap
 
     // empty() inherited
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const {
         return BaseMapType::baseBytes() + values.baseBytes();
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
         return BaseMapType::extraBytes() + values.extraBytes();
     }
 
@@ -1945,8 +1947,9 @@ class RS_HashMultiMap {
                         init_new_values[i - old_bucket_num].values[j] = {};
                     }
                 }
-                RSize key_clear_size = (bucket_num_per_table - old_bucket_num) * sizeof(BucketKeys);
-                RSize key_clear_offset = old_bucket_num * sizeof(BucketKeys);
+                RBigSize key_clear_size =
+                    (bucket_num_per_table - old_bucket_num) * sizeof(BucketKeys);
+                RBigSize key_clear_offset = old_bucket_num * sizeof(BucketKeys);
                 tables[0].bucket_keys.data.set(0, key_clear_size, key_clear_offset);
                 tables[0].bucket_values.writeSlice(
                     init_new_values, bucket_num_per_table - old_bucket_num, old_bucket_num
@@ -2072,7 +2075,7 @@ class RS_HashMultiMap {
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return bucket_num_per_table == 0; }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const {
         return sizeof(bucket_num_per_table) + tables[0].bucket_keys.data.baseBytes() +  //
                tables[0].bucket_values.data.baseBytes() +                               //
                tables[0].bucket_locks.data.baseBytes() +                                //
@@ -2082,7 +2085,7 @@ class RS_HashMultiMap {
     }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const {
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
         return tables[0].bucket_keys.extraBytes() + tables[0].bucket_values.extraBytes() +
                tables[0].bucket_locks.extraBytes() + tables[1].bucket_keys.extraBytes() +
                tables[1].bucket_values.extraBytes() + tables[1].bucket_locks.extraBytes() +

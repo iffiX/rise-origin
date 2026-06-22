@@ -11,12 +11,12 @@
 #include <string>
 
 #include "rise_origin/device/platform/rs_exec_trace.h"
+#include "rise_origin/utils/concurrency/rs_cpu_block.h"
+#include "rise_origin/utils/concurrency/rs_thread_pool.h"
+#include "rise_origin/utils/memory/rs_memory.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_env_var.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/concurrency/rs_cpu_block.h"
-#include "rise_origin/utils/memory/rs_memory.h"
-#include "rise_origin/utils/concurrency/rs_thread_pool.h"
 #include "rise_origin/utils/time/rs_timer.h"
 
 namespace rise {
@@ -75,7 +75,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
         device = {RSE_DEVICE_TYPE_UNKNOWN, RS_NULL_INDEX};
     }
 
-    RS_MemoryPtr allocate(size_t size, bool sync = true) override {
+    RS_MemoryPtr allocate(RBigSize size, bool sync = true) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CPU provider is not initialized"));
 
         if (size == 0) return {nullptr, 0, 0, device, this};
@@ -97,7 +97,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
         return {ptr, size, 0, device, this};
     }
 
-    RS_MemoryPtr allocateHost(size_t size, bool sync = true) override {
+    RS_MemoryPtr allocateHost(RBigSize size, bool sync = true) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CPU provider is not initialized"));
 
         if (size == 0) return {nullptr, 0, 0, device, this};
@@ -143,8 +143,8 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
     void set(
         const RS_MemoryPtr &ptr,
         int value,
-        size_t size,
-        size_t offset = 0,
+        RBigSize size,
+        RBigSize offset = 0,
         bool sync = true
     ) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CPU provider is not initialized"));
@@ -177,7 +177,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
     void copy(
         const RS_MemoryPtr &dst,
         const RS_ConstMemoryPtr &src,
-        size_t size,
+        RBigSize size,
         bool sync = true,
         bool ordered = true
     ) override {
@@ -243,8 +243,9 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
 
         ComputeFunction::validate();
 
-        config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE ? RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE
-                                                                    : config.block_size;
+        config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE
+                                ? RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE
+                                : config.block_size;
 
         config.shared_mem_size = config.shared_mem_size == 0
                                      ? ComputeFunction::sharedMemLayoutSize() * config.block_size
@@ -307,8 +308,8 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                             config.block_size,
                             RS_MIN(config.block_size, config.thread_num - b * config.block_size),
                             RS_DEVICE_CPU_FIBER_STACK_SIZE,
-                            (stack_mem +
-                             worker_thread_index * config.block_size * RS_DEVICE_CPU_FIBER_STACK_SIZE)
+                            (stack_mem + worker_thread_index * config.block_size *
+                                             RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                 .ptr(),
                             (shared_mem + worker_thread_index * config.shared_mem_size).ptr(),
                             args...
@@ -319,8 +320,8 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                             config.block_size,
                             RS_MIN(config.block_size, config.thread_num - b * config.block_size),
                             RS_DEVICE_CPU_FIBER_STACK_SIZE,
-                            (stack_mem +
-                             worker_thread_index * config.block_size * RS_DEVICE_CPU_FIBER_STACK_SIZE)
+                            (stack_mem + worker_thread_index * config.block_size *
+                                             RS_DEVICE_CPU_FIBER_STACK_SIZE)
                                 .ptr(),
                             static_cast<void *>(nullptr),
                             args...
@@ -374,7 +375,8 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                 stack_mem.size()) {
                 stack_mem.free();
                 stack_mem = allocate(
-                    RS_DEVICE_CPU_FIBER_STACK_SIZE * total_threads_per_block * parallel_block_num, true
+                    RS_DEVICE_CPU_FIBER_STACK_SIZE * total_threads_per_block * parallel_block_num,
+                    true
                 );
             }
 

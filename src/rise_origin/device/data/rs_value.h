@@ -135,10 +135,10 @@ class RS_Value {
     [[nodiscard]] RS_DeviceLocation device() const { return data.device(); }
 
     /// @brief Returns the base size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
     /// @brief Returns the extra size in bytes.
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const { return data.size(); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const { return data.size(); }
 
     /// @brief Returns the value.
     HOST_DEVICE_INLINE_QUALIFIER T& get() const { return data.get<T>(0); }

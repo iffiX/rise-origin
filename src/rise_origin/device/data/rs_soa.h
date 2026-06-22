@@ -85,30 +85,30 @@ struct PrivateHelper {
     // For regular fields, T is a pointer type
     // For nested fields, T is RS_StructOfArrays<SomeNestedField>
     template <typename T>
-    static std::enable_if_t<std::is_class_v<T>, RSize>
-    _getRequiredBytes(T &t, RSize num, RSize prev_last_member_end) {
+    static std::enable_if_t<std::is_class_v<T>, RBigSize>
+    _getRequiredBytes(T &t, RSize num, RBigSize prev_last_member_end) {
         return t._getRequiredBytes(num, prev_last_member_end);
     }
 
     template <typename T>
-    static std::enable_if_t<!std::is_class_v<T>, RSize>
-    _getRequiredBytes(T &t, RSize num, RSize prev_last_member_end) {
+    static std::enable_if_t<!std::is_class_v<T>, RBigSize>
+    _getRequiredBytes(T &t, RSize num, RBigSize prev_last_member_end) {
         using element_type = std::remove_extent_t<std::remove_pointer_t<T>>;
         return RS_ALIGN(prev_last_member_end + sizeof(element_type) * num, SOA_ALIGN_SIZE);
     }
 
     template <typename T>
-    static std::enable_if_t<std::is_class_v<T>, RSize>
-    _getOffsets(T &t, RSize num, std::vector<RSize> &offsets, RSize prev_last_member_end) {
+    static std::enable_if_t<std::is_class_v<T>, RBigSize>
+    _getOffsets(T &t, RSize num, std::vector<RBigSize> &offsets, RBigSize prev_last_member_end) {
         return t._getOffsets(num, offsets, prev_last_member_end);
     }
 
     template <typename T>
-    static std::enable_if_t<!std::is_class_v<T>, RSize>
-    _getOffsets(T &t, RSize num, std::vector<RSize> &offsets, RSize prev_last_member_end) {
+    static std::enable_if_t<!std::is_class_v<T>, RBigSize>
+    _getOffsets(T &t, RSize num, std::vector<RBigSize> &offsets, RBigSize prev_last_member_end) {
         using element_type = std::remove_extent_t<std::remove_pointer_t<T>>;
         offsets.push_back(prev_last_member_end);
-        RSize last_member_end =
+        RBigSize last_member_end =
             RS_ALIGN(prev_last_member_end + sizeof(element_type) * num, SOA_ALIGN_SIZE);
         return last_member_end;
     }
@@ -126,15 +126,15 @@ struct PrivateHelper {
     }
 
     template <typename T>
-    static std::enable_if_t<std::is_class_v<T>, RSize>
-    _updateMember(T &t, RS_MemoryPtr data, RSize num, RSize prev_last_member_end) {
+    static std::enable_if_t<std::is_class_v<T>, RBigSize>
+    _updateMember(T &t, RS_MemoryPtr data, RSize num, RBigSize prev_last_member_end) {
         t.elem_num = num;
         return t._updateMember(data, num, prev_last_member_end);
     }
 
     template <typename T>
-    static std::enable_if_t<!std::is_class_v<T>, RSize>
-    _updateMember(T &t, RS_MemoryPtr data, RSize num, RSize prev_last_member_end) {
+    static std::enable_if_t<!std::is_class_v<T>, RBigSize>
+    _updateMember(T &t, RS_MemoryPtr data, RSize num, RBigSize prev_last_member_end) {
         using element_type = std::remove_extent_t<std::remove_pointer_t<T>>;
         if (num == 0) {
             t = nullptr;
@@ -146,7 +146,7 @@ struct PrivateHelper {
     }
 
     template <typename T>
-    static std::enable_if_t<std::is_class_v<T>, std::pair<RSize, RSize>> _copyMember(
+    static std::enable_if_t<std::is_class_v<T>, std::pair<RBigSize, RBigSize>> _copyMember(
         T &t,
         RS_ConstMemoryPtr old_data,
         RSize old_num,
@@ -155,8 +155,8 @@ struct PrivateHelper {
         RSize new_num,
         RSize new_offset,
         RSize copy_num,
-        RSize old_prev_last_member_end,
-        RSize new_prev_last_member_end
+        RBigSize old_prev_last_member_end,
+        RBigSize new_prev_last_member_end
     ) {
         return t._copyMember(
             old_data,
@@ -172,7 +172,7 @@ struct PrivateHelper {
     }
 
     template <typename T>
-    static std::enable_if_t<!std::is_class_v<T>, std::pair<RSize, RSize>> _copyMember(
+    static std::enable_if_t<!std::is_class_v<T>, std::pair<RBigSize, RBigSize>> _copyMember(
         T &t,
         RS_ConstMemoryPtr old_data,
         RSize old_num,
@@ -181,8 +181,8 @@ struct PrivateHelper {
         RSize new_num,
         RSize new_offset,
         RSize copy_num,
-        RSize old_prev_last_member_end,
-        RSize new_prev_last_member_end
+        RBigSize old_prev_last_member_end,
+        RBigSize new_prev_last_member_end
     ) {
         using element_type = std::remove_extent_t<std::remove_pointer_t<T>>;
         (new_data + new_prev_last_member_end + sizeof(element_type) * new_offset)
@@ -191,9 +191,9 @@ struct PrivateHelper {
                 sizeof(element_type) * copy_num,
                 false
             );
-        RSize o_p_e =
+        RBigSize o_p_e =
             RS_ALIGN(old_prev_last_member_end + sizeof(element_type) * old_num, SOA_ALIGN_SIZE);
-        RSize n_p_e =
+        RBigSize n_p_e =
             RS_ALIGN(new_prev_last_member_end + sizeof(element_type) * new_num, SOA_ALIGN_SIZE);
         return std::make_pair(o_p_e, n_p_e);
     }
@@ -205,7 +205,7 @@ struct PrivateHelper {
         RSize num,
         T2 &element,
         RIndex element_index,
-        const std::vector<RSize> &offsets,
+        const std::vector<RBigSize> &offsets,
         RIndex member_absolute_index
     ) {
         return t._transverseMemberElementGet(
@@ -220,7 +220,7 @@ struct PrivateHelper {
         RSize num,
         T2 &element,
         RIndex element_index,
-        const std::vector<RSize> &offsets,
+        const std::vector<RBigSize> &offsets,
         RIndex member_absolute_index
     ) {
         auto ptr = reinterpret_cast<T>((data + offsets[member_absolute_index]).ptr());
@@ -236,7 +236,7 @@ struct PrivateHelper {
         RSize num,
         T2 &element,
         RIndex element_index,
-        const std::vector<RSize> &offsets,
+        const std::vector<RBigSize> &offsets,
         RIndex member_absolute_index
     ) {
         return t._transverseMemberElementSet(
@@ -251,7 +251,7 @@ struct PrivateHelper {
         RSize num,
         T2 &element,
         RIndex element_index,
-        const std::vector<RSize> &offsets,
+        const std::vector<RBigSize> &offsets,
         RIndex member_absolute_index
     ) {
         auto ptr = reinterpret_cast<T>((data + offsets[member_absolute_index]).ptr());
@@ -515,7 +515,7 @@ class RS_StructOfArrays {
         if (new_size == elem_num) return;
 
         if (elem_num != 0 && new_size != 0 && copy) {
-            RSize required_bytes = _getRequiredBytes(new_size);
+            RBigSize required_bytes = _getRequiredBytes(new_size);
             auto new_data = data.provider()->allocate(required_bytes, false);
             _copyMember(data, elem_num, 0, new_data, new_size, 0, RS_MIN(elem_num, new_size));
             data.free(false);
@@ -526,7 +526,7 @@ class RS_StructOfArrays {
             RS_MemoryProvider *provider = data.provider();
             // Free old immediately to reduce memory footprint
             if (data != nullptr) data.free(false);
-            RSize required_bytes = _getRequiredBytes(new_size);
+            RBigSize required_bytes = _getRequiredBytes(new_size);
             data = provider->allocate(required_bytes, false);
             elem_num = new_size;
             _updateMember(data, new_size);
@@ -564,10 +564,10 @@ class RS_StructOfArrays {
         );
 
         if (num > 0) {
-            std::vector<RSize> offsets;
+            std::vector<RBigSize> offsets;
             _getOffsets(num, offsets);
-            RSize required_size = _getRequiredBytes(num);
-            auto tmp_data = new std::byte[required_size];
+            RBigSize required_size = _getRequiredBytes(num);
+            auto tmp_data = new RByte[required_size];
             for (RIndex i = 0; i < num; i++) {
                 _transverseMemberElementSet({tmp_data, required_size}, num, input, i, offsets);
             }
@@ -597,9 +597,9 @@ class RS_StructOfArrays {
             ));
         }
         if (num > 0) {
-            std::vector<RSize> offsets;
+            std::vector<RBigSize> offsets;
             _getOffsets(elem_num, offsets);
-            auto tmp_data = new std::byte[data.size()];
+            auto tmp_data = new RByte[data.size()];
             for (RIndex i = 0; i < num; i++) {
                 _transverseMemberElementSet(
                     {tmp_data, data.size()}, elem_num, input[i], i, offsets
@@ -629,10 +629,10 @@ class RS_StructOfArrays {
         );
 
         if (num > 0) {
-            std::vector<RSize> offsets;
+            std::vector<RBigSize> offsets;
             _getOffsets(num, offsets);
-            RSize required_size = _getRequiredBytes(num);
-            auto tmp_data = new std::byte[required_size];
+            RBigSize required_size = _getRequiredBytes(num);
+            auto tmp_data = new RByte[required_size];
             for (RIndex i = 0; i < num; i++) {
                 _transverseMemberElementSet({tmp_data, required_size}, num, input[i], i, offsets);
             }
@@ -666,9 +666,9 @@ class RS_StructOfArrays {
         );
 
         if (elem_num > 0) {
-            std::vector<RSize> offsets;
+            std::vector<RBigSize> offsets;
             _getOffsets(elem_num, offsets);
-            auto tmp_data = new std::byte[data.size()];
+            auto tmp_data = new RByte[data.size()];
             data.copyTo(RS_MemoryPtr(tmp_data, data.size()), data.size());
             for (RIndex i = 0; i < elem_num; i++) {
                 _transverseMemberElementGet(
@@ -696,10 +696,10 @@ class RS_StructOfArrays {
             num + offset <= elem_num, "num={}, offset={}, elem_num={}", num, offset, elem_num
         );
         if (num > 0) {
-            RSize required_size = _getRequiredBytes(num);
-            auto tmp_data = new std::byte[required_size];
+            RBigSize required_size = _getRequiredBytes(num);
+            auto tmp_data = new RByte[required_size];
             _copyMember(data, elem_num, offset, {tmp_data, required_size}, num, 0, num);
-            std::vector<RSize> offsets;
+            std::vector<RBigSize> offsets;
             _getOffsets(num, offsets);
             for (RIndex i = 0; i < num; i++) {
                 _transverseMemberElementGet({tmp_data, required_size}, num, output[i], i, offsets);
@@ -995,9 +995,9 @@ class RS_StructOfArrays {
 
     HOST_DEVICE_INLINE_QUALIFIER constexpr bool empty() const { return elem_num == 0; }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize baseBytes() const { return sizeof(*this); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const { return sizeof(*this); }
 
-    HOST_DEVICE_INLINE_QUALIFIER RSize extraBytes() const { return data.size(); }
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const { return data.size(); }
 
     template <typename Member>
     auto &operator[](Member) {
@@ -1014,8 +1014,8 @@ class RS_StructOfArrays {
      * @param prev_last_member_end The ending size of the previous member.
      * @return The ending size of the last member.
      */
-    RSize _getRequiredBytes(RSize num, RSize prev_last_member_end = 0) {
-        RSize last_member_end = prev_last_member_end;
+    RBigSize _getRequiredBytes(RSize num, RBigSize prev_last_member_end = 0) {
+        RBigSize last_member_end = prev_last_member_end;
         for_each(field_members{}, [&](auto member, RSize index) {
             constexpr auto i = refl::trait::index_of_v<decltype(member), field_members>;
             using type = soa_helper::custom_underlying_type<decltype(member)>;
@@ -1042,8 +1042,9 @@ class RS_StructOfArrays {
      * @param prev_last_member_end The ending size of the previous member.
      * @return The ending size of the last member.
      */
-    RSize _getOffsets(RSize num, std::vector<RSize> &offsets, RSize prev_last_member_end = 0) {
-        RSize last_member_end = prev_last_member_end;
+    RBigSize
+    _getOffsets(RSize num, std::vector<RBigSize> &offsets, RBigSize prev_last_member_end = 0) {
+        RBigSize last_member_end = prev_last_member_end;
         for_each(field_members{}, [&](auto member, RSize index) {
             constexpr auto i = refl::trait::index_of_v<decltype(member), field_members>;
             using type = soa_helper::custom_underlying_type<decltype(member)>;
@@ -1081,8 +1082,8 @@ class RS_StructOfArrays {
      * @param prev_last_member_end The total ending size up until the previous member.
      * @return The ending size of the current struct of array.
      */
-    RSize _updateMember(RS_MemoryPtr data, RSize num, RSize prev_last_member_end = 0) {
-        RSize last_member_end = prev_last_member_end;
+    RBigSize _updateMember(RS_MemoryPtr data, RSize num, RBigSize prev_last_member_end = 0) {
+        RBigSize last_member_end = prev_last_member_end;
         for_each(field_members{}, [&](auto member, RSize index) {
             constexpr auto i = refl::trait::index_of_v<decltype(member), field_members>;
             using type = soa_helper::custom_underlying_type<decltype(member)>;
@@ -1119,7 +1120,7 @@ class RS_StructOfArrays {
      * @return A pair of the ending size of the last member in the old storage root and the new
      * storage root.
      */
-    std::pair<RSize, RSize> _copyMember(
+    std::pair<RBigSize, RBigSize> _copyMember(
         RS_ConstMemoryPtr old_data,
         RSize old_num,
         RSize old_offset,
@@ -1127,11 +1128,11 @@ class RS_StructOfArrays {
         RSize new_num,
         RSize new_offset,
         RSize copy_num,
-        RSize old_prev_last_member_end = 0,
-        RSize new_prev_last_member_end = 0
+        RBigSize old_prev_last_member_end = 0,
+        RBigSize new_prev_last_member_end = 0
     ) {
-        RSize old_last_member_end = old_prev_last_member_end;
-        RSize new_last_member_end = new_prev_last_member_end;
+        RBigSize old_last_member_end = old_prev_last_member_end;
+        RBigSize new_last_member_end = new_prev_last_member_end;
         for_each(field_members{}, [&](auto member, RSize index) {
             constexpr auto i = refl::trait::index_of_v<decltype(member), field_members>;
             using type = soa_helper::custom_underlying_type<decltype(member)>;
@@ -1186,7 +1187,7 @@ class RS_StructOfArrays {
         RSize num,
         T2 &element,
         RIndex element_index,
-        const std::vector<RSize> &offsets,
+        const std::vector<RBigSize> &offsets,
         RIndex member_absolute_index = 0
     ) {
         for_each(field_members{}, [&](auto member, RSize index) {
@@ -1225,7 +1226,7 @@ class RS_StructOfArrays {
         RSize num,
         T2 &element,
         RIndex element_index,
-        const std::vector<RSize> &offsets,
+        const std::vector<RBigSize> &offsets,
         RIndex member_absolute_index = 0
     ) {
         for_each(field_members{}, [&](auto member, RSize index) {

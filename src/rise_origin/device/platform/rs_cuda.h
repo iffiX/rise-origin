@@ -12,10 +12,10 @@
 #include <unordered_map>
 
 #include "rise_origin/device/platform/rs_exec_trace.h"
+#include "rise_origin/utils/memory/rs_memory.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_env_var.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/memory/rs_memory.h"
 #include "rise_origin/utils/time/rs_timer.h"
 
 #define COLORCODE_RED "\033[0;31m"
@@ -599,7 +599,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
         device = {RSE_DEVICE_TYPE_UNKNOWN, RS_NULL_INDEX};
     }
 
-    RS_MemoryPtr allocate(size_t size, bool sync = true) override {
+    RS_MemoryPtr allocate(RBigSize size, bool sync = true) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CUDA provider is not initialized"));
 
         if (size == 0) return {nullptr, 0, 0, device, this};
@@ -637,7 +637,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
         return {ptr, size, 0, device, this};
     }
 
-    RS_MemoryPtr allocateHost(size_t size, bool sync = true) override {
+    RS_MemoryPtr allocateHost(RBigSize size, bool sync = true) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CUDA provider is not initialized"));
 
         if (size == 0) return {nullptr, 0, 0, {RSE_DEVICE_TYPE_CPU, 0}, this};
@@ -682,8 +682,8 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
     void set(
         const RS_MemoryPtr &ptr,
         int value,
-        size_t size,
-        size_t offset = 0,
+        RBigSize size,
+        RBigSize offset = 0,
         bool sync = true
     ) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CUDA provider is not initialized"));
@@ -715,7 +715,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
     void copy(
         const RS_MemoryPtr &dst,
         const RS_ConstMemoryPtr &src,
-        size_t size,
+        RBigSize size,
         bool sync = true,
         bool ordered = true
     ) override {
@@ -920,10 +920,11 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
 
         std::lock_guard<std::recursive_mutex> lock(*mutex.get());
 
-        config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE
-                                ? (device.type == RSE_DEVICE_TYPE_CUDA ? RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE
-                                                                       : RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE)
-                                : config.block_size;
+        config.block_size =
+            config.block_size == RS_AUTO_BLOCK_SIZE
+                ? (device.type == RSE_DEVICE_TYPE_CUDA ? RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE
+                                                       : RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE)
+                : config.block_size;
         config.shared_mem_size = config.shared_mem_size == 0
                                      ? ComputeFunction::sharedMemLayoutSize() * config.block_size
                                      : config.shared_mem_size;
