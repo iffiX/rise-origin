@@ -34,6 +34,7 @@
 #include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/data/rs_any.h"
 #include "rise_origin/utils/rs_def.h"
+#include "rise_origin/utils/rs_logging.h"
 #include "rise_origin/utils/memory/rs_memory.h"
 #include "rs_kernel.h"
 

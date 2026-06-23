@@ -35,10 +35,9 @@ from rise_origin import (
     RSE_StructureVoxelRecordVoxelRange,
 )
 
-from rise_origin.rsc._utils import Quat3rf, Vec3rf, _fill, _quat3rf, _vec3rf
+from rise_origin.rsc._utils import Quat3rf, Vec3rf
 
 __all__ = [
-    "BodyRef",
     "VoxelSizeSpec",
     "StructureVoxelBody",
     "StructureVoxelConstraint",
@@ -46,12 +45,6 @@ __all__ = [
     "StructureVoxelSignal",
     "StructureVoxel",
 ]
-
-#: A reference to one rigid segment of a body, used by constraint endpoints and
-#: camera / region links: a :class:`StructureVoxelBody` (its segment 0), or a
-#: ``(body, segment_bid)`` tuple to pick a non-default segment. Resolved to ids
-#: by identity at structure assembly, so no manual id bookkeeping is needed.
-BodyRef = Union["StructureVoxelBody", Tuple["StructureVoxelBody", int]]
 
 #: Per-body voxel resolution for a multi-body importer: one ``float`` applied to
 #: every body, or a ``dict`` mapping each source part name to its voxel edge
@@ -154,17 +147,17 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         voxel_size: float = 0.0,
     ) -> None:
         super().__init__()
-        self.relative_origin_position = _vec3rf(relative_origin_position)
-        self.relative_orientation = _quat3rf(relative_orientation)
+        self.relative_origin_position = relative_origin_position
+        self.relative_orientation = relative_orientation
         self.x_voxels = x_voxels
         self.y_voxels = y_voxels
         self.z_voxels = z_voxels
-        _fill(self.material_reference_sid, material_reference_sid)
-        _fill(self.segment_bid, segment_bid)
-        _fill(self.expansion_signal_sid, expansion_signal_sid)
+        self.material_reference_sid = material_reference_sid
+        self.segment_bid = segment_bid
+        self.expansion_signal_sid = expansion_signal_sid
         if expansion_control_mode:
-            self.expansion_control_mode = list(expansion_control_mode)
-        _fill(self.link, link)
+            self.expansion_control_mode = expansion_control_mode
+        self.link = link
         self.voxel_size = voxel_size
 
     @classmethod
@@ -358,7 +351,6 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             A populated :class:`StructureVoxelBody`.
         """
         occ = np.asarray(occupancy, dtype=bool)
-        nx, ny, nz = occ.shape
         mats = (
             np.asarray(material_grid)
             if material_grid is not None
@@ -369,19 +361,44 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             if segment_grid is not None
             else np.where(occ, segment_sid, RS_NULL_INDEX)
         )
-        expansion = (
-            cls._flatten(np.asarray(expansion_signal_grid)).tolist()
+        exp = (
+            np.asarray(expansion_signal_grid)
             if expansion_signal_grid is not None
-            else ()
+            else None
         )
+
+        # Trim empty borders: crop to the tight box of voxels that carry data so
+        # the dense arrays do not store the surrounding empty space, then shift
+        # the origin so the kept voxels stay in the same place.
+        present = occ | (mats != RS_NULL_INDEX) | (segs != RS_NULL_INDEX)
+        if present.any():
+            present_x, present_y, present_z = np.nonzero(present)
+            x0, y0, z0 = int(present_x.min()), int(present_y.min()), int(present_z.min())
+            x1 = int(present_x.max()) + 1
+            y1 = int(present_y.max()) + 1
+            z1 = int(present_z.max()) + 1
+            box = (slice(x0, x1), slice(y0, y1), slice(z0, z1))
+            mats = mats[box]
+            segs = segs[box]
+            if exp is not None:
+                exp = exp[box]
+            shift = cls._rotate_vector(
+                relative_orientation,
+                (x0 * voxel_size, y0 * voxel_size, z0 * voxel_size),
+            )
+            base = np.asarray(relative_origin_position, dtype=np.float64) + shift
+            relative_origin_position = (float(base[0]), float(base[1]), float(base[2]))
+
+        nx, ny, nz = mats.shape
+        expansion = cls._flatten(exp) if exp is not None else ()
         return cls(
             relative_origin_position=relative_origin_position,
             relative_orientation=relative_orientation,
             x_voxels=int(nx),
             y_voxels=int(ny),
             z_voxels=int(nz),
-            material_reference_sid=cls._flatten(mats).tolist(),
-            segment_bid=cls._flatten(segs).tolist(),
+            material_reference_sid=cls._flatten(mats),
+            segment_bid=cls._flatten(segs),
             expansion_signal_sid=expansion,
             voxel_size=voxel_size,
         )
@@ -483,6 +500,15 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         return np.asarray(grid).transpose(order).ravel(order="C")
 
     @staticmethod
+    def _rotate_vector(orientation, vector) -> np.ndarray:
+        """Rotate a 3-vector by a quaternion given as (x, y, z, w)."""
+        quat = np.asarray(orientation, dtype=np.float64)
+        vec = np.asarray(vector, dtype=np.float64)
+        q_vec, q_w = quat[:3], quat[3]
+        crossed = 2.0 * np.cross(q_vec, vec)
+        return vec + q_w * crossed + np.cross(q_vec, crossed)
+
+    @staticmethod
     def _make_sphere_mask(radius: int) -> np.ndarray:
         """Solid-sphere occupancy of the given voxel radius, shape (2r, 2r, 2r)."""
         n = 2 * radius
@@ -528,24 +554,6 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         axial_excess = np.clip(np.abs(ga) - half, 0.0, None)
         return (gp * gp + gq * gq + axial_excess * axial_excess) <= float(radius) ** 2
 
-    @staticmethod
-    def _resolve_body_link(attached_to: "BodyRef") -> Tuple[str, int, int]:
-        """Resolve a body ref into ``(structure_name, body_sid, segment_bid)``.
-
-        The body must already be added to a :class:`StructureVoxel` (which stamps
-        it with its structure name and body id); cameras and rigid-body-linked
-        regions read those stamps to wire themselves without id bookkeeping.
-        """
-        body, segment_bid = (
-            attached_to if isinstance(attached_to, tuple) else (attached_to, 0)
-        )
-        try:
-            return body._structure_name, body._body_sid, segment_bid
-        except AttributeError as error:
-            raise ValueError(
-                "attached_to body must be added to a StructureVoxel before linking"
-            ) from error
-
 
 class StructureVoxelConstraint(RSC_StructureVoxelConstraint):
     """A joint between two rigid segments of a structure.
@@ -553,24 +561,17 @@ class StructureVoxelConstraint(RSC_StructureVoxelConstraint):
     ``type`` selects the joint kind; only the matching field group (hinge or
     prismatic) is meaningful for the actuated joints.
 
-    The two segments can be addressed two ways. Pass ``a`` / ``b`` as the
-    :class:`StructureVoxelBody` objects themselves (or ``(body, segment_bid)``
-    tuples) and the owning :class:`StructureVoxel` resolves them to ids by
-    identity at assembly -- no manual id bookkeeping. Or set the
-    ``a_body_sid`` / ``a_segment_bid`` / ``b_body_sid`` / ``b_segment_bid``
-    integers directly. Object refs, when given, win.
+    The two segments are addressed by their integer ids within the owning
+    structure: ``a_body_sid`` / ``a_segment_bid`` and ``b_body_sid`` /
+    ``b_segment_bid``.
 
     Args:
         type: Joint type (``RSE_StructureVoxelConstraintType``).
         is_collision_enabled: Whether the two joined bodies are allowed to
             collide with each other. Defaults to ``False``.
-        a: First segment as a body object or ``(body, segment_bid)`` tuple;
-            resolved at structure assembly. ``None`` uses the ``a_*`` integers.
-        b: Second segment as a body object or ``(body, segment_bid)`` tuple;
-            resolved at structure assembly. ``None`` uses the ``b_*`` integers.
-        a_body_sid: Body id of the first segment (ignored when ``a`` is given).
+        a_body_sid: Structure-scope id of the first body.
         a_segment_bid: Segment id within the first body.
-        b_body_sid: Body id of the second segment (ignored when ``b`` is given).
+        b_body_sid: Structure-scope id of the second body.
         b_segment_bid: Segment id within the second body.
         relative_anchor: Joint anchor in structure-local coordinates,
             ``(x, y, z)`` in meters.
@@ -603,8 +604,6 @@ class StructureVoxelConstraint(RSC_StructureVoxelConstraint):
         type: int,
         *,
         is_collision_enabled: bool = False,
-        a: Optional[BodyRef] = None,
-        b: Optional[BodyRef] = None,
         a_body_sid: int = RS_NULL_INDEX,
         a_segment_bid: int = RS_NULL_INDEX,
         b_body_sid: int = RS_NULL_INDEX,
@@ -636,16 +635,13 @@ class StructureVoxelConstraint(RSC_StructureVoxelConstraint):
         super().__init__()
         self.type = type
         self.is_collision_enabled = is_collision_enabled
-        # Pending body-object endpoints; StructureVoxel resolves them by identity.
-        self._a_ref = a
-        self._b_ref = b
         self.a_body_sid = a_body_sid
         self.a_segment_bid = a_segment_bid
         self.b_body_sid = b_body_sid
         self.b_segment_bid = b_segment_bid
-        self.relative_anchor = _vec3rf(relative_anchor)
+        self.relative_anchor = relative_anchor
         self.hinge_control_mode = hinge_control_mode
-        self.hinge_relative_axis = _vec3rf(hinge_relative_axis)
+        self.hinge_relative_axis = hinge_relative_axis
         self.hinge_min = hinge_min
         self.hinge_max = hinge_max
         self.hinge_position_control_kp = hinge_position_control_kp
@@ -654,7 +650,7 @@ class StructureVoxelConstraint(RSC_StructureVoxelConstraint):
         self.hinge_max_torque = hinge_max_torque
         self.hinge_signal_sid = hinge_signal_sid
         self.prismatic_control_mode = prismatic_control_mode
-        self.prismatic_relative_axis = _vec3rf(prismatic_relative_axis)
+        self.prismatic_relative_axis = prismatic_relative_axis
         self.prismatic_min = prismatic_min
         self.prismatic_max = prismatic_max
         self.prismatic_position_control_kp = prismatic_position_control_kp
@@ -799,33 +795,12 @@ class StructureVoxel(RSC_StructureVoxel):
     ) -> None:
         super().__init__()
         self.name = name
-        self.origin_position = _vec3rf(origin_position)
-        self.orientation = _quat3rf(orientation)
-        _fill(self.material_references, material_references)
+        self.origin_position = origin_position
+        self.orientation = orientation
+        self.material_references.extend(material_references)
         self.is_fixed = is_fixed
-
-        # Stamp each body with its assembly id so object refs (constraint
-        # endpoints, camera/region links) resolve by identity.
-        bodies = list(bodies)
-        index = {id(body): i for i, body in enumerate(bodies)}
-        for i, body in enumerate(bodies):
-            body._body_sid = i
-            body._structure_name = name
-
-        # Resolve constraint endpoints given as body objects into ids.
-        constraints = list(constraints)
-        for constraint in constraints:
-            if getattr(constraint, "_a_ref", None) is not None:
-                constraint.a_body_sid, constraint.a_segment_bid = (
-                    self._resolve_endpoint(constraint._a_ref, index)
-                )
-            if getattr(constraint, "_b_ref", None) is not None:
-                constraint.b_body_sid, constraint.b_segment_bid = (
-                    self._resolve_endpoint(constraint._b_ref, index)
-                )
-
-        _fill(self.bodies, bodies)
-        _fill(self.constraints, constraints)
+        self.bodies = list(bodies)
+        self.constraints = list(constraints)
         if record is not None:
             self.record = record
         if signal is not None:
@@ -1067,8 +1042,10 @@ class StructureVoxel(RSC_StructureVoxel):
                 constraints.append(
                     StructureVoxelConstraint(
                         constraint_type,
-                        a=parent_body,
-                        b=child_body,
+                        a_body_sid=bodies.index(parent_body),
+                        a_segment_bid=0,
+                        b_body_sid=bodies.index(child_body),
+                        b_segment_bid=0,
                         relative_anchor=anchor,
                         hinge_relative_axis=axis,
                         hinge_min=lower,
@@ -1089,8 +1066,10 @@ class StructureVoxel(RSC_StructureVoxel):
                 constraints.append(
                     StructureVoxelConstraint(
                         constraint_type,
-                        a=parent_body,
-                        b=child_body,
+                        a_body_sid=bodies.index(parent_body),
+                        a_segment_bid=0,
+                        b_body_sid=bodies.index(child_body),
+                        b_segment_bid=0,
                         relative_anchor=anchor,
                         prismatic_relative_axis=axis,
                         prismatic_min=lower,
@@ -1103,8 +1082,10 @@ class StructureVoxel(RSC_StructureVoxel):
                 constraints.append(
                     StructureVoxelConstraint(
                         constraint_type,
-                        a=parent_body,
-                        b=child_body,
+                        a_body_sid=bodies.index(parent_body),
+                        a_segment_bid=0,
+                        b_body_sid=bodies.index(child_body),
+                        b_segment_bid=0,
                         relative_anchor=anchor,
                     )
                 )
@@ -1279,8 +1260,10 @@ class StructureVoxel(RSC_StructureVoxel):
                 constraints.append(
                     StructureVoxelConstraint(
                         fixed_type,
-                        a=parent_body,
-                        b=child_body,
+                        a_body_sid=bodies.index(parent_body),
+                        a_segment_bid=0,
+                        b_body_sid=bodies.index(child_body),
+                        b_segment_bid=0,
                         relative_anchor=tuple(float(v) for v in data.xpos[child_id]),
                     )
                 )
@@ -1303,8 +1286,10 @@ class StructureVoxel(RSC_StructureVoxel):
                 constraints.append(
                     StructureVoxelConstraint(
                         hinge_type,
-                        a=parent_body,
-                        b=child_body,
+                        a_body_sid=bodies.index(parent_body),
+                        a_segment_bid=0,
+                        b_body_sid=bodies.index(child_body),
+                        b_segment_bid=0,
                         relative_anchor=anchor,
                         hinge_relative_axis=axis,
                         hinge_min=lower if limited else -math.pi,
@@ -1317,8 +1302,10 @@ class StructureVoxel(RSC_StructureVoxel):
                 constraints.append(
                     StructureVoxelConstraint(
                         prismatic_type,
-                        a=parent_body,
-                        b=child_body,
+                        a_body_sid=bodies.index(parent_body),
+                        a_segment_bid=0,
+                        b_body_sid=bodies.index(child_body),
+                        b_segment_bid=0,
                         relative_anchor=anchor,
                         prismatic_relative_axis=axis,
                         prismatic_min=lower if limited else -1.0,
@@ -1331,8 +1318,10 @@ class StructureVoxel(RSC_StructureVoxel):
                 constraints.append(
                     StructureVoxelConstraint(
                         ball_type,
-                        a=parent_body,
-                        b=child_body,
+                        a_body_sid=bodies.index(parent_body),
+                        a_segment_bid=0,
+                        b_body_sid=bodies.index(child_body),
+                        b_segment_bid=0,
                         relative_anchor=anchor,
                     )
                 )
@@ -1526,17 +1515,6 @@ class StructureVoxel(RSC_StructureVoxel):
                 return size, voxels
             cursor += 12 + content_len  # descend into chunk children, which follow
         raise ValueError(f"{path!r} contains no voxel data")
-
-    @staticmethod
-    def _resolve_endpoint(ref: BodyRef, index: dict) -> Tuple[int, int]:
-        """Resolve a constraint endpoint body ref to ``(body_sid, segment_bid)``."""
-        body, segment_bid = ref if isinstance(ref, tuple) else (ref, 0)
-        body_sid = index.get(id(body))
-        if body_sid is None:
-            raise ValueError(
-                "constraint endpoint references a body not in this structure's bodies"
-            )
-        return body_sid, segment_bid
 
     @staticmethod
     def _resolve_size(voxel_size: VoxelSizeSpec, name: str) -> float:

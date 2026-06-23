@@ -7,8 +7,8 @@
 #include <string>
 
 #include "rise_origin/rsc/rsc_base.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rsc_essence_base.h"
 
 namespace rise {
@@ -42,8 +42,9 @@ class RSC_MaterialPairPropertyBase : public RSC_EssenceBase {
     }
 
    protected:
-    void _validate() const override {}
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override {}
+    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
+    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
 };
 
 /**
@@ -67,8 +68,10 @@ class RSC_MaterialPairPropertyCoulombFriction : public RSC_MaterialPairPropertyB
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -88,8 +91,10 @@ class RSC_MaterialPairPropertyRestitution : public RSC_MaterialPairPropertyBase 
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 using RSC_MaterialPairPropertyVariant =

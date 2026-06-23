@@ -141,8 +141,10 @@ def build():
         constraints.append(
             rsc.entity.StructureVoxelConstraint(
                 RSE_StructureVoxelConstraintType.RSE_STRUCTURE_VOXEL_FIXED_JOINT,
-                a=(body, TORSO_SEG),
-                b=(body, upper),
+                a_body_sid=0,
+                a_segment_bid=TORSO_SEG,
+                b_body_sid=0,
+                b_segment_bid=upper,
                 relative_anchor=hip,
             )
         )
@@ -150,8 +152,10 @@ def build():
         constraints.append(
             rsc.entity.StructureVoxelConstraint(
                 RSE_StructureVoxelConstraintType.RSE_STRUCTURE_VOXEL_HINGE_JOINT,
-                a=(body, upper),
-                b=(body, lower),
+                a_body_sid=0,
+                a_segment_bid=upper,
+                b_body_sid=0,
+                b_segment_bid=lower,
                 relative_anchor=knee,
                 hinge_relative_axis=(0, 1, 0),
                 hinge_min=-2.0,

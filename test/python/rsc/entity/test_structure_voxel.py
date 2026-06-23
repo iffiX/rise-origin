@@ -49,34 +49,41 @@ def test_body_from_sdf_torus_is_nonempty():
     assert any(m != rs.RS_NULL_INDEX for m in body.material_reference_sid)
 
 
-def test_constraint_body_refs_resolve_by_identity():
+def test_body_from_grid_trims_empty_borders():
+    occ = np.zeros((5, 6, 7), dtype=bool)
+    occ[2, 3, 4] = True  # one voxel inside a larger empty grid
+    body = StructureVoxelBody.from_grid(
+        occ, material_sid=9, voxel_size=VS, relative_origin_position=(1.0, 2.0, 3.0)
+    )
+    # The dense lattice shrinks to just the occupied voxel and keeps its material.
+    assert (body.x_voxels, body.y_voxels, body.z_voxels) == (1, 1, 1)
+    assert list(body.material_reference_sid) == [9]
+    # The origin shifts by the trimmed border so the voxel keeps its world place.
+    origin = body.relative_origin_position
+    assert origin.x == pytest.approx(1.0 + 2 * VS)
+    assert origin.y == pytest.approx(2.0 + 3 * VS)
+    assert origin.z == pytest.approx(3.0 + 4 * VS)
+
+
+def test_constraint_ids_stored_in_structure():
     torso = StructureVoxelBody.box(6, 4, 3, voxel_size=VS)
     leg = StructureVoxelBody.cylinder(2, 6, voxel_size=VS)
-    hip = StructureVoxelConstraint(HINGE, a=torso, b=leg)
+    hip = StructureVoxelConstraint(HINGE, a_body_sid=0, b_body_sid=1)
     structure = StructureVoxel("dog", bodies=[torso, leg], constraints=[hip])
     assert structure.constraints[0].a_body_sid == 0
     assert structure.constraints[0].b_body_sid == 1
-    assert torso._body_sid == 0
-    assert torso._structure_name == "dog"
 
 
-def test_constraint_segment_tuple_ref():
-    first = StructureVoxelBody.box(2, 2, 2, voxel_size=VS)
-    second = StructureVoxelBody.box(2, 2, 2, voxel_size=VS)
-    joint = StructureVoxelConstraint(HINGE, a=(first, 0), b=(second, 1))
-    structure = StructureVoxel("s", bodies=[first, second], constraints=[joint])
-    assert structure.constraints[0].b_segment_bid == 1
+def test_constraint_segment_ids():
+    joint = StructureVoxelConstraint(
+        HINGE, a_body_sid=0, a_segment_bid=0, b_body_sid=1, b_segment_bid=1
+    )
+    assert joint.b_segment_bid == 1
 
 
 def test_constraint_explicit_int_ids():
     joint = StructureVoxelConstraint(HINGE, a_body_sid=0, b_body_sid=2)
     assert joint.a_body_sid == 0 and joint.b_body_sid == 2
-
-
-def test_unattached_body_link_raises():
-    body = StructureVoxelBody.box(2, 2, 2, voxel_size=VS)
-    with pytest.raises(ValueError):
-        CameraPerspectiveRigidBodyLinked("eye", attached_to=body)
 
 
 def test_resolve_size_scalar_dict_and_missing():

@@ -5,7 +5,6 @@
 import pickle
 
 import rise_origin as rs
-from rise_origin.rsc.entity import StructureVoxel, StructureVoxelBody
 from rise_origin.rsc.record import (
     IntersectRegionCuboid,
     IntersectRegionCuboidRigidBodyLinked,
@@ -32,11 +31,9 @@ def test_sphere_fields():
     assert region.position.z == 1.0
 
 
-def test_rb_linked_attached_to_resolves():
-    body = StructureVoxelBody.box(2, 2, 2, voxel_size=0.02)
-    StructureVoxel("dog", bodies=[body])
+def test_rb_linked_explicit_target():
     region = IntersectRegionCuboidRigidBodyLinked(
-        "z", attached_to=body, size=(0.1, 0.1, 0.1)
+        "z", structure_name="dog", body_sid=0, size=(0.1, 0.1, 0.1)
     )
     assert region.structure_name == "dog"
     assert region.body_sid == 0

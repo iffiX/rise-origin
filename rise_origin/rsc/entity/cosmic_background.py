@@ -13,7 +13,7 @@ from rise_origin import (
     RSC_CosmicBackgroundUniform,
 )
 
-from rise_origin.rsc._utils import Color3b, Vec3rf, _color3b, _vec3rf
+from rise_origin.rsc._utils import Color3b, Vec3rf
 
 __all__ = [
     "CosmicBackgroundUniform",
@@ -76,10 +76,10 @@ class CosmicBackgroundGradient(RSC_CosmicBackgroundGradient):
     ) -> None:
         super().__init__()
         self.name = name
-        self.zenith_color = _color3b(zenith_color)
-        self.horizon_color = _color3b(horizon_color)
-        self.sun_direction = _vec3rf(sun_direction)
-        self.sun_color = _color3b(sun_color)
+        self.zenith_color = zenith_color
+        self.horizon_color = horizon_color
+        self.sun_direction = sun_direction
+        self.sun_color = sun_color
         self.sun_angular_radius = sun_angular_radius
 
 
@@ -109,9 +109,9 @@ class CosmicBackgroundHosekWilkie(RSC_CosmicBackgroundHosekWilkie):
     ) -> None:
         super().__init__()
         self.name = name
-        self.sun_direction = _vec3rf(sun_direction)
-        self.sun_color = _color3b(sun_color)
+        self.sun_direction = sun_direction
+        self.sun_color = sun_color
         self.sun_angular_radius = sun_angular_radius
         self.turbidity = turbidity
-        self.ground_color = _color3b(ground_color)
+        self.ground_color = ground_color
         self.intensity = intensity

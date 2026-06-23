@@ -10,7 +10,7 @@ targeted structure region or rigid body.
 
 from rise_origin import RS_NULL_INDEX, RSC_Force, RSC_Torque
 
-from rise_origin.rsc._utils import Bound3ri, _bound3ri
+from rise_origin.rsc._utils import Bound3ri
 
 __all__ = ["Force", "Torque"]
 
@@ -47,7 +47,7 @@ class Force(RSC_Force):
         self.source_controller_name = source_controller_name
         self.structure_name = structure_name
         if voxel_range is not None:
-            self.voxel_range = _bound3ri(voxel_range)
+            self.voxel_range = voxel_range
         self.body_sid = body_sid
         self.segment_bid = segment_bid
 

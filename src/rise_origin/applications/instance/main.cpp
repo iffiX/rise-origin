@@ -65,10 +65,6 @@ int main(int argc, char **argv) {
         cerr << "Error: input directory not found\n";
         return 1;
     }
-    if (!fs::is_regular_file(input / "env.rsc")) {
-        cerr << "Error: env.rsc not found in input directory\n";
-        return 1;
-    }
 
     // Parse device
     RS_DeviceLocation device;
@@ -85,20 +81,17 @@ int main(int argc, char **argv) {
 
     RiseOrigin rise(device);
 
-    // Load first robot config
-    string env_config = (input / "env.rsc").string();
-    string robot_config;
-
+    // Load rsc files
+    vector<string> rsc_files;
     for (auto &file : fs::directory_iterator(input)) {
-        if (boost::algorithm::to_lower_copy(file.path().extension().string()) == ".rsc" &&
-            boost::algorithm::to_lower_copy(file.path().filename().string()) != "env.rsc") {
-            robot_config = file.path().string();
-            break;
+        auto extension = boost::algorithm::to_lower_copy(file.path().extension().string());
+        if (extension == ".rsct" || extension == ".rscb") {
+            rsc_files.push_back(file.path().string());
         }
     }
 
-    if (robot_config.empty()) {
-        cerr << "Error: no robot.rsc file found in input directory\n";
+    if (rsc_files.empty()) {
+        cerr << "Error: no .rsct or .rscb files found in input directory\n";
         return 1;
     }
 
@@ -106,11 +99,11 @@ int main(int argc, char **argv) {
     std::cout << "Loading world...";
     RS_Timer timer;
     rsc::RSC_World world;
-    world.open({env_config, robot_config}, true);
+    world.assembleFrom(rsc_files);
     std::cout << "loaded in: " << timer.elapsedTimeString() << std::endl;
 
     // CLI flags override the world's simulation settings.
-    auto &runtime = world.simulation.runtime;
+    auto &runtime = world.simulation->runtime;
     runtime.record_buffer_size = vm["record_size"].as<int>();
     runtime.max_time = vm["max_time"].as<double>();
     runtime.is_save_record = static_cast<bool>(vm["save_record"].as<int>());

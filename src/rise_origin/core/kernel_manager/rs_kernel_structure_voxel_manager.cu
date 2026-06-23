@@ -39,14 +39,14 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
 )
     : _kernel_manager(kernel_manager), _rsc(structure_rsc) {
     // Reject a structure whose bounding box leaves the world before doing any expensive work.
-    RBound3f world_bound = _computeWorldBound(structure_rsc);
+    RBound3f world_bound = _computeWorldBound(_structure());
     RFloat range = RFLOAT(RS_WORLD_MAX_RANGE);
     RBound3f world_range(-range, -range, -range, range, range, range);
     if (world_bound.isValid() && !world_range.isContaining(world_bound)) {
         RS_THROW(RS_InvalidCharacterizationException(
             "Structure \"{}\" bounding box [({}, {}, {}), ({}, {}, {})] exceeds the world range of "
             "+/-{} m in at least one axis",
-            structure_rsc.name,
+            _structure().name,
             world_bound.min_x,
             world_bound.min_y,
             world_bound.min_z,
@@ -58,12 +58,12 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     }
 
     _entity_registration =
-        RS_KernelGidRegistration(_kernel_manager, RSE_KERNEL_GID_ENTITY, structure_rsc.name);
+        RS_KernelGidRegistration(_kernel_manager, RSE_KERNEL_GID_ENTITY, _structure().name);
     _record_registration = RS_KernelGidRegistration(
-        _kernel_manager, RSE_KERNEL_GID_RECORD, structure_rsc.name + ":record"
+        _kernel_manager, RSE_KERNEL_GID_RECORD, _structure().name + ":record"
     );
     _signal_registration = RS_KernelGidRegistration(
-        _kernel_manager, RSE_KERNEL_GID_SIGNAL, structure_rsc.name + ":signal"
+        _kernel_manager, RSE_KERNEL_GID_SIGNAL, _structure().name + ":signal"
     );
     _structure_gid = _entity_registration.gid();
     _record_gid = _record_registration.gid();
@@ -74,24 +74,24 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
 
     RS_Timer timer;
 
-    _is_constrained = !_rsc.is_fixed && !structure_rsc.constraints.empty();
+    _is_constrained = !_structure().is_fixed && !_structure().constraints.empty();
 
     _resolveMaterials();
 
-    for (auto &body_rsc : structure_rsc.bodies) {
+    for (auto &body_rsc : _structure().bodies) {
         _addBody(body_rsc);
     }
     RS_LOG(
         _kernel_manager->getLogger(),
         debug,
         "Structure {} build body time: {}",
-        structure_rsc.name,
+        _structure().name,
         timer.elapsedTimeString()
     );
     timer.reset();
 
-    if (!_rsc.is_fixed) {
-        for (auto &constraint_rsc : structure_rsc.constraints) {
+    if (!_structure().is_fixed) {
+        for (auto &constraint_rsc : _structure().constraints) {
             _addConstraint(constraint_rsc);
         }
 
@@ -99,14 +99,14 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     }
     _addMaterials();
 
-    if (!_rsc.is_fixed) {
+    if (!_structure().is_fixed) {
         _colorConstraintJoints();
     }
     RS_LOG(
         _kernel_manager->getLogger(),
         debug,
         "Structure {} build constraint, material and optimize time: {}",
-        structure_rsc.name,
+        _structure().name,
         timer.elapsedTimeString()
     );
 
@@ -118,7 +118,7 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
         _kernel_manager->getLogger(),
         debug,
         "Structure {} has voxel: {} link: {} rigid body: {} rigid body surface voxel: {} joint: {}",
-        structure_rsc.name,
+        _structure().name,
         _voxel_num,
         _link_num,
         _rigid_body_num,
@@ -143,7 +143,7 @@ void RS_KernelStructureVoxelManager::commit() {
         _kernel_manager->getLogger(),
         debug,
         "Structure {} init kernel data time: {}",
-        _rsc.name,
+        _structure().name,
         timer.elapsedTimeString()
     );
 }
@@ -161,7 +161,7 @@ void RS_KernelStructureVoxelManager::decommit() {
 
 void RS_KernelStructureVoxelManager::freeze() {
     // A permanently fixed structure has no dynamic voxels and no active compute layouts to pause.
-    if (_rsc.is_fixed || _is_frozen) return;
+    if (_structure().is_fixed || _is_frozen) return;
     _kernel_manager->enterKernelDataCriticalZone();
     _freezeKernelData(true);
     _kernel_manager->exitKernelDataCriticalZone();
@@ -169,7 +169,7 @@ void RS_KernelStructureVoxelManager::freeze() {
 }
 
 void RS_KernelStructureVoxelManager::unfreeze() {
-    if (_rsc.is_fixed || !_is_frozen) return;
+    if (_structure().is_fixed || !_is_frozen) return;
     _kernel_manager->enterKernelDataCriticalZone();
     _freezeKernelData(false);
     _kernel_manager->exitKernelDataCriticalZone();
@@ -183,7 +183,7 @@ void RS_KernelStructureVoxelManager::reference() { _use_count += 1; }
 void RS_KernelStructureVoxelManager::dereference() {
     if (_use_count == 0) {
         RS_THROW(RS_HostExecutionException(
-            "Structure '{}' use_count underflow on dereference", _rsc.name
+            "Structure '{}' use_count underflow on dereference", _structure().name
         ));
     }
     _use_count -= 1;
@@ -218,9 +218,9 @@ std::vector<RS_WorldStructureVoxelRecord> RS_KernelStructureVoxelManager::getRec
 }
 
 bool RS_KernelStructureVoxelManager::hasControllerSignal() {
-    return !_rsc.is_fixed &&
-           (_rsc.signal.expansion_signal_num > 0 || _rsc.signal.hinge_signal_num > 0 ||
-            _rsc.signal.prismatic_signal_num > 0);
+    return !_structure().is_fixed && (_structure().signal->expansion_signal_num > 0 ||
+                                      _structure().signal->hinge_signal_num > 0 ||
+                                      _structure().signal->prismatic_signal_num > 0);
 }
 
 void RS_KernelStructureVoxelManager::syncControllerSignal() {
@@ -278,22 +278,26 @@ const unordered_set<RIndex> &RS_KernelStructureVoxelManager::getDependentMateria
     return _dependent_material_gid_set;
 }
 
-std::string RS_KernelStructureVoxelManager::getEntityName() const { return _rsc.name; }
+std::string RS_KernelStructureVoxelManager::getEntityName() const { return _structure().name; }
 
-std::string RS_KernelStructureVoxelManager::getRecordName() const { return _rsc.record.name; }
+std::string RS_KernelStructureVoxelManager::getRecordName() const {
+    return _structure().record->name;
+}
 
-std::string RS_KernelStructureVoxelManager::getSignalName() const { return _rsc.signal.name; }
+std::string RS_KernelStructureVoxelManager::getSignalName() const {
+    return _structure().signal->name;
+}
 
 std::string RS_KernelStructureVoxelManager::getRecordControllerName() const {
-    return _rsc.record.target_controller_reference;
+    return _structure().record->target_controller_reference;
 }
 
 std::string RS_KernelStructureVoxelManager::getRecordRecorderName() const {
-    return _rsc.record.target_recorder_reference;
+    return _structure().record->target_recorder_reference;
 }
 
 std::string RS_KernelStructureVoxelManager::getSignalControllerName() const {
-    return _rsc.signal.source_controller_name;
+    return _structure().signal->source_controller_name;
 }
 
 RIndex RS_KernelStructureVoxelManager::getEntityGid() const { return _structure_gid; }
@@ -345,7 +349,7 @@ RVec3rf RS_KernelStructureVoxelManager::getRigidBodyPositionFromRelativeAnchor(
 ) const {
     if (rigid_body_sid >= _rigid_body_num)
         RS_THROW(RS_InvalidArgumentException("Invalid rigid body sid {}", rigid_body_sid));
-    auto &body_rsc = _rsc.bodies[body_sid];
+    auto &body_rsc = _structure().bodies[body_sid];
     auto relative_diff = relative_anchor - body_rsc.relative_origin_position;
     auto body_local_anchor = body_rsc.relative_orientation.inverse().rotateVec3D(relative_diff);
     auto result = body_local_anchor - _rigid_bodies[rigid_body_sid].origin_b_position;
@@ -363,7 +367,7 @@ RS_KernelStructureVoxelManager::getSegmentPhysicalType(RIndex body_sid, RIndex s
             "Segment with body_sid {} and segment_bid {} not found in structure {}",
             body_sid,
             segment_bid,
-            _rsc.name
+            _structure().name
         ));
     }
 }
@@ -403,9 +407,9 @@ void RS_KernelStructureVoxelManager::_resolveMaterials() {
     // Resolve each material reference once into _mat_resolved_data, indexed by material_sid (the
     // structure's material reference index). A reference is acquired on the first occurrence of
     // each gid so the material cannot be removed while this structure is alive.
-    _mat_resolved_data.resize(_rsc.material_references.size());
+    _mat_resolved_data.resize(_structure().material_references.size());
 
-    for (auto &&[material_sid, material_reference] : enumerate(_rsc.material_references)) {
+    for (auto &&[material_sid, material_reference] : enumerate(_structure().material_references)) {
         RIndex material_gid = mat_mgr.findMaterial(material_reference);
         if (material_gid == RS_NULL_INDEX) {
             RS_THROW(RS_InvalidCharacterizationException(
@@ -482,9 +486,10 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
 
     _voxel_tmp_index_map[body_sid].init(&RS_MemoryDefaultProvider::getInstance());
 
-    auto initial_body_orientation = _rsc.orientation * body_rsc.relative_orientation;
+    auto initial_body_orientation = _structure().orientation * body_rsc.relative_orientation;
     auto initial_body_origin_position =
-        _rsc.origin_position + _rsc.orientation.rotateVec3D(body_rsc.relative_origin_position);
+        _structure().origin_position +
+        _structure().orientation.rotateVec3D(body_rsc.relative_origin_position);
     auto cuboids = _partitionSpace(body_rsc.x_voxels, body_rsc.y_voxels, body_rsc.z_voxels);
 
     RS_LOG(
@@ -761,7 +766,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
         }
 
         // Rigid body discovery only applies to non-fixed structures.
-        if (_rsc.is_fixed) continue;
+        if (_structure().is_fixed) continue;
 
         const auto &ref = _mat_resolved_data[ref_material_sid];
         _segment_phys_type_map[{body_sid, segment_bid}] = ref.phys_type;
@@ -800,119 +805,6 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
         timer.elapsedTimeString()
     );
     timer.reset();
-
-    //----------------------------------------------------------------
-    // Step 3: Create voxel hashmap
-    //----------------------------------------------------------------
-    // // Start from the exact level sizes and double-and-retry on overflow, preserving the entries
-    // // already inserted (copy = true). Each thread resumes from the voxel it failed on.
-    // RCoord3 actual_size = actual_max_bound - actual_min_bound;
-    // auto &voxel_tmp_index_map = _voxel_tmp_index_map[body_sid];
-    // array<RSize, 4> voxel_tmp_index_map_current_sizes = {
-    //     RS_MAX(actual_size.ceilDiv(voxel_tmp_index_map.getLevelSize(1)).prod(), RSize(1)),
-    //     RS_MAX(actual_size.ceilDiv(voxel_tmp_index_map.getLevelSize(1)).prod(), RSize(1)),
-    //     RS_MAX(actual_size.ceilDiv(voxel_tmp_index_map.getLevelSize(2)).prod(), RSize(1)),
-    //     RS_MAX(actual_size.ceilDiv(voxel_tmp_index_map.getLevelSize(3)).prod(), RSize(1)),
-    // };
-    // vector<RIndex> local_voxel_tmp_index_start(thread_count, 0);
-    // vector<RIndex> local_voxel_tmp_index_end(thread_count, 0);
-    // RSize voxel_tmp_insert_block_size = RS_CEIL_DIV(tmp_voxel_num, thread_count);
-
-    // for (RIndex t = 0; t < thread_count; t++) {
-    //     local_voxel_tmp_index_start[t] = t * voxel_tmp_insert_block_size;
-    //     local_voxel_tmp_index_end[t] =
-    //         RS_MIN(local_voxel_tmp_index_start[t] + voxel_tmp_insert_block_size, tmp_voxel_num);
-    // }
-
-    // RSize voxel_tmp_insert_retry = 10;
-    // bool is_voxel_tmp_insert_successful = true;
-
-    // voxel_tmp_index_map.resize(voxel_tmp_index_map_current_sizes[0], true);
-    // voxel_tmp_index_map.resizeMemPool(1, voxel_tmp_index_map_current_sizes[1], true);
-    // voxel_tmp_index_map.resizeMemPool(2, voxel_tmp_index_map_current_sizes[2], true);
-    // voxel_tmp_index_map.resizeMemPool(3, voxel_tmp_index_map_current_sizes[3], true);
-    // voxel_tmp_index_map.clear();
-
-    // // Attempt to insert all voxels
-    // _kernel_manager->getThreadPool()
-    //     ->submitLoop(
-    //         0,
-    //         thread_count,
-    //         [&](RIndex t) {
-    //             while (voxel_tmp_insert_retry > 0) {
-    //                 RIndex &start = local_voxel_tmp_index_start[t];
-    //                 RIndex end = local_voxel_tmp_index_end[t];
-
-    //                 auto accessor = voxel_tmp_index_map.getAccessor();
-
-    //                 for (; start < end; start++) {
-    //                     auto &voxel = tmp_voxels[start];
-    //                     if (!voxel_tmp_index_map.insert(
-    //                             {voxel.index_x, voxel.index_y, voxel.index_z},
-    //                             voxel.tmp_index,
-    //                             accessor
-    //                         )) {
-    //                         is_voxel_tmp_insert_successful = false;
-    //                         break;
-    //                     }
-    //                 }
-
-    //                 barrier.wait();
-    //                 if (is_voxel_tmp_insert_successful) {
-    //                     break;
-    //                 }
-    //                 barrier.wait();
-    //                 if (t == 0) {
-    //                     voxel_tmp_insert_retry--;
-
-    //                     if (voxel_tmp_insert_retry > 0) {
-    //                         is_voxel_tmp_insert_successful = true;
-    //                         voxel_tmp_index_map_current_sizes[0] *= 2;
-    //                         voxel_tmp_index_map_current_sizes[1] *= 2;
-    //                         voxel_tmp_index_map_current_sizes[2] *= 2;
-    //                         voxel_tmp_index_map_current_sizes[3] *= 2;
-    //                         voxel_tmp_index_map.resize(voxel_tmp_index_map_current_sizes[0],
-    //                         true); voxel_tmp_index_map.resizeMemPool(
-    //                             1, voxel_tmp_index_map_current_sizes[1], true
-    //                         );
-    //                         voxel_tmp_index_map.resizeMemPool(
-    //                             2, voxel_tmp_index_map_current_sizes[2], true
-    //                         );
-    //                         voxel_tmp_index_map.resizeMemPool(
-    //                             3, voxel_tmp_index_map_current_sizes[3], true
-    //                         );
-    //                         RS_LOG(
-    //                             _kernel_manager->getLogger(),
-    //                             debug,
-    //                             "Create voxel hashmap pass {} failed, resize voxel hashmap to
-    //                             size ({}, "
-    //                             "{}, {}, {}) and retry",
-    //                             10 - voxel_tmp_insert_retry,
-    //                             voxel_tmp_index_map_current_sizes[0],
-    //                             voxel_tmp_index_map_current_sizes[1],
-    //                             voxel_tmp_index_map_current_sizes[2],
-    //                             voxel_tmp_index_map_current_sizes[3]
-    //                         );
-    //                     }
-    //                 }
-    //                 barrier.wait();
-    //             }
-    //         }
-    //     )
-    //     .wait();
-
-    // if (!is_voxel_tmp_insert_successful) {
-    //     RS_THROW(RS_RuntimeException("Failed to insert all voxels in hashmap"));
-    // }
-
-    // RS_LOG(
-    //     _kernel_manager->getLogger(),
-    //     debug,
-    //     "Add body {} create voxel hashmap time {}",
-    //     body_sid,
-    //     timer.elapsedTimeString()
-    // );
-    // timer.reset();
 
     //----------------------------------------------------------------
     // Step 3: Create voxel hashmap (single hashmap level, 50% load factor)
@@ -1034,7 +926,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                             role = RSE_VOXEL_FACE_AIR;
                         } else {
                             auto &neighbor = tmp_voxels[*neighbor_voxel];
-                            bool is_cross_segment = !_rsc.is_fixed &&
+                            bool is_cross_segment = !_structure().is_fixed &&
                                                     neighbor.segment_bid != voxel.segment_bid;
                             if (is_cross_segment) {
                                 is_surface = true;
@@ -1069,7 +961,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
 
                     // Assign the rigid body now that the segment-type pass has emitted rigid
                     // bodies.
-                    if (!_rsc.is_fixed &&
+                    if (!_structure().is_fixed &&
                         (voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID ||
                          voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED)) {
                         voxel.rigid_body_sid =
@@ -1093,7 +985,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
     // Step 5: Find valid voxels, assign sid, and save them
     //----------------------------------------------------------------
     RIndex added_voxel_start = _voxel_num;
-    if (_rsc.is_fixed) {
+    if (_structure().is_fixed) {
         // For a fixed body, only add voxels that are ray-traceable or collidable.
         for (RIndex v = 0; v < tmp_voxel_num; v++) {
             if (tmp_voxels[v].is_render_active || tmp_voxels[v].is_contact_active) {
@@ -1125,7 +1017,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
     );
     timer.reset();
 
-    if (!_rsc.is_fixed) {
+    if (!_structure().is_fixed) {
         //----------------------------------------------------------------
         // Step 6: Gather rigid body voxel info
         //----------------------------------------------------------------
@@ -1299,7 +1191,8 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                 rigid_body.origin_b_position =
                     rigid_body.origin_b_position.min(material_local_position);
             }
-            RFloat half_voxel_size = _rsc.bodies[rigid_body.body_sid].voxel_size / RFLOAT(2);
+            RFloat half_voxel_size =
+                _structure().bodies[rigid_body.body_sid].voxel_size / RFLOAT(2);
             rigid_body.origin_b_position -= RVec3rf::full(half_voxel_size);
 
             // Compute local coordinates of material points
@@ -1356,7 +1249,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                     }
 
                     // Voxel size is uniform within a rigid body (it belongs to a single body)
-                    RFloat voxel_size = _rsc.bodies[rigid_body.body_sid].voxel_size;
+                    RFloat voxel_size = _structure().bodies[rigid_body.body_sid].voxel_size;
                     RFloat voxel_volume = voxel_size * voxel_size * voxel_size;
                     // Self inertia of one voxel about its own center, per diagonal axis: a solid
                     // cube of side voxel_size contributes m * (s^2 + s^2) / 12 = m * s^2 / 6 to
@@ -1497,8 +1390,8 @@ void RS_KernelStructureVoxelManager::_addConstraint(
             auto cj = _createBasicConstraintJoint(constraint_rsc, type, joint_sid);
 
             // Convert structure-relative hinge axis to body-local for each body
-            auto &body_a_rsc = _rsc.bodies[constraint_rsc.a_body_sid];
-            auto &body_b_rsc = _rsc.bodies[constraint_rsc.b_body_sid];
+            auto &body_a_rsc = _structure().bodies[constraint_rsc.a_body_sid];
+            auto &body_b_rsc = _structure().bodies[constraint_rsc.b_body_sid];
             cj.motor_sid = motor_sid;
             cj.hinge_control_mode =
                 _convertToConstraintJointHingeControlMode(constraint_rsc.hinge_control_mode);
@@ -1552,8 +1445,8 @@ void RS_KernelStructureVoxelManager::_addConstraint(
             auto cj = _createBasicConstraintJoint(constraint_rsc, type, joint_sid);
 
             // Convert structure-relative slide axis to body-A-local
-            auto &body_a_rsc = _rsc.bodies[constraint_rsc.a_body_sid];
-            auto &body_b_rsc = _rsc.bodies[constraint_rsc.b_body_sid];
+            auto &body_a_rsc = _structure().bodies[constraint_rsc.a_body_sid];
+            auto &body_b_rsc = _structure().bodies[constraint_rsc.b_body_sid];
             cj.motor_sid = motor_sid;
             cj.prismatic_control_mode = _convertToConstraintJointPrismaticControlMode(
                 constraint_rsc.prismatic_control_mode
@@ -1596,7 +1489,7 @@ void RS_KernelStructureVoxelManager::_addConstraint(
 void RS_KernelStructureVoxelManager::_addMaterials() {
     // Per-body voxel and link materials (different bodies may have different voxel_size)
     vector<RFloat> body_voxel_sizes;
-    for (auto &body_rsc : _rsc.bodies) {
+    for (auto &body_rsc : _structure().bodies) {
         body_voxel_sizes.push_back(body_rsc.voxel_size);
     }
 
@@ -1636,9 +1529,9 @@ void RS_KernelStructureVoxelManager::_addMaterials() {
 }
 
 void RS_KernelStructureVoxelManager::_addSignals() {
-    _expansion_signal_num = _rsc.signal.expansion_signal_num;
-    _hinge_signal_num = _rsc.signal.hinge_signal_num;
-    _prismatic_signal_num = _rsc.signal.prismatic_signal_num;
+    _expansion_signal_num = _structure().signal->expansion_signal_num;
+    _hinge_signal_num = _structure().signal->hinge_signal_num;
+    _prismatic_signal_num = _structure().signal->prismatic_signal_num;
 
     RBigSize total_size = RS_WorldStructureVoxelSignal::getRequiredMemorySize(
         _expansion_signal_num, _hinge_signal_num, _prismatic_signal_num
@@ -1748,21 +1641,21 @@ void RS_KernelStructureVoxelManager::_checkStructureLimits() const {
     if (_body_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM)
         RS_THROW(RS_InvalidCharacterizationException(
             "Structure \"{}\" has {} bodies, exceeding limit {}",
-            _rsc.name,
+            _structure().name,
             _body_num,
             RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM
         ));
     if (_voxel_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_VOXEL_NUM)
         RS_THROW(RS_InvalidCharacterizationException(
             "Structure \"{}\" has {} voxels, exceeding limit {}",
-            _rsc.name,
+            _structure().name,
             _voxel_num,
             RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_VOXEL_NUM
         ));
     if (_link_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_LINK_NUM)
         RS_THROW(RS_InvalidCharacterizationException(
             "Structure \"{}\" has {} links, exceeding limit {}",
-            _rsc.name,
+            _structure().name,
             _link_num,
             RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_LINK_NUM
         ));
@@ -1771,7 +1664,7 @@ void RS_KernelStructureVoxelManager::_checkStructureLimits() const {
             RS_THROW(RS_InvalidCharacterizationException(
                 "Constrained structure \"{}\" has {} rigid bodies, exceeding the constrained limit "
                 "{}",
-                _rsc.name,
+                _structure().name,
                 _rigid_body_num,
                 RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM
             ));
@@ -1780,7 +1673,7 @@ void RS_KernelStructureVoxelManager::_checkStructureLimits() const {
             RS_THROW(RS_InvalidCharacterizationException(
                 "Unconstrained structure \"{}\" has {} rigid bodies, exceeding the unconstrained "
                 "limit {}",
-                _rsc.name,
+                _structure().name,
                 _rigid_body_num,
                 RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_UNCONSTRAINED_NUM
             ));
@@ -1788,7 +1681,7 @@ void RS_KernelStructureVoxelManager::_checkStructureLimits() const {
     if (_joint_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM)
         RS_THROW(RS_InvalidCharacterizationException(
             "Structure \"{}\" has {} constraints, exceeding limit {}",
-            _rsc.name,
+            _structure().name,
             _joint_num,
             RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM
         ));
@@ -1807,7 +1700,7 @@ void RS_KernelStructureVoxelManager::_checkRigidBodyInertia() const {
         if (!rigid_body.local_moment_inertia_inverse.isValid())
             RS_THROW(RS_InvalidCharacterizationException(
                 "Rigid body in structure {} body {} segment {} has invalid moment inertia inverse",
-                _rsc.name,
+                _structure().name,
                 rigid_body.body_sid,
                 rigid_body.segment_bid
             ));
@@ -1966,7 +1859,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                     voxel_out.position = voxel.g_position;
                     voxel_out.orientation = voxel.g_orientation;
 
-                    FloatM body_voxel_size = _rsc.bodies[voxel.body_sid].voxel_size;
+                    FloatM body_voxel_size = _structure().bodies[voxel.body_sid].voxel_size;
                     FloatM half_voxel_size = 0.5 * body_voxel_size;
                     voxel_out.size = body_voxel_size;
                     voxel_out.nnn_offset =
@@ -2045,7 +1938,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                     link_out.state = state_union.link_state_packed;
                     // Initial transverse area is the mean voxel transverse area
                     // between negative voxel and positive voxel
-                    RFloat body_voxel_size = _rsc.bodies[link.body_sid].voxel_size;
+                    RFloat body_voxel_size = _structure().bodies[link.body_sid].voxel_size;
                     link_out.transverse_area = body_voxel_size * body_voxel_size;
 
                     links.get<LinkMem>(i) = link_out;
@@ -2255,7 +2148,7 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         // Note: Voxels must stay resolvable, collidable and renderable even when
         // the structure is fully fixed or frozen, so the voxel and voxel material layouts are
         // always active. The dynamic and static subsets are partitioned by stream compaction.
-        bool is_active = !_rsc.is_fixed;
+        bool is_active = !_structure().is_fixed;
         ctx.host_data->structure_link_material_layout.add(
             link_material_num, _structure_gid, is_active
         );
@@ -2273,7 +2166,7 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         );
         ctx.host_data->structure_constraint_joint_block_range_layout.add(1, _structure_gid);
 
-        if (!_rsc.is_fixed) {
+        if (!_structure().is_fixed) {
             for (auto &&[rigid_body_sid, rigid_body] : enumerate(_rigid_bodies)) {
                 ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
                     .associate(
@@ -2599,7 +2492,7 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
 void RS_KernelStructureVoxelManager::_initKernelRecordData() {
     auto memory_provider = _scoped_provider.get();
     auto buffer_frame_num = _kernel_manager->getKernelRecordBufferFrameNum();
-    const auto &record_cfg = _rsc.record;
+    const rsc::RSC_StructureVoxelRecord &record_cfg = _structure().record;
 
     _voxel_record_num = 0;
     _link_record_num = 0;
@@ -2614,7 +2507,7 @@ void RS_KernelStructureVoxelManager::_initKernelRecordData() {
     } else if (record_cfg.voxel_record_range ==
                rsc::RSE_STRUCTURE_VOXEL_RECORD_VOXEL_RANGE_RANDOM) {
         RSize voxel_sample_num = RS_MIN(_voxel_num, record_cfg.voxel_sample_num);
-        auto random_voxel_sid = _selectSID(_rsc.name, voxel_sample_num, _voxel_num);
+        auto random_voxel_sid = _selectSID(_structure().name, voxel_sample_num, _voxel_num);
         _voxel_record_sid = RS_Array<RIndex, 1>(random_voxel_sid.size(), memory_provider);
         _voxel_record_handles = RS_Array<RHandle, 1>(random_voxel_sid.size(), memory_provider);
         _voxel_record_sid.write(random_voxel_sid.data());
@@ -2628,7 +2521,7 @@ void RS_KernelStructureVoxelManager::_initKernelRecordData() {
         generateIndex(_link_record_sid);
     } else if (record_cfg.link_record_range == rsc::RSE_STRUCTURE_VOXEL_RECORD_LINK_RANGE_RANDOM) {
         RSize link_sample_num = RS_MIN(_link_num, record_cfg.link_sample_num);
-        auto random_link_sid = _selectSID(_rsc.name, link_sample_num, _link_num);
+        auto random_link_sid = _selectSID(_structure().name, link_sample_num, _link_num);
         _link_record_sid = RS_Array<RIndex, 1>(random_link_sid.size(), memory_provider);
         _link_record_handles = RS_Array<RHandle, 1>(random_link_sid.size(), memory_provider);
         _link_record_sid.write(random_link_sid.data());
@@ -3106,7 +2999,9 @@ RS_KernelStructureVoxelManager::_partitionSpace(RSize x_size, RSize y_size, RSiz
     return std::move(cuboids);
 }
 
-RBound3f RS_KernelStructureVoxelManager::_computeWorldBound(const SupportedRSC &structure_rsc) {
+RBound3f RS_KernelStructureVoxelManager::_computeWorldBound(
+    const rsc::RSC_StructureVoxel &structure_rsc
+) {
     RBound3f world_bound = RBound3f::lowest();
 
     for (const auto &body : structure_rsc.bodies) {

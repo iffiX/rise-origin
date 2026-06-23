@@ -34,16 +34,33 @@ class RiseOriginImpl {
             delete t;
         }
     };
+    std::shared_ptr<RS_WorldHandle> world_handle{};
 
     RiseOriginImpl() = default;
 
     explicit RiseOriginImpl(const RS_DeviceLocation &device) : local_device(device) {}
 
+    ~RiseOriginImpl() {
+        // Destroying the engine joins the free thread, which waits for the world to end. A world
+        // still running here usually means the engine was destroyed too early, so warn first.
+        if (world_handle && !world_handle->isEnd()) {
+            if (auto logger = logging::get("root")) {
+                logger->warn(
+                    "RiseOrigin destroyed while world '{}' is still running. Keep the RiseOrigin "
+                    "instance alive until its world ends; avoid using it as a temporary like "
+                    "RiseOrigin(\"cpu\").hello(world).",
+                    world_handle->name()
+                );
+                logger->flush();
+            }
+        }
+    }
+
     [[nodiscard]] std::shared_ptr<RS_WorldHandle>
     hello(RSC_World &&world, RS_WorldCallback &&callback) {
         sim_manager_mutex.lock();
 
-        auto log_level = parseLogLevel(world.simulation.runtime.log_level);
+        auto log_level = parseLogLevel(world.simulation->runtime.log_level);
         if (!logging::get("root")) {
             auto logger = std::make_shared<logging::logger>("root");
             register_logger(logger);
@@ -57,6 +74,7 @@ class RiseOriginImpl {
         auto local_handle = sim_manager->run(std::move(world), std::move(callback));
 
         auto handle = std::make_shared<RS_WorldLocalHandle>(local_handle);
+        world_handle = handle;
 
         sim_manager_free_thread.reset(new std::thread([&]() {
             sim_manager->free();
@@ -89,6 +107,5 @@ RiseOrigin::RiseOrigin(const RS_DeviceLocation &device)
 std::shared_ptr<RS_WorldHandle>
 RiseOrigin::hello(const RSC_World &world, RS_WorldCallback callback) {
     RSC_World local = world;
-    local.validate(false);
     return _rise_impl->hello(std::move(local), std::move(callback));
 }

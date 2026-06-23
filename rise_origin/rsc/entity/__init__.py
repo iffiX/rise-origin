@@ -31,7 +31,6 @@ from rise_origin.rsc.entity.cosmic_background import (
 )
 from rise_origin.rsc.entity.floor import FloorArray, FloorFlat
 from rise_origin.rsc.entity.structure_voxel import (
-    BodyRef,
     VoxelSizeSpec,
     StructureVoxel,
     StructureVoxelBody,
@@ -59,7 +58,6 @@ FloorBase = RSC_FloorBase
 CosmicBackgroundBase = RSC_CosmicBackgroundBase
 
 __all__ = [
-    "BodyRef",
     "VoxelSizeSpec",
     "EntityBase",
     "StructureBase",

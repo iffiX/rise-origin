@@ -22,12 +22,6 @@ def test_omitted_field_keeps_engine_default():
     assert built.global_damping_z == default.global_damping_z
 
 
-def test_time_optional_dt_set():
-    time = sim.Time(dt=1e-3, dt_frac=0.5)
-    assert time.dt == pytest.approx(1e-3)
-    assert time.dt_frac == pytest.approx(0.5)
-
-
 def test_vision_bundles_subconfigs():
     vision = sim.Vision(
         trace=sim.VisionTrace(firefly_cap=10.0),

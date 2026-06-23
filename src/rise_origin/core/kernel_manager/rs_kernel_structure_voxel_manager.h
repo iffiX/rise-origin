@@ -109,7 +109,7 @@ struct RS_VoxelKeyHasher {
  */
 class RS_KernelStructureVoxelManager {
    public:
-    using SupportedRSC = rsc::RSC_StructureVoxel;
+    using SupportedRSC = RS_Variant<rsc::RSC_StructureVoxel>;
 
     /**
      * @brief Bind to the kernel manager, resolve and reference dependent materials, and build the
@@ -981,6 +981,10 @@ class RS_KernelStructureVoxelManager {
     device::RS_Array<RIndex, 1> _constraint_joint_record_sid;
     device::RS_Array<RHandle, 1> _constraint_joint_record_handles;
 
+    /// Concrete view of the variant characterization held by this manager.
+    const rsc::RSC_StructureVoxel &_structure() const { return _rsc.as<rsc::RSC_StructureVoxel>(); }
+    rsc::RSC_StructureVoxel &_structure() { return _rsc.as<rsc::RSC_StructureVoxel>(); }
+
     /// Resolve every dependent material's physical kind and scalar data via the unified
     /// material manager's query interface. Populates `_mat_resolved_data` (indexed by material_sid)
     /// and `_dependent_material_gid_set`.
@@ -1050,7 +1054,7 @@ class RS_KernelStructureVoxelManager {
 
     static std::vector<Cuboid> _partitionSpace(RSize x_size, RSize y_size, RSize z_size);
 
-    static RBound3f _computeWorldBound(const SupportedRSC &structure_rsc);
+    static RBound3f _computeWorldBound(const rsc::RSC_StructureVoxel &structure_rsc);
 };
 
 /**

@@ -5,6 +5,13 @@
 #define RS_CONF_H
 
 /*****************************************************************
+ * Engine
+ *****************************************************************/
+#ifndef RS_ENGINE_VERSION
+#define RS_ENGINE_VERSION "0.0.0"
+#endif
+
+/*****************************************************************
  * Debug
  *****************************************************************/
 // #define RS_DEBUG_ENABLE_DEVICE_SOA true
@@ -49,6 +56,23 @@
 #endif
 #ifndef RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE
 #define RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE 256
+#endif
+
+/*****************************************************************
+ * RSC
+ *****************************************************************/
+// Current durable RSC file schema version this build writes.
+#ifndef RS_RSC_VERSION
+#define RS_RSC_VERSION "1.0.0"
+#endif
+
+// RSC characterization dialect this build reads and writes.
+#ifndef RS_RSC_EDITION
+#define RS_RSC_EDITION "origin"
+#endif
+
+#ifndef RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE
+#define RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE 1024
 #endif
 
 /*****************************************************************

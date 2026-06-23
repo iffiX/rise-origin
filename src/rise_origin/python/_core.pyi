@@ -350,6 +350,17 @@ class RS_MathExpr:
 ################################################################################
 ################################################################################
 
+################################################################################
+# RSC Exceptions
+################################################################################
+
+class RS_DataException(Exception):
+    """Raised when characterization data cannot be parsed."""
+
+
+class RS_InvalidCharacterizationException(RS_DataException):
+    """Raised when a characterization fails validation."""
+
 
 ################################################################################
 # RSC Bases
@@ -1126,13 +1137,15 @@ class RSC_World(RSC_Base):
     def __init__(self) -> None: ...
 
     @overload
-    def __init__(self, configs: Iterable[str], throw_error: bool = True) -> None:
-        """Construct from an iterable of XML configuration strings."""
+    def __init__(self, rsc_strings: Iterable[str]) -> None:
+        """Construct from an iterable of XML characterization strings.
+
+        Raises:
+            RS_DataException: When an input string is not valid XML.
+        """
         ...
 
     name: str
-    is_valid: bool
-    invalid_reason: str
     simulation: RSC_Simulation
     resources: VecResourceVariant
     essences: VecEssenceVariant
@@ -1142,9 +1155,34 @@ class RSC_World(RSC_Base):
     recorders: VecRecorderVariant
     controllers: VecControllerVariant
 
-    def open(self, paths: Iterable[str], throw_error: bool = True) -> None: ...
+    def open(self, paths: Iterable[str]) -> None:
+        """Open and parse XML characterization files.
 
-    def validate(self, throw_error: bool = True) -> None: ...
+        Raises:
+            RS_DataException: When a path cannot be opened or holds invalid XML.
+        """
+        ...
+
+
+################################################################################
+# Validator
+################################################################################
+
+class RS_RSCValidator:
+    """Validates characterizations, deduping shared geometry across calls."""
+
+    def __init__(self) -> None: ...
+
+    def validate(self, rsc: RSC_Base) -> None:
+        """Validate a characterization and raise on the first failed check.
+
+        Args:
+            rsc: Any RSC_Base subclass, such as an RSC_World, to validate.
+
+        Raises:
+            RS_InvalidCharacterizationException: When a check fails.
+        """
+        ...
 
 
 ################################################################################
@@ -1573,89 +1611,459 @@ class RS_WorldHandle:
     """Live handle to a running world. Mutations must be framed by
     ``begin_modification_transaction`` / ``end_modification_transaction``."""
 
-    def is_pending(self) -> bool: ...
+    def is_pending(self) -> bool:
+        """Report whether the world is still uninitialized or initializing.
 
-    def is_running(self) -> bool: ...
+        Returns:
+            True when the world has not yet started running.
+        """
+        ...
 
-    def is_paused(self) -> bool: ...
+    def is_running(self) -> bool:
+        """Report whether the world is currently running.
 
-    def is_end(self) -> bool: ...
+        Returns:
+            True when the world is in the running state.
+        """
+        ...
 
-    def pause(self) -> None: ...
+    def is_paused(self) -> bool:
+        """Report whether the world is currently paused.
 
-    def resume(self) -> None: ...
+        Returns:
+            True when the world is in the paused state.
+        """
+        ...
 
-    def terminate(self) -> None: ...
+    def is_end(self) -> bool:
+        """Report whether the world has ended.
 
-    def get_status(self) -> int: ...
+        Returns:
+            True when the world has reached any end state, whether clean or failed.
+        """
+        ...
 
-    def wait_for_running(self) -> bool: ...
+    def pause(self) -> None:
+        """Pause the running world.
 
-    def wait_for_end(self) -> None: ...
+        Blocks until the world is running, then requests a pause. Does nothing if the
+        world ends before it starts running.
+        """
+        ...
+
+    def resume(self) -> None:
+        """Resume the paused world.
+
+        Blocks until the world is running, then requests a resume. Does nothing if the
+        world ends before it starts running.
+        """
+        ...
+
+    def terminate(self) -> None:
+        """Terminate the running world.
+
+        Blocks until the world is running, then requests termination. Does nothing if
+        the world ends before it starts running.
+        """
+        ...
+
+    def get_status(self) -> int:
+        """Read the current world status.
+
+        Returns:
+            The current RSE_WorldStatus.
+        """
+        ...
+
+    def wait_for_running(self) -> bool:
+        """Block until the world starts running or ends.
+
+        Returns:
+            True if the world reached the running state, False if it ended first.
+        """
+        ...
+
+    def wait_for_end(self) -> None:
+        """Block until the world ends."""
+        ...
+
+    def has_message(self) -> bool:
+        """Report whether one or more world messages are waiting to be drained.
+
+        Returns:
+            True when get_messages() would return at least one message.
+        """
+        ...
+
+    def get_messages(self) -> List[RS_WorldMessage]:
+        """Drain all currently queued world messages.
+
+        Messages are returned in posting order and removed from the queue atomically.
+        Once drained, a message cannot satisfy a later wait_for_message() call.
+
+        Returns:
+            The queued RS_WorldMessage objects.
+        """
+        ...
 
     def wait_for_message(
         self,
         message_id: int = ...,
         level: RSE_WorldMessageLevel = ...,
-    ) -> RS_WorldMessage: ...
+    ) -> RS_WorldMessage:
+        """Block until a matching world message arrives.
 
-    def begin_modification_transaction(self) -> None: ...
+        Messages drained by get_messages() are no longer available to this call.
 
-    def end_modification_transaction(self) -> None: ...
+        Args:
+            message_id: The id returned by a mutator to wait on its outcome. Defaults to
+                RS_NULL_INDEX, which waits for the next message posted after this call
+                regardless of id.
+            level: The minimum severity to match. Defaults to RSE_WORLD_MESSAGE_ANY_LEVEL,
+                which matches any severity.
 
-    def get_world(self) -> RSC_World: ...
+        Returns:
+            The matching RS_WorldMessage.
+        """
+        ...
 
-    def set_simulation(self, simulation: RSC_Simulation) -> int: ...
+    def begin_modification_transaction(self) -> None:
+        """Open a modification transaction so several edits apply on the same step.
 
-    def add_resource(self, resource: RSC_ResourceVariant) -> int: ...
+        Blocks until the world is running. Does nothing if the world ends before it
+        starts running.
+        """
+        ...
 
-    def remove_resource(self, name: str) -> int: ...
+    def end_modification_transaction(self) -> None:
+        """Close the open modification transaction and apply its batched edits.
 
-    def find_resource(self, name: str) -> RSC_ResourceVariant: ...
+        Blocks until the world is running. Does nothing if the world ends before it
+        starts running.
+        """
+        ...
 
-    def add_essence(self, essence: RSC_EssenceVariant) -> int: ...
+    def get_world(self) -> RSC_World:
+        """Snapshot the current world characterization.
 
-    def update_essence(self, name: str, essence: RSC_EssenceVariant) -> int: ...
+        Blocks until the world is running, then reads back the live world including its
+        active recorders and controllers.
 
-    def remove_essence(self, name: str) -> int: ...
+        Returns:
+            The current RSC_World, or an empty RSC_World if the world ended first.
+        """
+        ...
 
-    def find_essence(self, name: str) -> RSC_EssenceVariant: ...
+    def set_simulation(self, simulation: RSC_Simulation) -> int:
+        """Replace the simulation parameters of the running world.
 
-    def add_entity(self, entity: RSC_EntityVariant) -> int: ...
+        Args:
+            simulation: The RSC_Simulation to apply.
 
-    def remove_entity(self, name: str) -> int: ...
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
 
-    def freeze_entity(self, name: str) -> int: ...
+    def add_resource(self, resource: RSC_ResourceVariant) -> int:
+        """Validate and add a resource to the running world.
 
-    def unfreeze_entity(self, name: str) -> int: ...
+        Args:
+            resource: The RSC_ResourceVariant to add.
 
-    def find_entity(self, name: str) -> RSC_EntityVariant: ...
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
 
-    def is_entity_frozen(self, name: str) -> bool: ...
+        Raises:
+            RS_InvalidCharacterizationException: When the resource fails validation.
+        """
+        ...
 
-    def add_record(self, record: RSC_RecordVariant) -> int: ...
+    def remove_resource(self, name: str) -> int:
+        """Remove the named resource from the running world.
 
-    def remove_record(self, name: str) -> int: ...
+        Args:
+            name: The name of the resource to remove.
 
-    def find_record(self, name: str) -> RSC_RecordVariant: ...
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
 
-    def add_signal(self, signal: RSC_SignalVariant) -> int: ...
+    def find_resource(self, name: str) -> RSC_ResourceVariant:
+        """Look up the named resource in the running world.
 
-    def remove_signal(self, name: str) -> int: ...
+        Args:
+            name: The name of the resource to find.
 
-    def find_signal(self, name: str) -> RSC_SignalVariant: ...
+        Returns:
+            The matching RSC_ResourceVariant, or an empty variant if the world is not running.
+        """
+        ...
 
-    def add_recorder(self, recorder: RSC_RecorderVariant) -> int: ...
+    def add_essence(self, essence: RSC_EssenceVariant) -> int:
+        """Validate and add an essence to the running world.
 
-    def remove_recorder(self, name: str) -> int: ...
+        Args:
+            essence: The RSC_EssenceVariant to add.
 
-    def find_recorder(self, name: str) -> RSC_RecorderVariant: ...
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
 
-    def add_controller(self, controller: RSC_ControllerVariant) -> int: ...
+        Raises:
+            RS_InvalidCharacterizationException: When the essence fails validation.
+        """
+        ...
 
-    def remove_controller(self, name: str) -> int: ...
+    def update_essence(self, name: str, essence: RSC_EssenceVariant) -> int:
+        """Validate and update the named essence in the running world.
 
-    def find_controller(self, name: str) -> RSC_ControllerVariant: ...
+        Args:
+            name: The name of the essence to update.
+            essence: The RSC_EssenceVariant holding the new values.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+
+        Raises:
+            RS_InvalidCharacterizationException: When the essence fails validation.
+        """
+        ...
+
+    def remove_essence(self, name: str) -> int:
+        """Remove the named essence from the running world.
+
+        Args:
+            name: The name of the essence to remove.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def find_essence(self, name: str) -> RSC_EssenceVariant:
+        """Look up the named essence in the running world.
+
+        Args:
+            name: The name of the essence to find.
+
+        Returns:
+            The matching RSC_EssenceVariant, or an empty variant if the world is not running.
+        """
+        ...
+
+    def add_entity(self, entity: RSC_EntityVariant) -> int:
+        """Validate and add an entity to the running world.
+
+        Args:
+            entity: The RSC_EntityVariant to add.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+
+        Raises:
+            RS_InvalidCharacterizationException: When the entity fails validation.
+        """
+        ...
+
+    def remove_entity(self, name: str) -> int:
+        """Remove the named entity from the running world.
+
+        Args:
+            name: The name of the entity to remove.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def freeze_entity(self, name: str) -> int:
+        """Freeze the named entity so it stops advancing.
+
+        Args:
+            name: The name of the entity to freeze.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def unfreeze_entity(self, name: str) -> int:
+        """Unfreeze the named entity so it resumes advancing.
+
+        Args:
+            name: The name of the entity to unfreeze.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def find_entity(self, name: str) -> RSC_EntityVariant:
+        """Look up the named entity in the running world.
+
+        Args:
+            name: The name of the entity to find.
+
+        Returns:
+            The matching RSC_EntityVariant, or an empty variant if the world is not running.
+        """
+        ...
+
+    def is_entity_frozen(self, name: str) -> bool:
+        """Report whether the named entity is frozen.
+
+        Args:
+            name: The name of the entity to query.
+
+        Returns:
+            True if the entity is frozen, False if it is not or the world is not running.
+        """
+        ...
+
+    def add_record(self, record: RSC_RecordVariant) -> int:
+        """Validate and add a record to the running world.
+
+        Args:
+            record: The RSC_RecordVariant to add.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+
+        Raises:
+            RS_InvalidCharacterizationException: When the record fails validation.
+        """
+        ...
+
+    def remove_record(self, name: str) -> int:
+        """Remove the named record from the running world.
+
+        Args:
+            name: The name of the record to remove.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def find_record(self, name: str) -> RSC_RecordVariant:
+        """Look up the named record in the running world.
+
+        Args:
+            name: The name of the record to find.
+
+        Returns:
+            The matching RSC_RecordVariant, or an empty variant if the world is not running.
+        """
+        ...
+
+    def add_signal(self, signal: RSC_SignalVariant) -> int:
+        """Validate and add a signal to the running world.
+
+        Args:
+            signal: The RSC_SignalVariant to add.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+
+        Raises:
+            RS_InvalidCharacterizationException: When the signal fails validation.
+        """
+        ...
+
+    def remove_signal(self, name: str) -> int:
+        """Remove the named signal from the running world.
+
+        Args:
+            name: The name of the signal to remove.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def find_signal(self, name: str) -> RSC_SignalVariant:
+        """Look up the named signal in the running world.
+
+        Args:
+            name: The name of the signal to find.
+
+        Returns:
+            The matching RSC_SignalVariant, or an empty variant if the world is not running.
+        """
+        ...
+
+    def add_recorder(self, recorder: RSC_RecorderVariant) -> int:
+        """Validate and add a recorder to the running world.
+
+        Args:
+            recorder: The RSC_RecorderVariant to add.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+
+        Raises:
+            RS_InvalidCharacterizationException: When the recorder fails validation.
+        """
+        ...
+
+    def remove_recorder(self, name: str) -> int:
+        """Remove the named recorder from the running world.
+
+        Args:
+            name: The name of the recorder to remove.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def find_recorder(self, name: str) -> RSC_RecorderVariant:
+        """Look up the named recorder in the running world.
+
+        Args:
+            name: The name of the recorder to find.
+
+        Returns:
+            The matching RSC_RecorderVariant, or an empty variant if the world is not running.
+        """
+        ...
+
+    def add_controller(self, controller: RSC_ControllerVariant) -> int:
+        """Validate and add a controller to the running world.
+
+        Args:
+            controller: The RSC_ControllerVariant to add.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+
+        Raises:
+            RS_InvalidCharacterizationException: When the controller fails validation.
+        """
+        ...
+
+    def remove_controller(self, name: str) -> int:
+        """Remove the named controller from the running world.
+
+        Args:
+            name: The name of the controller to remove.
+
+        Returns:
+            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+        """
+        ...
+
+    def find_controller(self, name: str) -> RSC_ControllerVariant:
+        """Look up the named controller in the running world.
+
+        Args:
+            name: The name of the controller to find.
+
+        Returns:
+            The matching RSC_ControllerVariant, or an empty variant if the world is not running.
+        """
+        ...
 
 
 ################################################################################
@@ -1670,13 +2078,34 @@ class RS_WorldHandle:
 ################################################################################
 
 class RiseOrigin:
-    """Top-level entry point for running a world."""
+    """The RiseOrigin.
+
+    Usage::
+
+        world = RSC_World(["config.xml"])
+        r = RiseOrigin()
+        handle = r.hello(world)
+        # World is yours
+    """
 
     @overload
-    def __init__(self, device: RS_DeviceLocation = ...) -> None: ...
+    def __init__(self, device: RS_DeviceLocation = ...) -> None:
+        """Construct a local RiseOrigin instance on the specified device.
+
+        Args:
+            device: Device identifiers used by this process.
+        """
+        ...
 
     @overload
-    def __init__(self, device_str: str = "") -> None: ...
+    def __init__(self, device_str: str = "") -> None:
+        """Construct a local RiseOrigin instance from a device string.
+
+        Args:
+            device_str: Device string, such as "cpu" or "cuda:0". Defaults to the local
+                CPU when empty.
+        """
+        ...
 
     def hello(
             self,
@@ -1684,4 +2113,15 @@ class RiseOrigin:
             callback: Optional[
                 Callable[[str, float, List[RS_WorldController]], None]
             ] = None,
-    ) -> RS_WorldHandle: ...
+    ) -> RS_WorldHandle:
+        """Say hello to the world.
+
+        Args:
+            world: Root world config describing all entities, essences, resources, etc
+                that should exist before time starts.
+            callback: Optional callback for control and modification of the world.
+
+        Returns:
+            The world handle.
+        """
+        ...

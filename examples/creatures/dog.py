@@ -164,12 +164,14 @@ def _body(grid, corner):
     )
 
 
-def _hinge(a, b, *, axis, anchor, signal_sid, angle_min, angle_max, torque, kp, kd):
+def _hinge(a_body_sid, b_body_sid, *, axis, anchor, signal_sid, angle_min, angle_max, torque, kp, kd):
     """A PD-position hinge driven by the structure signal ``signal_sid``."""
     return rsc.entity.StructureVoxelConstraint(
         RSE_StructureVoxelConstraintType.RSE_STRUCTURE_VOXEL_HINGE_JOINT,
-        a=a,
-        b=b,
+        a_body_sid=a_body_sid,
+        a_segment_bid=0,
+        b_body_sid=b_body_sid,
+        b_segment_bid=0,
         relative_anchor=anchor,
         hinge_relative_axis=axis,
         hinge_control_mode=(
@@ -240,10 +242,11 @@ def build():
     tail = _body(_tail(), (-13 * v, -1 * v, LEG_TOP + 3 * v))
     bodies = [front, back, tail]
 
+    # Body ids follow the bodies list: front=0, back=1, tail=2, then legs from 3.
     constraints = [
         _hinge(
-            back,
-            tail,
+            1,  # back
+            2,  # tail
             axis=(0, 0, 1),
             anchor=(-8 * v, 0.0, LEG_TOP + 4 * v),
             signal_sid=TAIL_SIG,
@@ -254,8 +257,8 @@ def build():
             kd=0.3,
         ),
         _hinge(
-            front,
-            back,
+            0,  # front
+            1,  # back
             axis=(0, 0, 1),
             anchor=(0.0, 0.0, LEG_TOP + 3 * v),
             signal_sid=SPINE_SIG,
@@ -268,18 +271,19 @@ def build():
     ]
 
     legs = [
-        (front, (8 * v, -2 * v, LEG_TOP), (7 * v, -3 * v, 0.0), 0),
-        (front, (8 * v, 2 * v, LEG_TOP), (7 * v, 1 * v, 0.0), 1),
-        (back, (-6 * v, -2 * v, LEG_TOP), (-7 * v, -3 * v, 0.0), 2),
-        (back, (-6 * v, 2 * v, LEG_TOP), (-7 * v, 1 * v, 0.0), 3),
+        (0, (8 * v, -2 * v, LEG_TOP), (7 * v, -3 * v, 0.0), 0),  # front hip
+        (0, (8 * v, 2 * v, LEG_TOP), (7 * v, 1 * v, 0.0), 1),  # front hip
+        (1, (-6 * v, -2 * v, LEG_TOP), (-7 * v, -3 * v, 0.0), 2),  # back hip
+        (1, (-6 * v, 2 * v, LEG_TOP), (-7 * v, 1 * v, 0.0), 3),  # back hip
     ]
-    for body, anchor, corner, sig in legs:
+    for hip_sid, anchor, corner, sig in legs:
         leg = _body(_leg(), corner)
+        leg_sid = len(bodies)
         bodies.append(leg)
         constraints.append(
             _hinge(
-                body,
-                leg,
+                hip_sid,
+                leg_sid,
                 axis=(0, 1, 0),
                 anchor=anchor,
                 signal_sid=sig,
@@ -322,7 +326,8 @@ def build():
         cameras.append(
             rsc.entity.CameraPerspectiveRigidBodyLinked(
                 cam_name,
-                attached_to=front,
+                structure_name="dog",
+                body_sid=0,  # front body
                 relative_anchor=_eye_anchor(vox),
                 image_width=PIP,
                 image_height=PIP,

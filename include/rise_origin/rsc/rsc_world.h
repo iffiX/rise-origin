@@ -119,67 +119,46 @@ class RSC_World : public RSC_Base {
     /// Human-readable world name.
     std::string name;
 
-    /// Validation state (populated by validate()).
-    bool is_valid = false;
-    std::string invalid_reason;
-
     /// Simulation-wide settings (time step, solver params, gravity, vision, etc.).
-    RSC_Simulation simulation;
+    RSCRef<RSC_Simulation> simulation = RSC_Simulation();
 
     /// Resources.
-    std::vector<RSC_ResourceVariant> resources;
+    RSCVec<RSC_ResourceVariant> resources;
 
     /// Essences.
-    std::vector<RSC_EssenceVariant> essences;
+    RSCVec<RSC_EssenceVariant> essences;
 
     /// Entities.
-    std::vector<RSC_EntityVariant> entities;
+    RSCVec<RSC_EntityVariant> entities;
 
     /// Records.
-    std::vector<RSC_RecordVariant> records;
+    RSCVec<RSC_RecordVariant> records;
 
     /// Signals.
-    std::vector<RSC_SignalVariant> signals;
+    RSCVec<RSC_SignalVariant> signals;
 
     /// Recorders.
-    std::vector<RSC_RecorderVariant> recorders;
+    RSCVec<RSC_RecorderVariant> recorders;
 
     /// Controllers.
-    std::vector<RSC_ControllerVariant> controllers;
+    RSCVec<RSC_ControllerVariant> controllers;
 
     RSC_World() = default;
 
     /**
-     * @brief Construct from a vector of XML characterization strings.
-     * @param rsc_strings Later strings override RSC_Simulation of earlier ones, and append
-     * to other sections of earlier ones.
-     * @param throw_parse_error When false, validation errors populate is_valid / invalid_reason
-     * instead of throwing.
+     * @brief Assemble this world from saved RSC files (.rsct or .rscb), read in order.
+     * @details Each file holds either a single component (resource, essence, entity, record,
+     * signal, recorder, controller), which appends to its section, or a world, which appends its
+     * components and replaces the simulation.
+     * @throw RS_DataException when a path cannot be opened or parsed.
      */
-    explicit RSC_World(const std::vector<std::string>& rsc_strings, bool throw_parse_error = true);
-
-    /**
-     * @brief Load from XML file paths. Same override semantics as the string constructor.
-     * @throw RS_DataException if the RSC file paths are invalid, it is not affected by
-     * throw_parse_error.
-     * @param throw_parse_error When false, validation errors populate is_valid / invalid_reason
-     * instead of throwing.
-     */
-    void open(const std::vector<std::string>& rsc_paths, bool throw_parse_error = true);
-
-    /**
-     * @brief Validate the world characterization. When throw_error is true, throws on error;
-     * otherwise stores validity in is_valid / invalid_reason.
-     */
-    void validate(bool throw_error = true);
+    void assembleFrom(const std::vector<std::string>& paths);
 
     bool operator==(const RSC_World& other) const;
 
     template <typename Serializer>
     void serialize(Serializer& s) {
         s("name", name);
-        s("is_valid", is_valid);
-        s("invalid_reason", invalid_reason);
         s("simulation", simulation);
         s("resources", resources);
         s("essences", essences);
@@ -191,12 +170,11 @@ class RSC_World : public RSC_Base {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
-
-   private:
-    std::vector<std::string> _rsc_strings;
-    void _parseSettings();
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& reader) override;
+    void _write(RS_RSCPropertyTreeWriter& writer) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
+    void _deepCopyShared(MemoRef memo) override;
 };
 
 }  // namespace rsc

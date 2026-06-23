@@ -87,12 +87,14 @@ def _box(size, material_id, corner):
     )
 
 
-def _hinge(a, b, *, axis, anchor, signal_sid, angle_min, angle_max):
+def _hinge(a_body_sid, b_body_sid, *, axis, anchor, signal_sid, angle_min, angle_max):
     """A motorized hinge driven by the structure signal ``signal_sid``."""
     return rsc.entity.StructureVoxelConstraint(
         RSE_StructureVoxelConstraintType.RSE_STRUCTURE_VOXEL_HINGE_JOINT,
-        a=a,
-        b=b,
+        a_body_sid=a_body_sid,
+        a_segment_bid=0,
+        b_body_sid=b_body_sid,
+        b_segment_bid=0,
         relative_anchor=anchor,
         hinge_relative_axis=axis,
         hinge_min=angle_min,
@@ -146,12 +148,14 @@ def build():
             TORSO_Z - LOWER_LEN * VOXEL,
         )
         lower = _box((LEG_THICK, LEG_THICK, LOWER_LEN), LOWER_ID, lower_corner)
+        upper_sid = len(bodies)  # torso is body 0; legs append in (upper, lower) pairs
+        lower_sid = upper_sid + 1
         bodies.extend([upper, lower])
 
         constraints.append(
             _hinge(
-                (torso, 0),
-                upper,
+                0,  # torso segment 0
+                upper_sid,
                 axis=(0, 0, 1),  # vertical: hip steers the leg fore/aft
                 anchor=hip,
                 signal_sid=leg,
@@ -161,8 +165,8 @@ def build():
         )
         constraints.append(
             _hinge(
-                upper,
-                lower,
+                upper_sid,
+                lower_sid,
                 axis=knee_axis,  # horizontal: knee lifts the foot
                 anchor=knee,
                 signal_sid=4 + leg,

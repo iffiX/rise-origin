@@ -31,7 +31,9 @@ class RSC_RecorderHDF5 : public RSC_RecorderBase {
     }
 
    protected:
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 using RSC_RecorderVariant = RS_Variant<RSC_RecorderHDF5>;

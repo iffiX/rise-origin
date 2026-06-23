@@ -37,8 +37,9 @@ class RSC_MaterialUnaryProperty : public RSC_EssenceBase {
     }
 
    protected:
-    void _validate() const override {}
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override {}
+    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
+    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
 };
 
 /*****************************************************************
@@ -69,7 +70,9 @@ class RSC_MaterialPhysicalPropertyFixed : public RSC_MaterialPhysicalPropertyBas
     }
 
    protected:
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -109,8 +112,10 @@ class RSC_MaterialPhysicalPropertySoft : public RSC_MaterialPhysicalPropertyBase
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -130,8 +135,10 @@ class RSC_MaterialPhysicalPropertyRigid : public RSC_MaterialPhysicalPropertyBas
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -160,8 +167,10 @@ class RSC_MaterialPhysicalPropertyAtlas : public RSC_MaterialPhysicalPropertyBas
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /*****************************************************************
@@ -216,7 +225,9 @@ class RSC_MaterialOpticalPropertySimpleMicrofacet : public RSC_MaterialOpticalPr
     }
 
    protected:
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 }  // namespace rsc

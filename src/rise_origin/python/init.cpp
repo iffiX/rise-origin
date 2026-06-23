@@ -46,6 +46,23 @@ class RSPY_RiseOrigin {
     ~RSPY_RiseOrigin() {
         // release the gil to make sure the clean-up thread can work properly
         py::gil_scoped_release release;
+
+        // Tearing down joins the clean-up thread, which waits for every world to end. A world still
+        // running here usually means the instance was used as a temporary, so warn before blocking.
+        {
+            std::lock_guard sim_lock(_simulation_mutex);
+            for (auto &[_, handle] : _job_handles) {
+                if (handle->isEnd()) continue;
+                print(
+                    "Warning: RiseOrigin destroyed while world '{}' is still running. Keep the "
+                    "RiseOrigin instance alive until its world ends; avoid using it as a temporary "
+                    "like rs.RiseOrigin(\"cpu\").hello(world).\n",
+                    handle->name()
+                );
+                std::fflush(stdout);
+            }
+        }
+
         {
             std::lock_guard lock(_cleanup_mutex);
             _shutdown = true;
@@ -169,13 +186,56 @@ PYBIND11_MODULE(_core, m) {
     initRSPYRSC(m);
     initRSPYCore(m);
 
-    py::class_<RSPY_RiseOrigin>(m, "RiseOrigin")
-        .def(py::init<const RSPY_DeviceLocation &>(), py::arg("device") = RSPY_DeviceLocation())
-        .def(py::init<const std::string &>(), py::arg("device_str") = "")
+    py::class_<RSPY_RiseOrigin>(
+        m,
+        "RiseOrigin",
+        R"doc(
+        The RiseOrigin.
+
+        Usage::
+
+            world = RSC_World(["config.xml"])
+            r = RiseOrigin()
+            handle = r.hello(world)
+            # World is yours
+    )doc"
+    )
+        .def(
+            py::init<const RSPY_DeviceLocation &>(),
+            py::arg("device") = RSPY_DeviceLocation(),
+            R"doc(
+            Construct a local RiseOrigin instance on the specified device.
+
+            Args:
+                device: Device identifiers used by this process.
+        )doc"
+        )
+        .def(
+            py::init<const std::string &>(),
+            py::arg("device_str") = "",
+            R"doc(
+            Construct a local RiseOrigin instance from a device string.
+
+            Args:
+                device_str: Device string, such as "cpu" or "cuda:0". Defaults to the
+                            local CPU when empty.
+        )doc"
+        )
         .def(
             "hello",
             &RSPY_RiseOrigin::hello,
             py::arg("world"),
-            py::arg("callback") = py::none()
+            py::arg("callback") = py::none(),
+            R"doc(
+            Say hello to the world.
+
+            Args:
+                world: Root world config describing all entities, essences, resources,
+                       etc that should exist before time starts.
+                callback: Optional callback for control and modification of the world.
+
+            Returns:
+                The world handle.
+        )doc"
         );
 }

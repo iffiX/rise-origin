@@ -10,10 +10,10 @@
 #include "rise_origin/rsc/record/rsc_record_base.h"
 #include "rise_origin/rsc/rsc_base.h"
 #include "rise_origin/rsc/signal/rsc_signal_base.h"
-#include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rsc_entity_base.h"
 
 namespace rise {
@@ -49,8 +49,9 @@ class RSC_StructureBase : public RSC_EntityBase {
     }
 
    protected:
-    void _validate() const override {}
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override {}
+    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
 };
 
 /*****************************************************************
@@ -140,8 +141,14 @@ class RSC_StructureVoxelBody : public RSC_Base {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
+
+   private:
+    void _validateNullSegment(RS_RSCValidator& validator) const;
+    void _validateLinkAdjacency(RS_RSCValidator& validator) const;
 };
 
 RS_ENUM(
@@ -351,8 +358,10 @@ class RSC_StructureVoxelConstraint : public RSC_Base {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /*****************************************************************
@@ -432,8 +441,10 @@ class RSC_StructureVoxelRecord : public RSC_RecordBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -464,8 +475,10 @@ class RSC_StructureVoxelSignal : public RSC_SignalBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /*****************************************************************
@@ -478,16 +491,16 @@ class RSC_StructureVoxel : public RSC_StructureBase {
     bool is_fixed = false;
 
     /// Bodies in the structure.
-    std::vector<RSC_StructureVoxelBody> bodies;
+    RSCVec<RSC_StructureVoxelBody> bodies;
 
     /// Constraints in the structure.
-    std::vector<RSC_StructureVoxelConstraint> constraints;
+    RSCVec<RSC_StructureVoxelConstraint> constraints;
 
     /// Structure record.
-    RSC_StructureVoxelRecord record;
+    RSCRef<RSC_StructureVoxelRecord> record = RSC_StructureVoxelRecord();
 
     /// Structure signal.
-    RSC_StructureVoxelSignal signal;
+    RSCRef<RSC_StructureVoxelSignal> signal = RSC_StructureVoxelSignal();
 
     bool operator==(const RSC_StructureVoxel& other) const;
 
@@ -502,8 +515,17 @@ class RSC_StructureVoxel : public RSC_StructureBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
+    void _deepCopyShared(MemoRef memo) override;
+
+   private:
+    void _validateMaterialSIDExist(RS_RSCValidator& validator) const;
+    void _validateExpansionSignals(RS_RSCValidator& validator) const;
+    void _validateConstraints(RS_RSCValidator& validator) const;
+    void _validateConstraintSignals(RS_RSCValidator& validator) const;
 };
 
 }  // namespace rsc

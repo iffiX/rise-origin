@@ -17,8 +17,7 @@ from rise_origin import (
     RSC_IntersectRegionSphere,
 )
 
-from rise_origin.rsc._utils import Quat3rf, Vec3rf, _quat3rf, _vec3rf
-from rise_origin.rsc.entity.structure_voxel import BodyRef, StructureVoxelBody
+from rise_origin.rsc._utils import Quat3rf, Vec3rf
 
 __all__ = [
     "IntersectRegionCuboid",
@@ -57,9 +56,9 @@ class IntersectRegionCuboid(RSC_IntersectRegionCuboid):
     ) -> None:
         super().__init__()
         self.name = name
-        self.position = _vec3rf(position)
-        self.orientation = _quat3rf(orientation)
-        self.size = _vec3rf(size)
+        self.position = position
+        self.orientation = orientation
+        self.size = size
         self.target_controller_reference = target_controller_reference
         self.target_recorder_reference = target_recorder_reference
 
@@ -74,9 +73,6 @@ class IntersectRegionCuboidRigidBodyLinked(RSC_IntersectRegionCuboidRigidBodyLin
 
     Args:
         name: Unique record name.
-        attached_to: Body object (or ``(body, segment_bid)`` tuple) the box
-            follows; resolves the ids below. The body must already be added to
-            its structure. ``None`` uses the explicit ids.
         structure_name: Name of the structure whose rigid body the box follows.
         body_sid: Body sub-id within the structure the box is attached to.
         segment_bid: Segment id of that body the box is attached to.
@@ -96,7 +92,6 @@ class IntersectRegionCuboidRigidBodyLinked(RSC_IntersectRegionCuboidRigidBodyLin
         self,
         name: str,
         *,
-        attached_to: Optional[BodyRef] = None,
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
@@ -107,17 +102,13 @@ class IntersectRegionCuboidRigidBodyLinked(RSC_IntersectRegionCuboidRigidBodyLin
         target_recorder_reference: str = "",
     ) -> None:
         super().__init__()
-        if attached_to is not None:
-            structure_name, body_sid, segment_bid = (
-                StructureVoxelBody._resolve_body_link(attached_to)
-            )
         self.name = name
         self.structure_name = structure_name
         self.body_sid = body_sid
         self.segment_bid = segment_bid
-        self.relative_anchor = _vec3rf(relative_anchor)
-        self.relative_orientation = _quat3rf(relative_orientation)
-        self.size = _vec3rf(size)
+        self.relative_anchor = relative_anchor
+        self.relative_orientation = relative_orientation
+        self.size = size
         self.target_controller_reference = target_controller_reference
         self.target_recorder_reference = target_recorder_reference
 
@@ -150,7 +141,7 @@ class IntersectRegionSphere(RSC_IntersectRegionSphere):
     ) -> None:
         super().__init__()
         self.name = name
-        self.position = _vec3rf(position)
+        self.position = position
         self.radius = radius
         self.target_controller_reference = target_controller_reference
         self.target_recorder_reference = target_recorder_reference

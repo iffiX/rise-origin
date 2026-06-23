@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Muhan Li (iffi/iffiX)
 
-#ifndef RS_HASH_H
-#define RS_HASH_H
+#ifndef RS_DEVICE_HASH_H
+#define RS_DEVICE_HASH_H
 
 #include "rise_origin/utils/meta/rs_num_traits.h"
 

@@ -13,8 +13,6 @@ import numpy as np
 
 from rise_origin import RSC_FloorArray, RSC_FloorFlat
 
-from rise_origin.rsc._utils import _fill
-
 __all__ = ["FloorFlat", "FloorArray"]
 
 
@@ -86,7 +84,7 @@ class FloorArray(RSC_FloorArray):
         self.y_values = y_values
         self.is_x_repeat = is_x_repeat
         self.is_y_repeat = is_y_repeat
-        _fill(self.height, height)
+        self.height = height
 
     @classmethod
     def from_function(

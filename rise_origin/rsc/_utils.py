@@ -43,16 +43,6 @@ Color3f = Union[RColor3f, Tuple[float, float, float]]
 Bound3ri = Union[RBound3ri, Tuple[int, int, int, int, int, int]]
 
 
-def _vec3rf(value: Vec3rf) -> RVec3rf:
-    """Coerce a 3-tuple into an ``RVec3rf`` (pass through if already one)."""
-    return value if isinstance(value, RVec3rf) else RVec3rf(*value)
-
-
-def _quat3rf(value: Quat3rf) -> RQuat3rf:
-    """Coerce a 4-tuple into an ``RQuat3rf`` (pass through if already one)."""
-    return value if isinstance(value, RQuat3rf) else RQuat3rf(*value)
-
-
 def _mat3rf(value: Mat3rf) -> RMat3rf:
     """Coerce a 3x3 or flat nine-element sequence into an ``RMat3rf``."""
     if isinstance(value, RMat3rf):
@@ -63,27 +53,6 @@ def _mat3rf(value: Mat3rf) -> RMat3rf:
     matrix = RMat3rf()
     matrix.from_list([VecFloat([float(x) for x in row]) for row in rows])
     return matrix
-
-
-def _color3b(value: Color3b) -> RColor3b:
-    """Coerce a 3-tuple into an ``RColor3b`` (pass through if already one)."""
-    return value if isinstance(value, RColor3b) else RColor3b(*value)
-
-
-def _color3f(value: Color3f) -> RColor3f:
-    """Coerce a 3-tuple into an ``RColor3f`` (pass through if already one)."""
-    return value if isinstance(value, RColor3f) else RColor3f(*value)
-
-
-def _bound3ri(value: Bound3ri) -> RBound3ri:
-    """Coerce a 6-tuple into an ``RBound3ri`` (pass through if already one)."""
-    return value if isinstance(value, RBound3ri) else RBound3ri(*value)
-
-
-def _fill(target, values) -> None:
-    """Append each value into a bound (non-list-assignable) vector, in order."""
-    for value in values:
-        target.append(value)
 
 
 def _apply(config, **fields) -> None:

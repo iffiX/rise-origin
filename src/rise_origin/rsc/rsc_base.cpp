@@ -7,7 +7,7 @@ namespace rise {
 
 namespace rsc {
 
-void RSC_Base::_validate() const {}
+void RSC_Base::_validate(RS_RSCValidator&) const {}
 
 }  // namespace rsc
 

@@ -140,12 +140,14 @@ def _shelled_box(core_size, shell, core_id, skin_id, core_corner, orientation):
     )
 
 
-def _hinge(a, b, *, axis, anchor, signal_sid, angle_min, angle_max):
+def _hinge(a_body_sid, b_body_sid, *, axis, anchor, signal_sid, angle_min, angle_max):
     """A motorized hinge driven by the structure signal ``signal_sid``."""
     return rsc.entity.StructureVoxelConstraint(
         RSE_StructureVoxelConstraintType.RSE_STRUCTURE_VOXEL_HINGE_JOINT,
-        a=a,
-        b=b,
+        a_body_sid=a_body_sid,
+        a_segment_bid=0,
+        b_body_sid=b_body_sid,
+        b_segment_bid=0,
         relative_anchor=anchor,
         hinge_relative_axis=axis,
         hinge_min=angle_min,
@@ -221,12 +223,14 @@ def build():
         lower = _shelled_box(
             LEG, LOWER_SHELL, LOWER_CORE, LOWER_SKIN, tuple(lower_corner), lower_quat
         )
+        upper_sid = len(bodies)  # torso is body 0; legs append in (upper, lower) pairs
+        lower_sid = upper_sid + 1
         bodies.extend([upper, lower])
 
         constraints.append(
             _hinge(
-                torso,
-                upper,
+                0,  # torso
+                upper_sid,
                 axis=axis,
                 anchor=hip_anchor,
                 signal_sid=leg_idx,
@@ -236,8 +240,8 @@ def build():
         )
         constraints.append(
             _hinge(
-                upper,
-                lower,
+                upper_sid,
+                lower_sid,
                 axis=axis,
                 anchor=tuple(knee_anchor),
                 signal_sid=4 + leg_idx,
@@ -260,7 +264,8 @@ def build():
     # control callback through the same controller that drives the gait.
     camera = rsc.entity.CameraPerspectiveRigidBodyLinked(
         CAMERA_NAME,
-        attached_to=torso,
+        structure_name="quadruped",
+        body_sid=0,  # torso body
         relative_anchor=(0.20, 0.0, 0.27),
         relative_orientation=(0.0, 0.2164, 0.0, 0.9763),
         image_width=PIP_SIZE,

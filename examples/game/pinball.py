@@ -213,12 +213,14 @@ def _wall_mask():
     return np.repeat(mask[:, :, None], WALL_H, axis=2)
 
 
-def _hinge(a, b, *, anchor, signal_sid, angle_min, angle_max):
+def _hinge(a_body_sid, b_body_sid, *, anchor, signal_sid, angle_min, angle_max):
     """A PD-position flipper hinge about the playfield normal (local Z)."""
     return rsc.entity.StructureVoxelConstraint(
         _HINGE,
-        a=a,
-        b=b,
+        a_body_sid=a_body_sid,
+        a_segment_bid=0,
+        b_body_sid=b_body_sid,
+        b_segment_bid=0,
         relative_anchor=anchor,
         hinge_relative_axis=(0, 0, 1),
         hinge_control_mode=_HINGE_PD,
@@ -319,6 +321,7 @@ def _make_table():
         relative_origin_position=(54 * V, 18 * V, z0),
     )
 
+    # Body ids: pad=0 wall=1 glass=2 barrel=3 piston=4 left_inlane=5 right_inlane=6 left=7 right=8.
     bodies = [pad, wall, glass, barrel, piston, left_inlane, right_inlane, left, right]
 
     # Pop bumpers (fixed cylinders); the ball bounces off them physically.
@@ -337,8 +340,10 @@ def _make_table():
     constraints = [
         rsc.entity.StructureVoxelConstraint(
             _PRISMATIC,
-            a=piston,
-            b=barrel,
+            a_body_sid=4,  # piston
+            a_segment_bid=0,
+            b_body_sid=3,  # barrel
+            b_segment_bid=0,
             relative_anchor=(93 * V, 9 * V, (PAD_T + WALL_H // 2) * V),
             prismatic_relative_axis=PLUNGER_AXIS,
             prismatic_control_mode=_PRISMATIC_POSITION,
@@ -349,16 +354,16 @@ def _make_table():
             prismatic_signal_sid=PLUNGER_SIG,
         ),
         _hinge(
-            left,
-            pad,
+            7,  # left flipper
+            0,  # pad
             anchor=(30 * V, 20 * V, (PAD_T + WALL_H // 2) * V),
             signal_sid=LEFT_SIG,
             angle_min=-0.6,
             angle_max=0.7,
         ),
         _hinge(
-            right,
-            pad,
+            8,  # right flipper
+            0,  # pad
             anchor=(70 * V, 20 * V, (PAD_T + WALL_H // 2) * V),
             signal_sid=RIGHT_SIG,
             angle_min=-0.7,

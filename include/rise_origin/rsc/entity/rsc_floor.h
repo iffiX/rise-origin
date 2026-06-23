@@ -8,8 +8,8 @@
 #include <vector>
 
 #include "rise_origin/rsc/rsc_base.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rsc_entity_base.h"
 
 namespace rise {
@@ -39,8 +39,9 @@ class RSC_FloorBase : public RSC_EntityBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
 };
 
 /**
@@ -65,8 +66,10 @@ class RSC_FloorFlat : public RSC_FloorBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -110,8 +113,10 @@ class RSC_FloorArray : public RSC_FloorBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 using RSC_FloorVariant = RS_Variant<RSC_FloorFlat, RSC_FloorArray>;

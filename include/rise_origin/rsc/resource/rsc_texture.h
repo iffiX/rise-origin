@@ -8,10 +8,10 @@
 #include <vector>
 
 #include "rise_origin/rsc/rsc_base.h"
-#include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/math/rs_color.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rsc_resource_base.h"
 
 namespace rise {
@@ -30,8 +30,9 @@ class RSC_TextureBase : public RSC_ResourceBase {
     }
 
    protected:
-    void _validate() const override {}
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override {}
+    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
+    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
 };
 
 class RSC_TextureConstant : public RSC_TextureBase {
@@ -48,7 +49,9 @@ class RSC_TextureConstant : public RSC_TextureBase {
     }
 
    protected:
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -91,8 +94,10 @@ class RSC_TextureGrid : public RSC_TextureBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 using RSC_TextureVariant = RS_Variant<RSC_TextureConstant, RSC_TextureGrid>;

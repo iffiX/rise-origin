@@ -21,8 +21,7 @@ from rise_origin import (
     RSC_CameraPerspectiveSignal,
 )
 
-from rise_origin.rsc._utils import Quat3rf, Vec3rf, _quat3rf, _vec3rf
-from rise_origin.rsc.entity.structure_voxel import BodyRef, StructureVoxelBody
+from rise_origin.rsc._utils import Quat3rf, Vec3rf
 
 __all__ = [
     "CameraPerspectiveRecord",
@@ -160,8 +159,8 @@ class CameraPerspectiveFree(RSC_CameraPerspectiveFree):
     ) -> None:
         super().__init__()
         self.name = name
-        self.origin_position = _vec3rf(origin_position)
-        self.orientation = _quat3rf(orientation)
+        self.origin_position = origin_position
+        self.orientation = orientation
         _apply_perspective(
             self,
             image_width,
@@ -180,17 +179,11 @@ class CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveRigidBodyLinked):
     """A perspective camera rigidly attached to a structure's rigid body.
 
     The camera rides a structure's rigid body segment, offset by a body-relative
-    anchor and orientation, so it moves with that body. Either pass
-    ``attached_to`` as the :class:`StructureVoxelBody` it rides (or a
-    ``(body, segment_bid)`` tuple) and the structure/body/segment ids are
-    resolved automatically, or set ``structure_name`` / ``body_sid`` /
-    ``segment_bid`` directly.
+    anchor and orientation, so it moves with that body. Identify the target with
+    ``structure_name`` / ``body_sid`` / ``segment_bid``.
 
     Args:
         name: Unique entity name.
-        attached_to: Body object (or ``(body, segment_bid)`` tuple) the camera
-            rides; resolves the ids below. The body must already be added to its
-            structure. ``None`` uses the explicit ids.
         structure_name: Name of the structure to attach to.
         body_sid: Body sub-id within the structure the camera rides.
         segment_bid: Segment id of that body the camera rides.
@@ -216,7 +209,6 @@ class CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveRigidBodyLinked):
         self,
         name: str = "camera",
         *,
-        attached_to: Optional[BodyRef] = None,
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
@@ -233,16 +225,12 @@ class CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveRigidBodyLinked):
         signal: Optional[CameraPerspectiveSignal] = None,
     ) -> None:
         super().__init__()
-        if attached_to is not None:
-            structure_name, body_sid, segment_bid = (
-                StructureVoxelBody._resolve_body_link(attached_to)
-            )
         self.name = name
         self.structure_name = structure_name
         self.body_sid = body_sid
         self.segment_bid = segment_bid
-        self.relative_anchor = _vec3rf(relative_anchor)
-        self.relative_orientation = _quat3rf(relative_orientation)
+        self.relative_anchor = relative_anchor
+        self.relative_orientation = relative_orientation
         _apply_perspective(
             self,
             image_width,

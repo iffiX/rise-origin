@@ -24,8 +24,10 @@ class RSC_Material : public RSC_EssenceBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree &rsc_tree) override;
+    void _validate(RS_RSCValidator &validator) const override;
+    void _read(const RS_RSCPropertyTreeReader &tree) override;
+    void _write(RS_RSCPropertyTreeWriter &tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 }  // namespace rsc

@@ -10,7 +10,7 @@ reference.
 
 from rise_origin import RSC_TextureConstant, RSC_TextureGrid
 
-from rise_origin.rsc._utils import Color3f, _color3f
+from rise_origin.rsc._utils import Color3f
 
 __all__ = ["TextureConstant", "TextureGrid"]
 
@@ -31,7 +31,7 @@ class TextureConstant(RSC_TextureConstant):
     ) -> None:
         super().__init__()
         self.name = name
-        self.value = _color3f(value)
+        self.value = value
 
 
 class TextureGrid(RSC_TextureGrid):
@@ -65,8 +65,8 @@ class TextureGrid(RSC_TextureGrid):
     ) -> None:
         super().__init__()
         self.name = name
-        self.fill_color = _color3f(fill_color)
-        self.line_color = _color3f(line_color)
+        self.fill_color = fill_color
+        self.line_color = line_color
         self.is_meters = is_meters
         self.x_spacing = x_spacing
         self.y_spacing = y_spacing

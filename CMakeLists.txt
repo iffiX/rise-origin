@@ -1,3 +1,11 @@
+################################################################
+# Project configuration
+################################################################
+# Feed the repo VERSION file into the RS_ENGINE_VERSION macro from rs_conf.h.
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" RS_ENGINE_VERSION_STR LIMIT_COUNT 1)
+string(STRIP "${RS_ENGINE_VERSION_STR}" RS_ENGINE_VERSION_STR)
+add_compile_definitions(RS_ENGINE_VERSION="${RS_ENGINE_VERSION_STR}")
+
 cmake_minimum_required(VERSION 3.22...3.30)
 
 set(CMAKE_SKIP_INSTALL_ALL_DEPENDENCY true)

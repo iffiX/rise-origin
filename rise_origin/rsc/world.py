@@ -58,16 +58,11 @@ class World(RSC_World):
         super().__init__()
         self.name = name
         self.simulation = simulation if simulation is not None else Simulation()
-        self._wrap(self.resources, resources, RSC_ResourceVariant)
-        self._wrap(self.essences, essences, RSC_EssenceVariant)
-        self._wrap(self.entities, entities, RSC_EntityVariant)
-        self._wrap(self.records, records, RSC_RecordVariant)
-        self._wrap(self.signals, signals, RSC_SignalVariant)
-        self._wrap(self.recorders, recorders, RSC_RecorderVariant)
-        self._wrap(self.controllers, controllers, RSC_ControllerVariant)
-
-    @staticmethod
-    def _wrap(vector, items, variant_cls) -> None:
-        """Wrap each builder object into its variant and append to the vector."""
-        for item in items:
-            vector.append(item if isinstance(item, variant_cls) else variant_cls(item))
+        # The container casters wrap each concrete builder into its variant on assignment.
+        self.resources = list(resources)
+        self.essences = list(essences)
+        self.entities = list(entities)
+        self.records = list(records)
+        self.signals = list(signals)
+        self.recorders = list(recorders)
+        self.controllers = list(controllers)

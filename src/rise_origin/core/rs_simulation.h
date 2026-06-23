@@ -18,6 +18,7 @@
 #include "rise_origin/core/recorder/rs_simulation_recorder.h"
 #include "rise_origin/core/rs_world_handle.h"
 #include "rise_origin/core/rs_world_def.h"
+#include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/math/rs_float.h"
 
@@ -34,6 +35,7 @@ class RS_Simulation {
     std::string name;
     RSE_FloatType simulation_memory_accuracy = RSE_FLOAT_32;
 
+    RS_RSCValidator validator;
     std::shared_ptr<RS_KernelManager> kernel_manager;
     std::future<void> recorder_sync_future{};
 
@@ -104,6 +106,28 @@ class RS_Simulation {
      *****************************************************************/
 
     /**
+     * @brief Report whether one or more world messages are waiting to be drained.
+     * @return True when getMessages() would return at least one message.
+     */
+    bool hasMessage() {
+        std::lock_guard lock(message_mutex);
+        return !messages.empty();
+    }
+
+    /**
+     * @brief Drain and return all currently queued world messages.
+     * @details Messages are returned in posting order and removed from the queue atomically. Once
+     * drained, a message cannot satisfy a later waitForMessage() call.
+     * @return The queued messages.
+     */
+    std::vector<RS_WorldMessage> getMessages() {
+        std::lock_guard lock(message_mutex);
+        std::vector<RS_WorldMessage> result;
+        result.swap(messages);
+        return result;
+    }
+
+    /**
      * @brief Allocate a fresh message id for a mutator about to issue work.
      */
     RIndex allocateMessageId() {
@@ -138,7 +162,7 @@ class RS_Simulation {
      * @details An id-specific wait scans messages already posted (the outcome may have arrived
      * first); an any-message wait (message_id == RS_NULL_INDEX) only considers messages posted after
      * this call. RSE_WORLD_MESSAGE_ANY_LEVEL matches any severity; a specific level matches
-     * severity >= level.
+     * severity >= level. Messages drained by getMessages() are no longer available to this call.
      */
     RS_WorldMessage waitForMessage(
         RIndex message_id = RS_NULL_INDEX,

@@ -5,6 +5,7 @@
 #define RS_WORLD_HANDLE_H
 
 #include <string>
+#include <vector>
 
 #include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/data/rs_variant.h"
@@ -75,7 +76,7 @@ struct RS_WorldMessage {
  * @brief Handle to a running world.
  * @details Exposes lifecycle control and name-keyed add/update/remove/find
  * operations over the six RSC category axes (entity, essence, resource,
- * controller, signal, recorder). An atomic sequence of mutations can be 
+ * controller, signal, recorder). An atomic sequence of mutations can be
  * framed by wrapping with begin/endModificationTransaction.
  */
 class RS_WorldHandle {
@@ -147,10 +148,25 @@ class RS_WorldHandle {
      * Messages
      *****************************************************************/
     /**
+     * @brief Report whether one or more world messages are waiting to be drained.
+     * @return True when getMessages() would return at least one message.
+     */
+    virtual bool hasMessage() = 0;
+
+    /**
+     * @brief Drain and return all currently queued world messages.
+     * @details Messages are returned in posting order and removed from the queue atomically. Once
+     * drained, a message cannot satisfy a later waitForMessage() call.
+     * @return The queued messages.
+     */
+    virtual std::vector<RS_WorldMessage> getMessages() = 0;
+
+    /**
      * @brief Block until a world message arrives.
      * @details message_id == RS_NULL_INDEX returns the next message matching the level filter;
-     * otherwise blocks for the message with that id. RSE_WORLD_MESSAGE_ANY_LEVEL matches any severity;
-     * a specific level matches severity >= level.
+     * otherwise blocks for the message with that id. RSE_WORLD_MESSAGE_ANY_LEVEL matches any
+     * severity; a specific level matches severity >= level. Messages drained by getMessages() are
+     * no longer available to this call.
      */
     virtual RS_WorldMessage waitForMessage(
         RIndex message_id = RS_NULL_INDEX,
@@ -216,8 +232,8 @@ class RS_WorldHandle {
      * @brief Update the named essence.
      * @return Message id to wait on.
      */
-    virtual RIndex updateEssence(const std::string& name,
-                                 const rsc::RSC_EssenceVariant& essence) = 0;
+    virtual RIndex
+    updateEssence(const std::string& name, const rsc::RSC_EssenceVariant& essence) = 0;
 
     /**
      * @brief Remove the named essence.
@@ -340,7 +356,7 @@ class RS_WorldHandle {
      * @return Message id to wait on.
      */
     virtual RIndex removeController(const std::string& name) = 0;
-    
+
     /**
      * @brief Re-emit the named controller's characterization.
      */

@@ -32,8 +32,7 @@ RS_KernelIntersectRegionManager::RS_KernelIntersectRegionManager(
         auto sm_it = structure_managers.find(region_linked.structure_name);
         if (sm_it == structure_managers.end())
             RS_THROW(RS_InvalidCharacterizationException(
-                "Structure {} is not registered in the kernel manager",
-                region_linked.structure_name
+                "Structure {} is not registered in the kernel manager", region_linked.structure_name
             ));
         auto& structure_manager = *sm_it->second;
 
@@ -50,7 +49,8 @@ RS_KernelIntersectRegionManager::RS_KernelIntersectRegionManager(
         _rb_anchor = structure_manager.getRigidBodyPositionFromRelativeAnchor(
             region_linked.body_sid, _rigid_body_sid, region_linked.relative_anchor
         );
-        auto& body_rsc = structure_manager.getRSC().bodies[region_linked.body_sid];
+        auto& body_rsc =
+            structure_manager.getRSC().as<rsc::RSC_StructureVoxel>().bodies[region_linked.body_sid];
         _rb_orientation =
             body_rsc.relative_orientation.inverse() * region_linked.relative_orientation;
 
@@ -142,7 +142,9 @@ std::string RS_KernelIntersectRegionManager::getStructureName() const {
     return _rsc.as<RSC_IntersectRegionCuboidRigidBodyLinked>().structure_name;
 }
 
-RIndex RS_KernelIntersectRegionManager::getStructureGid() const { return _structure_reference.gid(); }
+RIndex RS_KernelIntersectRegionManager::getStructureGid() const {
+    return _structure_reference.gid();
+}
 
 const RS_KernelIntersectRegionManager::SupportedRSC&
 RS_KernelIntersectRegionManager::getRSC() const {
@@ -205,7 +207,8 @@ void RS_KernelIntersectRegionManager::_freeKernelData() {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
         auto& ctx = k_ptr->ctx;
 
-        RIndex index = ctx.host_data->intersect_region_record_layout.find(_record_registration.gid());
+        RIndex index =
+            ctx.host_data->intersect_region_record_layout.find(_record_registration.gid());
         ctx.intersect_regions.erase(index);
         ctx.host_data->intersect_region_record_layout.remove(index);
 

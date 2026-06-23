@@ -1,0 +1,125 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Muhan Li (iffi/iffiX)
+
+#ifndef RS_RSC_REGISTRY_H
+#define RS_RSC_REGISTRY_H
+
+#include <functional>
+#include <string>
+#include <string_view>
+#include <typeindex>
+#include <typeinfo>
+#include <unordered_map>
+
+#include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/rs_exception.h"
+#include "rs_rsc_property_tree_reader.h"
+#include "rs_rsc_property_tree_writer.h"
+#include "rsc_base.h"
+
+namespace rise {
+
+namespace rsc {
+
+/**
+ * @brief Singleton mapping a type name to the read and write of its RSC type.
+ * @details A variant element is stored as { type, data }. This turns the name into a
+ * constructed and read node, and a held alternative back into its name and data.
+ */
+class RS_RSCRegistry {
+   public:
+    RS_RSCRegistry(const RS_RSCRegistry &) = delete;
+    RS_RSCRegistry &operator=(const RS_RSCRegistry &) = delete;
+
+    /**
+     * @brief Set a node into the matching variant alternative, false when none matches.
+     */
+    template <typename... Ts>
+    bool tryAssign(RS_Variant<Ts...> &out, const RSC_Base::RSCRef<RSC_Base> &node) const {
+        return ([&] {
+            if (auto *held = dynamic_cast<Ts *>(node.get())) {
+                out = *held;
+                return true;
+            }
+            return false;
+        }() || ...);
+    }
+
+    /**
+     * @brief Read a { type, data } element into the matching variant alternative.
+     */
+    template <typename... Ts>
+    void read(RS_Variant<Ts...> &out, const RS_RSCPropertyTreeReader &element) const {
+        std::string type = element.get<std::string>(RSC_Base::VAR_TYPE_KEY);
+        RSC_Base::RSCRef<RSC_Base> node = make(type, element.getChild(RSC_Base::VAR_DATA_KEY));
+        if (!tryAssign(out, node)) {
+            RS_THROW(RS_InvalidCharacterizationException("Unexpected RSC type {}", type));
+        }
+    }
+
+    /**
+     * @brief Write the held variant alternative as a { type, data } element.
+     */
+    template <typename... Ts>
+    void write(const RS_Variant<Ts...> &in, RS_RSCPropertyTreeWriter element) const {
+        in.visit([&](const auto &held) {
+            using T = std::decay_t<decltype(held)>;
+            element.add(RSC_Base::VAR_TYPE_KEY, getName(typeid(T)));
+            held.write(element.addChild(RSC_Base::VAR_DATA_KEY));
+        });
+    }
+
+    /**
+     * @brief Construct a node by type name and read it.
+     */
+    RSC_Base::RSCRef<RSC_Base> make(std::string_view type, const RS_RSCPropertyTreeReader &data)
+        const;
+
+    /**
+     * @brief Get the registered name of a concrete RSC type.
+     */
+    const std::string &getName(const std::type_info &type) const;
+
+    /**
+     * @brief Get the process wide registry, built on first use.
+     */
+    static RS_RSCRegistry &getInstance() {
+        static RS_RSCRegistry instance;
+        return instance;
+    }
+
+   private:
+    using ReadFn = std::function<RSC_Base::RSCRef<RSC_Base>(const RS_RSCPropertyTreeReader &)>;
+
+    /// Maps type name -> construct and read into a base node.
+    std::unordered_map<std::string, ReadFn> _read_map;
+
+    /// Maps type_index -> registered type name.
+    std::unordered_map<std::type_index, std::string> _name_map;
+
+    RS_RSCRegistry() { _registerAll(); }
+
+    /**
+     * @brief Register every savable RSC type, defined as one list in the source file.
+     */
+    void _registerAll();
+
+    /**
+     * @brief Register one concrete RSC type under name.
+     */
+    template <typename T>
+    void _register(const std::string &name) {
+        _read_map[name] = [](const RS_RSCPropertyTreeReader &data) -> RSC_Base::RSCRef<RSC_Base> {
+            auto node = std::make_shared<T>();
+            node->read(data);
+            return node;
+        };
+        _name_map[std::type_index(typeid(T))] = name;
+    }
+};
+
+}  // namespace rsc
+
+}  // namespace rise
+
+#endif  // RS_RSC_REGISTRY_H

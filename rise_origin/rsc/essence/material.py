@@ -36,7 +36,7 @@ from rise_origin import (
     RSC_MaterialPhysicalPropertyAtlas,
 )
 
-from rise_origin.rsc._utils import Mat3rf, Vec3rf, _mat3rf, _vec3rf
+from rise_origin.rsc._utils import Mat3rf, Vec3rf, _mat3rf
 
 __all__ = [
     "Material",
@@ -171,7 +171,7 @@ class MaterialPhysicalPropertyAtlas(RSC_MaterialPhysicalPropertyAtlas):
         self.name = name
         self.material_reference = material_reference
         self.mass = mass
-        self.com_position = _vec3rf(com_position)
+        self.com_position = com_position
         self.inertia = _mat3rf(inertia)
 
 

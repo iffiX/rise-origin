@@ -14,7 +14,7 @@ namespace rise {
 void RS_Simulation::addRecorder(const rsc::RSC_RecorderVariant &recorder) {
     recorder.visit([&](auto &cfg) {
         using T = std::decay_t<decltype(cfg)>;
-        cfg.validate();
+        validator.validate(cfg);
 
         std::shared_ptr<RS_SimulationRecorder> instance;
         if constexpr (std::is_same_v<T, rsc::RSC_RecorderHDF5>) {
@@ -61,7 +61,7 @@ rsc::RSC_RecorderVariant RS_Simulation::findRecorder(const std::string &name) {
 
 void RS_Simulation::addController(const rsc::RSC_ControllerVariant &controller) {
     controller.visit([&](auto &cfg) {
-        cfg.validate();
+        validator.validate(cfg);
         std::lock_guard lock(controllers_mutex);
         if (controllers.count(cfg.name)) {
             RS_THROW(RS_DuplicateException("Controller name '{}' already in use", cfg.name));

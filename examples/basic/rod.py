@@ -155,8 +155,10 @@ def build():
 
     hinge = rsc.entity.StructureVoxelConstraint(
         RSE_StructureVoxelConstraintType.RSE_STRUCTURE_VOXEL_HINGE_JOINT,
-        a=(main_body, ROTOR_SEG),
-        b=(stator_body, 0),
+        a_body_sid=0,
+        a_segment_bid=ROTOR_SEG,
+        b_body_sid=1,
+        b_segment_bid=0,
         relative_anchor=(interface_x, 0.0, AXIS_Z),
         hinge_relative_axis=(1.0, 0.0, 0.0),
         hinge_control_mode=(

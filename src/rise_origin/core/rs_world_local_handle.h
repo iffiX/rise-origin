@@ -29,6 +29,8 @@ class RS_WorldLocalHandle : public RS_WorldHandle {
     void waitForEnd() override;
 
     // Messages
+    bool hasMessage() override;
+    std::vector<RS_WorldMessage> getMessages() override;
     RS_WorldMessage waitForMessage(
         RIndex message_id = RS_NULL_INDEX,
         RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_ANY_LEVEL

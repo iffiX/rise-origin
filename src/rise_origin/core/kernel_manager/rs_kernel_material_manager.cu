@@ -208,8 +208,6 @@ void RS_KernelMaterialManager::free() {
  * Material
  *****************************************************************/
 void RS_KernelMaterialManager::addMaterial(const RSC_Material& material) {
-    material.validate();
-
     if (_material_registrations.count(material.name) > 0) {
         RS_THROW(RS_DuplicateException("Material name '{}' already in use", material.name));
     }
@@ -398,8 +396,6 @@ RSize RS_KernelMaterialManager::getMaterialUseCount(const string& name) const {
 void RS_KernelMaterialManager::addMaterialProperty(const UnaryPropertyVariant& property) {
     property.visit([&](auto& p) {
         using T = std::decay_t<decltype(p)>;
-        p.validate();
-
         const auto& prop_name = p.name;
         const auto& mat_ref = p.material_reference;
 
@@ -478,8 +474,6 @@ void RS_KernelMaterialManager::addMaterialProperty(const UnaryPropertyVariant& p
 void RS_KernelMaterialManager::addMaterialProperty(const PairPropertyVariant& property) {
     property.visit([&](auto& p) {
         using T = std::decay_t<decltype(p)>;
-        p.validate();
-
         const auto& prop_name = p.name;
         const auto& first_ref = p.first_material_reference;
         const auto& second_ref = p.second_material_reference;

@@ -4,6 +4,7 @@
 #include "rise_origin/rsc/entity/rsc_camera.h"
 
 #include "rise_origin/rsc/rs_rsc_util.h"
+#include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rise_origin/utils/rs_conf.h"
 
 using namespace std;
@@ -17,17 +18,26 @@ bool RSC_CameraPerspectiveRecord::operator==(const RSC_CameraPerspectiveRecord &
            has_depth == other.has_depth && has_entity_info == other.has_entity_info;
 }
 
-void RSC_CameraPerspectiveRecord::_validate() const {
-    RSC_RecordBase::_validate();
-    RSC_EXPECT_EQ(RSC_CameraPerspectiveRecord, name, "default");
+void RSC_CameraPerspectiveRecord::_validate(RS_RSCValidator &validator) const {
+    RSC_RecordBase::_validate(validator);
+    validator.submitValidatorIfNotExists("RSC_CameraPerspectiveRecord::_validate", this, [this] {
+        RSC_EXPECT_EQ(RSC_CameraPerspectiveRecord, name, "default");
+    });
 }
 
-void RSC_CameraPerspectiveRecord::_read(const RS_CharacterizationPropertyTree &rsc_tree) {
-    RSC_RecordBase::_read(rsc_tree);
+void RSC_CameraPerspectiveRecord::_read(const RS_RSCPropertyTreeReader &tree) {
+    RSC_RecordBase::_read(tree);
     name = "default";
-    has_rgb = rsc_tree.get("HasRGB", has_rgb);
-    has_depth = rsc_tree.get("HasDepth", has_depth);
-    has_entity_info = rsc_tree.get("HasEntityInfo", has_entity_info);
+    has_rgb = tree.get("has_rgb", has_rgb);
+    has_depth = tree.get("has_depth", has_depth);
+    has_entity_info = tree.get("has_entity_info", has_entity_info);
+}
+
+void RSC_CameraPerspectiveRecord::_write(RS_RSCPropertyTreeWriter &tree) const {
+    RSC_RecordBase::_write(tree);
+    tree.add("has_rgb", has_rgb);
+    tree.add("has_depth", has_depth);
+    tree.add("has_entity_info", has_entity_info);
 }
 
 bool RSC_CameraPerspectiveSignal::operator==(const RSC_CameraPerspectiveSignal &other) const {
@@ -36,36 +46,56 @@ bool RSC_CameraPerspectiveSignal::operator==(const RSC_CameraPerspectiveSignal &
            optics_signal_num == other.optics_signal_num;
 }
 
-void RSC_CameraPerspectiveSignal::_validate() const {
-    RSC_SignalBase::_validate();
-    RSC_EXPECT_EQ(RSC_CameraPerspectiveSignal, name, "default");
+void RSC_CameraPerspectiveSignal::_validate(RS_RSCValidator &validator) const {
+    RSC_SignalBase::_validate(validator);
+    validator.submitValidatorIfNotExists("RSC_CameraPerspectiveSignal::_validate", this, [this] {
+        RSC_EXPECT_EQ(RSC_CameraPerspectiveSignal, name, "default");
+    });
 }
 
-void RSC_CameraPerspectiveSignal::_read(const RS_CharacterizationPropertyTree &rsc_tree) {
-    RSC_SignalBase::_read(rsc_tree);
+void RSC_CameraPerspectiveSignal::_read(const RS_RSCPropertyTreeReader &tree) {
+    RSC_SignalBase::_read(tree);
     name = "default";
-    position_signal_num = rsc_tree.get<RSize>("PositionSignalNum", position_signal_num);
-    orientation_signal_num = rsc_tree.get<RSize>("OrientationSignalNum", orientation_signal_num);
-    optics_signal_num = rsc_tree.get<RSize>("OpticsSignalNum", optics_signal_num);
+    position_signal_num = tree.get<RSize>("position_signal_num", position_signal_num);
+    orientation_signal_num = tree.get<RSize>("orientation_signal_num", orientation_signal_num);
+    optics_signal_num = tree.get<RSize>("optics_signal_num", optics_signal_num);
 }
 
-static void _readPerspectiveCameraBase(
-    RSC_CameraPerspectiveBase &cam,
-    const RS_CharacterizationPropertyTree &rsc_tree
-) {
-    cam.image_width = rsc_tree.get<RSize>("ImageWidth", cam.image_width);
-    cam.image_height = rsc_tree.get<RSize>("ImageHeight", cam.image_height);
-    cam.samples_per_pixel = rsc_tree.get<RSize>("SamplesPerPixel", cam.samples_per_pixel);
-    cam.max_depth = rsc_tree.get<RSize>("MaxDepth", cam.max_depth);
-    cam.field_of_view = rsc_tree.get<RFloat>("FieldOfView", cam.field_of_view);
-    cam.defocus_angle = rsc_tree.get<RFloat>("DefocusAngle", cam.defocus_angle);
-    cam.focus_distance = rsc_tree.get<RFloat>("FocusDistance", cam.focus_distance);
-    if (rsc_tree.isChildExist("Record")) {
-        cam.record.read(rsc_tree.getChild("Record"), false);
+void RSC_CameraPerspectiveSignal::_write(RS_RSCPropertyTreeWriter &tree) const {
+    RSC_SignalBase::_write(tree);
+    tree.add("position_signal_num", position_signal_num);
+    tree.add("orientation_signal_num", orientation_signal_num);
+    tree.add("optics_signal_num", optics_signal_num);
+}
+
+static void
+_readPerspectiveCameraBase(RSC_CameraPerspectiveBase &cam, const RS_RSCPropertyTreeReader &tree) {
+    cam.image_width = tree.get<RSize>("image_width", cam.image_width);
+    cam.image_height = tree.get<RSize>("image_height", cam.image_height);
+    cam.samples_per_pixel = tree.get<RSize>("samples_per_pixel", cam.samples_per_pixel);
+    cam.max_depth = tree.get<RSize>("max_depth", cam.max_depth);
+    cam.field_of_view = tree.get<RFloat>("field_of_view", cam.field_of_view);
+    cam.defocus_angle = tree.get<RFloat>("defocus_angle", cam.defocus_angle);
+    cam.focus_distance = tree.get<RFloat>("focus_distance", cam.focus_distance);
+    if (tree.isChildExist("record")) {
+        cam.record.read(tree.getChild("record"));
     }
-    if (rsc_tree.isChildExist("Signal")) {
-        cam.signal.read(rsc_tree.getChild("Signal"), false);
+    if (tree.isChildExist("signal")) {
+        cam.signal.read(tree.getChild("signal"));
     }
+}
+
+static void
+_writePerspectiveCameraBase(const RSC_CameraPerspectiveBase &cam, RS_RSCPropertyTreeWriter &tree) {
+    tree.add("image_width", cam.image_width);
+    tree.add("image_height", cam.image_height);
+    tree.add("samples_per_pixel", cam.samples_per_pixel);
+    tree.add("max_depth", cam.max_depth);
+    tree.add("field_of_view", cam.field_of_view);
+    tree.add("defocus_angle", cam.defocus_angle);
+    tree.add("focus_distance", cam.focus_distance);
+    cam.record.write(tree.addChild("record"));
+    cam.signal.write(tree.addChild("signal"));
 }
 
 static void _validatePerspectiveCameraBase(const RSC_CameraPerspectiveBase &cam) {
@@ -84,11 +114,18 @@ bool RSC_CameraPerspectiveFree::operator==(const RSC_CameraPerspectiveFree &othe
            origin_position == other.origin_position && orientation == other.orientation;
 }
 
-void RSC_CameraPerspectiveFree::_read(const RS_CharacterizationPropertyTree &rsc_tree) {
-    RSC_EntityBase::_read(rsc_tree);
-    _readPerspectiveCameraBase(*this, rsc_tree);
-    origin_position = readVec3rf(rsc_tree.get<string>("OriginPosition"));
-    orientation = readQuat3rf(rsc_tree.get<string>("Orientation"));
+void RSC_CameraPerspectiveFree::_read(const RS_RSCPropertyTreeReader &tree) {
+    RSC_EntityBase::_read(tree);
+    _readPerspectiveCameraBase(*this, tree);
+    origin_position = readVec3rf(tree, "origin_position");
+    orientation = readQuat3rf(tree, "orientation");
+}
+
+void RSC_CameraPerspectiveFree::_write(RS_RSCPropertyTreeWriter &tree) const {
+    RSC_EntityBase::_write(tree);
+    _writePerspectiveCameraBase(*this, tree);
+    writeVec3rf(tree, "origin_position", origin_position);
+    writeQuat3rf(tree, "orientation", orientation);
 }
 
 bool RSC_CameraPerspectiveRigidBodyLinked::operator==(
@@ -100,22 +137,34 @@ bool RSC_CameraPerspectiveRigidBodyLinked::operator==(
            relative_orientation == other.relative_orientation;
 }
 
-void RSC_CameraPerspectiveRigidBodyLinked::_validate() const {
-    RSC_EntityBase::_validate();
-    _validatePerspectiveCameraBase(*this);
-    RSC_EXPECT_NOT_NULL(RSC_CameraPerspectiveRigidBodyLinked, body_sid, RS_NULL_INDEX);
+void RSC_CameraPerspectiveRigidBodyLinked::_validate(RS_RSCValidator &validator) const {
+    RSC_EntityBase::_validate(validator);
+    validator.submitValidatorIfNotExists(
+        "RSC_CameraPerspectiveRigidBodyLinked::_validate", this, [this] {
+            _validatePerspectiveCameraBase(*this);
+            RSC_EXPECT_NOT_NULL(RSC_CameraPerspectiveRigidBodyLinked, body_sid, RS_NULL_INDEX);
+        }
+    );
 }
 
-void RSC_CameraPerspectiveRigidBodyLinked::_read(
-    const RS_CharacterizationPropertyTree &rsc_tree
-) {
-    RSC_EntityBase::_read(rsc_tree);
-    _readPerspectiveCameraBase(*this, rsc_tree);
-    structure_name = rsc_tree.get<string>("StructureName");
-    body_sid = rsc_tree.get<RIndex>("BodySID");
-    segment_bid = rsc_tree.get<RIndex>("SegmentBID", segment_bid);
-    relative_anchor = readVec3rf(rsc_tree.get<string>("RelativeAnchor"));
-    relative_orientation = readQuat3rf(rsc_tree.get<string>("RelativeOrientation"));
+void RSC_CameraPerspectiveRigidBodyLinked::_read(const RS_RSCPropertyTreeReader &tree) {
+    RSC_EntityBase::_read(tree);
+    _readPerspectiveCameraBase(*this, tree);
+    structure_name = tree.get<string>("structure_name");
+    body_sid = tree.get<RIndex>("body_sid");
+    segment_bid = tree.get<RIndex>("segment_bid", segment_bid);
+    relative_anchor = readVec3rf(tree, "relative_anchor");
+    relative_orientation = readQuat3rf(tree, "relative_orientation");
+}
+
+void RSC_CameraPerspectiveRigidBodyLinked::_write(RS_RSCPropertyTreeWriter &tree) const {
+    RSC_EntityBase::_write(tree);
+    _writePerspectiveCameraBase(*this, tree);
+    tree.add("structure_name", structure_name);
+    tree.add("body_sid", body_sid);
+    tree.add("segment_bid", segment_bid);
+    writeVec3rf(tree, "relative_anchor", relative_anchor);
+    writeQuat3rf(tree, "relative_orientation", relative_orientation);
 }
 
 }  // namespace rsc

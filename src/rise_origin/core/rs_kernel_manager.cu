@@ -45,7 +45,9 @@ RS_KernelManager::RS_KernelManager() {
              _updateResource(p.first, p.second, message_id);
          }},
         {"removeResource",
-         [this](RS_Any arg, RIndex message_id) { _removeResource(arg.as<std::string>(), message_id); }},
+         [this](RS_Any arg, RIndex message_id) {
+             _removeResource(arg.as<std::string>(), message_id);
+         }},
 
         {"addEssence",
          [this](RS_Any arg, RIndex message_id) {
@@ -57,32 +59,43 @@ RS_KernelManager::RS_KernelManager() {
              _updateEssence(p.first, p.second, message_id);
          }},
         {"removeEssence",
-         [this](RS_Any arg, RIndex message_id) { _removeEssence(arg.as<std::string>(), message_id); }},
+         [this](RS_Any arg, RIndex message_id) {
+             _removeEssence(arg.as<std::string>(), message_id);
+         }},
 
         {"addEntity",
          [this](RS_Any arg, RIndex message_id) {
              _addEntity(arg.as<RSC_EntityVariant>(), message_id);
          }},
         {"removeEntity",
-         [this](RS_Any arg, RIndex message_id) { _removeEntity(arg.as<std::string>(), message_id); }},
+         [this](RS_Any arg, RIndex message_id) {
+             _removeEntity(arg.as<std::string>(), message_id);
+         }},
         {"freezeEntity",
-         [this](RS_Any arg, RIndex message_id) { _freezeEntity(arg.as<std::string>(), message_id); }},
+         [this](RS_Any arg, RIndex message_id) {
+             _freezeEntity(arg.as<std::string>(), message_id);
+         }},
         {"unfreezeEntity",
-         [this](RS_Any arg, RIndex message_id) { _unfreezeEntity(arg.as<std::string>(), message_id); }},
+         [this](RS_Any arg, RIndex message_id) {
+             _unfreezeEntity(arg.as<std::string>(), message_id);
+         }},
 
         {"addRecord",
          [this](RS_Any arg, RIndex message_id) {
              _addRecord(arg.as<RSC_RecordVariant>(), message_id);
          }},
         {"removeRecord",
-         [this](RS_Any arg, RIndex message_id) { _removeRecord(arg.as<std::string>(), message_id); }},
+         [this](RS_Any arg, RIndex message_id) {
+             _removeRecord(arg.as<std::string>(), message_id);
+         }},
 
         {"addSignal",
          [this](RS_Any arg, RIndex message_id) {
              _addSignal(arg.as<RSC_SignalVariant>(), message_id);
          }},
-        {"removeSignal",
-         [this](RS_Any arg, RIndex message_id) { _removeSignal(arg.as<std::string>(), message_id); }},
+        {"removeSignal", [this](RS_Any arg, RIndex message_id) {
+             _removeSignal(arg.as<std::string>(), message_id);
+         }},
     };
 }
 
@@ -1077,7 +1090,7 @@ RSC_EntityVariant RS_KernelManager::findEntity(const std::string& name) {
     RS_KernelManagerCommandExecutionGuard guard(this);
     if (auto it = _kernel_structure_voxel_managers.find(name);
         it != _kernel_structure_voxel_managers.end())
-        return RSC_EntityVariant(it->second->getRSC());
+        return it->second->getRSC().visit([](auto& c) { return RSC_EntityVariant(c); });
     if (auto it = _kernel_camera_perspective_managers.find(name);
         it != _kernel_camera_perspective_managers.end()) {
         return it->second->getRSC().visit([](auto& c) { return RSC_EntityVariant(c); });
@@ -1189,7 +1202,7 @@ RSC_World RS_KernelManager::getWorld() {
 
     // Entities
     for (auto& [_, sm] : _kernel_structure_voxel_managers) {
-        world.entities.emplace_back(sm->getRSC());
+        sm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
     }
     for (auto& [_, cm] : _kernel_camera_perspective_managers) {
         cm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
@@ -1446,14 +1459,15 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
                         _message_sink(
                             {message.id,
                              RSE_WORLD_MESSAGE_ERROR,
-                             RS_WorldMessageData{
-                                 RS_WorldMessageText{"Aborted because of previous unsuccessful task"}
-                             }}
+                             RS_WorldMessageData{RS_WorldMessageText{
+                                 "Aborted because of previous unsuccessful task"
+                             }}}
                         );
                 _pending_messages.clear();
-                // A failure before the kernel-data critical zone is a recoverable characterization error. A
-                // failure inside it leaves the context half-mutated and tainted; unwind the zone,
-                // mark the kernel terminated, and return so freeKernel does the coarse teardown.
+                // A failure before the kernel-data critical zone is a recoverable characterization
+                // error. A failure inside it leaves the context half-mutated and tainted; unwind
+                // the zone, mark the kernel terminated, and return so freeKernel does the coarse
+                // teardown.
                 if (isInKernelDataCriticalZone()) {
                     RS_LOG(
                         _logger,
@@ -1665,7 +1679,9 @@ void RS_KernelManager::_addResource(const RSC_ResourceVariant& resource, RIndex 
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _resource_gids.find(name); it != _resource_gids.end()) gid = it->second;
-    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE, gid, name});
+    _queueInfo(
+        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE, gid, name}
+    );
 }
 
 void RS_KernelManager::_updateResource(
@@ -1706,7 +1722,9 @@ void RS_KernelManager::_addEssence(const RSC_EssenceVariant& essence, RIndex mes
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _essence_gids.find(name); it != _essence_gids.end()) gid = it->second;
-    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE, gid, name});
+    _queueInfo(
+        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE, gid, name}
+    );
 }
 
 void RS_KernelManager::_updateEssence(
@@ -1746,9 +1764,7 @@ void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, RIndex messag
             _stageCommit(RSE_KERNEL_MANAGER_STRUCTURE_VOXEL, c.name);
         } else if constexpr (std::is_same_v<T, RSC_CameraPerspectiveFree> ||
                              std::is_same_v<T, RSC_CameraPerspectiveRigidBodyLinked>) {
-            auto mgr = std::make_unique<RS_KernelCameraPerspectiveManager>(
-                this, RS_KernelCameraPerspectiveManager::SupportedRSC(c)
-            );
+            auto mgr = std::make_unique<RS_KernelCameraPerspectiveManager>(this, c);
             _kernel_camera_perspective_managers[c.name] = std::move(mgr);
             _stageCommit(RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE, c.name);
         } else if constexpr (std::is_same_v<T, RSC_FloorFlat> ||
@@ -1756,9 +1772,7 @@ void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, RIndex messag
             if (_kernel_floor_manager) {
                 RS_THROW(RS_DuplicateException("Floor entity already exists"));
             }
-            _kernel_floor_manager = std::make_unique<RS_KernelFloorManager>(
-                this, RS_KernelFloorManager::SupportedRSC(c)
-            );
+            _kernel_floor_manager = std::make_unique<RS_KernelFloorManager>(this, c);
             _stageCommit(RSE_KERNEL_MANAGER_FLOOR, c.name);
         } else if constexpr (std::is_same_v<T, RSC_CosmicBackgroundUniform> ||
                              std::is_same_v<T, RSC_CosmicBackgroundGradient> ||
@@ -1766,15 +1780,16 @@ void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, RIndex messag
             if (_kernel_cosmic_background_manager) {
                 RS_THROW(RS_DuplicateException("Cosmic background entity already exists"));
             }
-            _kernel_cosmic_background_manager = std::make_unique<RS_KernelCosmicBackgroundManager>(
-                this, RS_KernelCosmicBackgroundManager::SupportedRSC(c)
-            );
+            _kernel_cosmic_background_manager =
+                std::make_unique<RS_KernelCosmicBackgroundManager>(this, c);
             _stageCommit(RSE_KERNEL_MANAGER_COSMIC_BACKGROUND, c.name);
         }
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _entity_gids.find(name); it != _entity_gids.end()) gid = it->second;
-    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY, gid, name});
+    _queueInfo(
+        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY, gid, name}
+    );
 }
 
 void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id) {
@@ -1909,7 +1924,9 @@ void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_i
         });
         if (matched) {
             _kernel_floor_manager->unfreeze();
-            _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+            _queueInfo(
+                message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)}
+            );
             return;
         }
     }
@@ -1920,7 +1937,9 @@ void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_i
         });
         if (matched) {
             _kernel_cosmic_background_manager->unfreeze();
-            _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+            _queueInfo(
+                message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)}
+            );
             return;
         }
     }
@@ -1947,7 +1966,9 @@ void RS_KernelManager::_addRecord(const RSC_RecordVariant& record, RIndex messag
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _record_gids.find(name); it != _record_gids.end()) gid = it->second;
-    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD, gid, name});
+    _queueInfo(
+        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD, gid, name}
+    );
 }
 
 void RS_KernelManager::_removeRecord(const std::string& name, RIndex message_id) {
@@ -1982,7 +2003,9 @@ void RS_KernelManager::_addSignal(const RSC_SignalVariant& signal, RIndex messag
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _signal_gids.find(name); it != _signal_gids.end()) gid = it->second;
-    _queueInfo(message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL, gid, name});
+    _queueInfo(
+        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL, gid, name}
+    );
 }
 
 void RS_KernelManager::_removeSignal(const std::string& name, RIndex message_id) {
@@ -2082,11 +2105,21 @@ RS_KernelGidRegistration::RS_KernelGidRegistration(
 )
     : _kernel_manager(kernel_manager), _type(type), _name(std::move(name)) {
     switch (_type) {
-        case RSE_KERNEL_GID_ENTITY: _gid = _kernel_manager->registerEntity(_name); break;
-        case RSE_KERNEL_GID_ESSENCE: _gid = _kernel_manager->registerEssence(_name); break;
-        case RSE_KERNEL_GID_RESOURCE: _gid = _kernel_manager->registerResource(_name); break;
-        case RSE_KERNEL_GID_RECORD: _gid = _kernel_manager->registerRecord(_name); break;
-        case RSE_KERNEL_GID_SIGNAL: _gid = _kernel_manager->registerSignal(_name); break;
+        case RSE_KERNEL_GID_ENTITY:
+            _gid = _kernel_manager->registerEntity(_name);
+            break;
+        case RSE_KERNEL_GID_ESSENCE:
+            _gid = _kernel_manager->registerEssence(_name);
+            break;
+        case RSE_KERNEL_GID_RESOURCE:
+            _gid = _kernel_manager->registerResource(_name);
+            break;
+        case RSE_KERNEL_GID_RECORD:
+            _gid = _kernel_manager->registerRecord(_name);
+            break;
+        case RSE_KERNEL_GID_SIGNAL:
+            _gid = _kernel_manager->registerSignal(_name);
+            break;
     }
 }
 
@@ -2101,7 +2134,8 @@ RS_KernelGidRegistration::RS_KernelGidRegistration(RS_KernelGidRegistration&& ot
     other._gid = RS_NULL_INDEX;
 }
 
-RS_KernelGidRegistration& RS_KernelGidRegistration::operator=(RS_KernelGidRegistration&& other
+RS_KernelGidRegistration& RS_KernelGidRegistration::operator=(
+    RS_KernelGidRegistration&& other
 ) noexcept {
     if (this != &other) {
         _release();
@@ -2118,11 +2152,21 @@ RS_KernelGidRegistration& RS_KernelGidRegistration::operator=(RS_KernelGidRegist
 void RS_KernelGidRegistration::_release() {
     if (_kernel_manager == nullptr || _gid == RS_NULL_INDEX) return;
     switch (_type) {
-        case RSE_KERNEL_GID_ENTITY: _kernel_manager->deregisterEntity(_name); break;
-        case RSE_KERNEL_GID_ESSENCE: _kernel_manager->deregisterEssence(_name); break;
-        case RSE_KERNEL_GID_RESOURCE: _kernel_manager->deregisterResource(_name); break;
-        case RSE_KERNEL_GID_RECORD: _kernel_manager->deregisterRecord(_name); break;
-        case RSE_KERNEL_GID_SIGNAL: _kernel_manager->deregisterSignal(_name); break;
+        case RSE_KERNEL_GID_ENTITY:
+            _kernel_manager->deregisterEntity(_name);
+            break;
+        case RSE_KERNEL_GID_ESSENCE:
+            _kernel_manager->deregisterEssence(_name);
+            break;
+        case RSE_KERNEL_GID_RESOURCE:
+            _kernel_manager->deregisterResource(_name);
+            break;
+        case RSE_KERNEL_GID_RECORD:
+            _kernel_manager->deregisterRecord(_name);
+            break;
+        case RSE_KERNEL_GID_SIGNAL:
+            _kernel_manager->deregisterSignal(_name);
+            break;
     }
     _kernel_manager = nullptr;
     _gid = RS_NULL_INDEX;

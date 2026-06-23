@@ -1,0 +1,1361 @@
+{
+  "header": {
+    "magic": "RSC",
+    "edition": "origin",
+    "rsc_version": "1.0.0",
+    "engine_version": "0.2.0",
+    "type": "RSC_World"
+  },
+  "body": {
+    "name": "",
+    "entities": [
+      {
+        "type": "RSC_StructureVoxel",
+        "data": {
+          "name": "structure_0",
+          "is_fixed": false,
+          "origin_position": [
+            0,
+            0,
+            0.1
+          ],
+          "orientation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "material_references": [
+            "material_0",
+            "material_1",
+            "material_2"
+          ],
+          "bodies": [
+            {
+              "relative_orientation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "relative_origin_position": [
+                0,
+                0,
+                0
+              ],
+              "x_voxels": 3,
+              "y_voxels": 3,
+              "z_voxels": 9,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1
+                ]
+              ]
+            },
+            {
+              "relative_orientation": [
+                0,
+                0.7071068,
+                0,
+                0.7071068
+              ],
+              "relative_origin_position": [
+                0.01,
+                0.032,
+                0.09
+              ],
+              "x_voxels": 1,
+              "y_voxels": 1,
+              "z_voxels": 3,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ]
+            },
+            {
+              "relative_orientation": [
+                0,
+                0.7071068,
+                0,
+                0.7071068
+              ],
+              "relative_origin_position": [
+                0.04,
+                0.032,
+                0.09
+              ],
+              "x_voxels": 1,
+              "y_voxels": 1,
+              "z_voxels": 3,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ]
+            }
+          ],
+          "constraints": [
+            {
+              "type": "RSE_STRUCTURE_VOXEL_HINGE_JOINT",
+              "relative_anchor": [
+                0.015,
+                0.032,
+                0.085
+              ],
+              "a_body_sid": 0,
+              "a_segment_bid": 2,
+              "b_body_sid": 1,
+              "b_segment_bid": 1,
+              "hinge_control_mode": "RSE_STRUCTURE_VOXEL_HINGE_CONTROL_BASIC_POSITION",
+              "hinge_relative_axis": [
+                0,
+                1,
+                0
+              ],
+              "hinge_min": -1,
+              "hinge_max": 1,
+              "hinge_max_torque": 5,
+              "hinge_signal_sid": 0
+            },
+            {
+              "type": "RSE_STRUCTURE_VOXEL_BALL_AND_SOCKET_JOINT",
+              "relative_anchor": [
+                0.04,
+                0.037,
+                0.085
+              ],
+              "a_body_sid": 1,
+              "a_segment_bid": 1,
+              "b_body_sid": 2,
+              "b_segment_bid": 1
+            }
+          ],
+          "signal": {
+            "source_controller_name": "default_controller",
+            "expansion_signal_num": 0,
+            "hinge_signal_num": 1
+          },
+          "record": {
+            "target_recorder_reference": "robot_recorder",
+            "voxel_record_range": "RSE_STRUCTURE_VOXEL_RECORD_VOXEL_RANGE_ALL",
+            "link_record_range": "RSE_STRUCTURE_VOXEL_RECORD_LINK_RANGE_ALL",
+            "rigid_body_record_range": "RSE_STRUCTURE_VOXEL_RECORD_RIGID_BODY_RANGE_ALL",
+            "joint_record_range": "RSE_STRUCTURE_VOXEL_RECORD_JOINT_RANGE_ALL"
+          }
+        }
+      },
+      {
+        "type": "RSC_StructureVoxel",
+        "data": {
+          "name": "structure_1",
+          "is_fixed": false,
+          "origin_position": [
+            0,
+            0.2,
+            0.1
+          ],
+          "orientation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "material_references": [
+            "material_0",
+            "material_1",
+            "material_2"
+          ],
+          "bodies": [
+            {
+              "relative_orientation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "relative_origin_position": [
+                0,
+                0,
+                0
+              ],
+              "x_voxels": 4,
+              "y_voxels": 4,
+              "z_voxels": 8,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ]
+              ]
+            },
+            {
+              "relative_orientation": [
+                0,
+                0.7071068,
+                0,
+                0.7071068
+              ],
+              "relative_origin_position": [
+                0.01,
+                0.042,
+                0.08
+              ],
+              "x_voxels": 1,
+              "y_voxels": 1,
+              "z_voxels": 3,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ]
+            },
+            {
+              "relative_orientation": [
+                0,
+                0.7071068,
+                0,
+                0.7071068
+              ],
+              "relative_origin_position": [
+                0.04,
+                0.042,
+                0.08
+              ],
+              "x_voxels": 1,
+              "y_voxels": 1,
+              "z_voxels": 3,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ]
+            }
+          ],
+          "constraints": [
+            {
+              "type": "RSE_STRUCTURE_VOXEL_HINGE_JOINT",
+              "relative_anchor": [
+                0.015,
+                0.042,
+                0.075
+              ],
+              "a_body_sid": 0,
+              "a_segment_bid": 2,
+              "b_body_sid": 1,
+              "b_segment_bid": 1,
+              "hinge_control_mode": "RSE_STRUCTURE_VOXEL_HINGE_CONTROL_BASIC_POSITION",
+              "hinge_relative_axis": [
+                0,
+                1,
+                0
+              ],
+              "hinge_min": -1,
+              "hinge_max": 1,
+              "hinge_max_torque": 5,
+              "hinge_signal_sid": 0
+            },
+            {
+              "type": "RSE_STRUCTURE_VOXEL_BALL_AND_SOCKET_JOINT",
+              "relative_anchor": [
+                0.04,
+                0.047,
+                0.075
+              ],
+              "a_body_sid": 1,
+              "a_segment_bid": 1,
+              "b_body_sid": 2,
+              "b_segment_bid": 1
+            }
+          ],
+          "signal": {
+            "source_controller_name": "default_controller",
+            "expansion_signal_num": 0,
+            "hinge_signal_num": 1
+          },
+          "record": {
+            "target_recorder_reference": "robot_recorder",
+            "voxel_record_range": "RSE_STRUCTURE_VOXEL_RECORD_VOXEL_RANGE_ALL",
+            "link_record_range": "RSE_STRUCTURE_VOXEL_RECORD_LINK_RANGE_ALL",
+            "rigid_body_record_range": "RSE_STRUCTURE_VOXEL_RECORD_RIGID_BODY_RANGE_ALL",
+            "joint_record_range": "RSE_STRUCTURE_VOXEL_RECORD_JOINT_RANGE_ALL"
+          }
+        }
+      },
+      {
+        "type": "RSC_StructureVoxel",
+        "data": {
+          "name": "structure_2",
+          "is_fixed": false,
+          "origin_position": [
+            0,
+            0.4,
+            0.1
+          ],
+          "orientation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "material_references": [
+            "material_0",
+            "material_1",
+            "material_2"
+          ],
+          "bodies": [
+            {
+              "relative_orientation": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "relative_origin_position": [
+                0,
+                0,
+                0
+              ],
+              "x_voxels": 4,
+              "y_voxels": 4,
+              "z_voxels": 8,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ],
+                [
+                  2,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  2,
+                  2
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ],
+                [
+                  1,
+                  1,
+                  1,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  2,
+                  2,
+                  2,
+                  1,
+                  1,
+                  1,
+                  1,
+                  1
+                ]
+              ]
+            },
+            {
+              "relative_orientation": [
+                0,
+                0.7071068,
+                0,
+                0.7071068
+              ],
+              "relative_origin_position": [
+                0.01,
+                0.042,
+                0.08
+              ],
+              "x_voxels": 1,
+              "y_voxels": 1,
+              "z_voxels": 3,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ]
+            },
+            {
+              "relative_orientation": [
+                0,
+                0.7071068,
+                0,
+                0.7071068
+              ],
+              "relative_origin_position": [
+                0.01,
+                0.055,
+                0.08
+              ],
+              "x_voxels": 1,
+              "y_voxels": 1,
+              "z_voxels": 3,
+              "voxel_size": 0.01,
+              "material_reference_sid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ],
+              "segment_bid": [
+                [
+                  1
+                ],
+                [
+                  1
+                ],
+                [
+                  1
+                ]
+              ]
+            }
+          ],
+          "constraints": [
+            {
+              "type": "RSE_STRUCTURE_VOXEL_HINGE_JOINT",
+              "relative_anchor": [
+                0.015,
+                0.042,
+                0.075
+              ],
+              "a_body_sid": 0,
+              "a_segment_bid": 2,
+              "b_body_sid": 1,
+              "b_segment_bid": 1,
+              "hinge_control_mode": "RSE_STRUCTURE_VOXEL_HINGE_CONTROL_BASIC_POSITION",
+              "hinge_relative_axis": [
+                0,
+                1,
+                0
+              ],
+              "hinge_min": -1,
+              "hinge_max": 1,
+              "hinge_max_torque": 5,
+              "hinge_signal_sid": 0
+            },
+            {
+              "type": "RSE_STRUCTURE_VOXEL_PRISMATIC_JOINT",
+              "relative_anchor": [
+                0.01,
+                0.055,
+                0.075
+              ],
+              "a_body_sid": 1,
+              "a_segment_bid": 1,
+              "b_body_sid": 2,
+              "b_segment_bid": 1,
+              "prismatic_control_mode": "RSE_STRUCTURE_VOXEL_PRISMATIC_CONTROL_BASIC_POSITION",
+              "prismatic_relative_axis": [
+                1,
+                0,
+                0
+              ],
+              "prismatic_min": -0.03,
+              "prismatic_max": 0.03,
+              "prismatic_max_force": 5,
+              "prismatic_max_speed": 1,
+              "prismatic_signal_sid": 0
+            }
+          ],
+          "signal": {
+            "source_controller_name": "default_controller",
+            "expansion_signal_num": 0,
+            "hinge_signal_num": 1,
+            "prismatic_signal_num": 1
+          },
+          "record": {
+            "target_recorder_reference": "robot_recorder",
+            "voxel_record_range": "RSE_STRUCTURE_VOXEL_RECORD_VOXEL_RANGE_ALL",
+            "link_record_range": "RSE_STRUCTURE_VOXEL_RECORD_LINK_RANGE_ALL",
+            "rigid_body_record_range": "RSE_STRUCTURE_VOXEL_RECORD_RIGID_BODY_RANGE_ALL",
+            "joint_record_range": "RSE_STRUCTURE_VOXEL_RECORD_JOINT_RANGE_ALL"
+          }
+        }
+      },
+      {
+        "type": "RSC_CameraPerspectiveFree",
+        "data": {
+          "name": "camera_0",
+          "orientation": [
+            0,
+            0,
+            0,
+            1
+          ],
+          "origin_position": [
+            -1,
+            0,
+            0.2
+          ],
+          "image_width": 1280,
+          "image_height": 960,
+          "samples_per_pixel": 4,
+          "max_depth": 10,
+          "field_of_view": 45,
+          "defocus_angle": 0,
+          "focus_distance": 0.5
+        }
+      }
+    ],
+    "recorders": [
+      {
+        "type": "RSC_RecorderHDF5",
+        "data": {
+          "name": "robot_recorder",
+          "path": "robot.h5_history"
+        }
+      }
+    ],
+    "controllers": [
+      {
+        "type": "RSC_ControllerCallback",
+        "data": {
+          "name": "default_controller"
+        }
+      }
+    ],
+    "resources": [],
+    "essences": [],
+    "records": [],
+    "signals": []
+  }
+}

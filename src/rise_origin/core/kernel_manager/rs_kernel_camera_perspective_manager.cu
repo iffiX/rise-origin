@@ -60,7 +60,8 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
         _camera_rb_position = structure_manager.getRigidBodyPositionFromRelativeAnchor(
             perspective.body_sid, rigid_body_sid, perspective.relative_anchor
         );
-        auto& body_rsc = structure_manager.getRSC().bodies[perspective.body_sid];
+        auto& body_rsc =
+            structure_manager.getRSC().as<rsc::RSC_StructureVoxel>().bodies[perspective.body_sid];
         _camera_rb_orientation =
             body_rsc.relative_orientation.inverse() * perspective.relative_orientation;
         pixel_num = perspective.image_width * perspective.image_height;

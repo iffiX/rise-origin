@@ -61,7 +61,14 @@ bool RS_WorldLocalHandle::waitForRunning() { return _simulation->waitForStatus(R
 
 void RS_WorldLocalHandle::waitForEnd() { _simulation->waitForEnd(); }
 
-RS_WorldMessage RS_WorldLocalHandle::waitForMessage(RIndex message_id, RSE_WorldMessageLevel level) {
+bool RS_WorldLocalHandle::hasMessage() { return _simulation->hasMessage(); }
+
+std::vector<RS_WorldMessage> RS_WorldLocalHandle::getMessages() {
+    return _simulation->getMessages();
+}
+
+RS_WorldMessage
+RS_WorldLocalHandle::waitForMessage(RIndex message_id, RSE_WorldMessageLevel level) {
     return _simulation->waitForMessage(message_id, level);
 }
 
@@ -83,7 +90,8 @@ RSC_World RS_WorldLocalHandle::getWorld() {
     // Controllers and recorders live on RS_Simulation; merge them in.
     {
         std::lock_guard lock(_simulation->controllers_mutex);
-        for (auto& [_, controller] : _simulation->controllers) world.controllers.push_back(controller);
+        for (auto& [_, controller] : _simulation->controllers)
+            world.controllers.push_back(controller);
     }
     {
         std::lock_guard lock(_simulation->recorders_mutex);
@@ -101,6 +109,7 @@ RIndex RS_WorldLocalHandle::setSimulation(const RSC_Simulation& simulation) {
 
 RIndex RS_WorldLocalHandle::addResource(const RSC_ResourceVariant& resource) {
     if (!waitForRunning()) return RS_NULL_INDEX;
+    resource.visit([&](auto& cfg) { _simulation->validator.validate(cfg); });
     RIndex id = _simulation->allocateMessageId();
     _simulation->kernel_manager->addResource(resource, id);
     return id;
@@ -120,16 +129,16 @@ RSC_ResourceVariant RS_WorldLocalHandle::findResource(const std::string& name) {
 
 RIndex RS_WorldLocalHandle::addEssence(const RSC_EssenceVariant& essence) {
     if (!waitForRunning()) return RS_NULL_INDEX;
+    essence.visit([&](auto& cfg) { _simulation->validator.validate(cfg); });
     RIndex id = _simulation->allocateMessageId();
     _simulation->kernel_manager->addEssence(essence, id);
     return id;
 }
 
-RIndex RS_WorldLocalHandle::updateEssence(
-    const std::string& name,
-    const RSC_EssenceVariant& essence
-) {
+RIndex
+RS_WorldLocalHandle::updateEssence(const std::string& name, const RSC_EssenceVariant& essence) {
     if (!waitForRunning()) return RS_NULL_INDEX;
+    essence.visit([&](auto& cfg) { _simulation->validator.validate(cfg); });
     RIndex id = _simulation->allocateMessageId();
     _simulation->kernel_manager->updateEssence(name, essence, id);
     return id;
@@ -149,6 +158,7 @@ RSC_EssenceVariant RS_WorldLocalHandle::findEssence(const std::string& name) {
 
 RIndex RS_WorldLocalHandle::addEntity(const RSC_EntityVariant& entity) {
     if (!waitForRunning()) return RS_NULL_INDEX;
+    entity.visit([&](auto& cfg) { _simulation->validator.validate(cfg); });
     RIndex id = _simulation->allocateMessageId();
     _simulation->kernel_manager->addEntity(entity, id);
     return id;
@@ -187,6 +197,7 @@ bool RS_WorldLocalHandle::isEntityFrozen(const std::string& name) {
 
 RIndex RS_WorldLocalHandle::addRecord(const RSC_RecordVariant& record) {
     if (!waitForRunning()) return RS_NULL_INDEX;
+    record.visit([&](auto& cfg) { _simulation->validator.validate(cfg); });
     RIndex id = _simulation->allocateMessageId();
     _simulation->kernel_manager->addRecord(record, id);
     return id;
@@ -206,6 +217,7 @@ RSC_RecordVariant RS_WorldLocalHandle::findRecord(const std::string& name) {
 
 RIndex RS_WorldLocalHandle::addSignal(const RSC_SignalVariant& signal) {
     if (!waitForRunning()) return RS_NULL_INDEX;
+    signal.visit([&](auto& cfg) { _simulation->validator.validate(cfg); });
     RIndex id = _simulation->allocateMessageId();
     _simulation->kernel_manager->addSignal(signal, id);
     return id;

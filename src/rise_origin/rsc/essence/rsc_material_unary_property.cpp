@@ -4,6 +4,7 @@
 #include "rise_origin/rsc/essence/rsc_material_unary_property.h"
 
 #include "rise_origin/rsc/rs_rsc_util.h"
+#include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rise_origin/utils/string/rs_string.h"
 
 using namespace std;
@@ -18,9 +19,14 @@ bool RSC_MaterialPhysicalPropertyFixed::operator==(
     return RSC_MaterialPhysicalPropertyBase::operator==(other);
 }
 
-void RSC_MaterialPhysicalPropertyFixed::_read(const RS_CharacterizationPropertyTree& rsc_tree) {
-    RSC_EssenceBase::_read(rsc_tree);
-    material_reference = rsc_tree.get("MaterialReference", material_reference);
+void RSC_MaterialPhysicalPropertyFixed::_read(const RS_RSCPropertyTreeReader& tree) {
+    RSC_EssenceBase::_read(tree);
+    material_reference = tree.get("material_reference", material_reference);
+}
+
+void RSC_MaterialPhysicalPropertyFixed::_write(RS_RSCPropertyTreeWriter& tree) const {
+    RSC_EssenceBase::_write(tree);
+    tree.add("material_reference", material_reference);
 }
 
 bool RSC_MaterialPhysicalPropertySoft::operator==(
@@ -32,26 +38,41 @@ bool RSC_MaterialPhysicalPropertySoft::operator==(
            min_expansion == other.min_expansion && max_expansion == other.max_expansion;
 }
 
-void RSC_MaterialPhysicalPropertySoft::_validate() const {
-    RSC_EssenceBase::_validate();
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertySoft, elastic_modulus, 0);
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertySoft, fail_stress, 0);
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertySoft, density, 0);
-    RSC_EXPECT_GE(RSC_MaterialPhysicalPropertySoft, poissons_ratio, 0);
-    RSC_EXPECT_LE(RSC_MaterialPhysicalPropertySoft, poissons_ratio, 0.5);
-    RSC_EXPECT_GE(RSC_MaterialPhysicalPropertySoft, min_expansion, -1);
-    RSC_EXPECT_GE(RSC_MaterialPhysicalPropertySoft, max_expansion, min_expansion);
+void RSC_MaterialPhysicalPropertySoft::_validate(RS_RSCValidator& validator) const {
+    RSC_EssenceBase::_validate(validator);
+    validator.submitValidatorIfNotExists(
+        "RSC_MaterialPhysicalPropertySoft::_validate", this, [this] {
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertySoft, elastic_modulus, 0);
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertySoft, fail_stress, 0);
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertySoft, density, 0);
+            RSC_EXPECT_GE(RSC_MaterialPhysicalPropertySoft, poissons_ratio, 0);
+            RSC_EXPECT_LE(RSC_MaterialPhysicalPropertySoft, poissons_ratio, 0.5);
+            RSC_EXPECT_GE(RSC_MaterialPhysicalPropertySoft, min_expansion, -1);
+            RSC_EXPECT_GE(RSC_MaterialPhysicalPropertySoft, max_expansion, min_expansion);
+        }
+    );
 }
 
-void RSC_MaterialPhysicalPropertySoft::_read(const RS_CharacterizationPropertyTree& rsc_tree) {
-    RSC_EssenceBase::_read(rsc_tree);
-    material_reference = rsc_tree.get("MaterialReference", material_reference);
-    elastic_modulus = rsc_tree.get("ElasticModulus", elastic_modulus);
-    fail_stress = rsc_tree.get("FailStress", fail_stress);
-    density = rsc_tree.get("Density", density);
-    poissons_ratio = rsc_tree.get("PoissonsRatio", poissons_ratio);
-    min_expansion = rsc_tree.get("MinExpansion", min_expansion);
-    max_expansion = rsc_tree.get("MaxExpansion", max_expansion);
+void RSC_MaterialPhysicalPropertySoft::_read(const RS_RSCPropertyTreeReader& tree) {
+    RSC_EssenceBase::_read(tree);
+    material_reference = tree.get("material_reference", material_reference);
+    elastic_modulus = tree.get("elastic_modulus", elastic_modulus);
+    fail_stress = tree.get("fail_stress", fail_stress);
+    density = tree.get("density", density);
+    poissons_ratio = tree.get("poissons_ratio", poissons_ratio);
+    min_expansion = tree.get("min_expansion", min_expansion);
+    max_expansion = tree.get("max_expansion", max_expansion);
+}
+
+void RSC_MaterialPhysicalPropertySoft::_write(RS_RSCPropertyTreeWriter& tree) const {
+    RSC_EssenceBase::_write(tree);
+    tree.add("material_reference", material_reference);
+    tree.add("elastic_modulus", elastic_modulus);
+    tree.add("fail_stress", fail_stress);
+    tree.add("density", density);
+    tree.add("poissons_ratio", poissons_ratio);
+    tree.add("min_expansion", min_expansion);
+    tree.add("max_expansion", max_expansion);
 }
 
 bool RSC_MaterialPhysicalPropertyRigid::operator==(
@@ -60,15 +81,25 @@ bool RSC_MaterialPhysicalPropertyRigid::operator==(
     return RSC_MaterialPhysicalPropertyBase::operator==(other) && density == other.density;
 }
 
-void RSC_MaterialPhysicalPropertyRigid::_validate() const {
-    RSC_EssenceBase::_validate();
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyRigid, density, 0);
+void RSC_MaterialPhysicalPropertyRigid::_validate(RS_RSCValidator& validator) const {
+    RSC_EssenceBase::_validate(validator);
+    validator.submitValidatorIfNotExists(
+        "RSC_MaterialPhysicalPropertyRigid::_validate", this, [this] {
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyRigid, density, 0);
+        }
+    );
 }
 
-void RSC_MaterialPhysicalPropertyRigid::_read(const RS_CharacterizationPropertyTree& rsc_tree) {
-    RSC_EssenceBase::_read(rsc_tree);
-    material_reference = rsc_tree.get("MaterialReference", material_reference);
-    density = rsc_tree.get("Density", density);
+void RSC_MaterialPhysicalPropertyRigid::_read(const RS_RSCPropertyTreeReader& tree) {
+    RSC_EssenceBase::_read(tree);
+    material_reference = tree.get("material_reference", material_reference);
+    density = tree.get("density", density);
+}
+
+void RSC_MaterialPhysicalPropertyRigid::_write(RS_RSCPropertyTreeWriter& tree) const {
+    RSC_EssenceBase::_write(tree);
+    tree.add("material_reference", material_reference);
+    tree.add("density", density);
 }
 
 bool RSC_MaterialPhysicalPropertyAtlas::operator==(
@@ -78,20 +109,32 @@ bool RSC_MaterialPhysicalPropertyAtlas::operator==(
            com_position == other.com_position && inertia == other.inertia;
 }
 
-void RSC_MaterialPhysicalPropertyAtlas::_validate() const {
-    RSC_EssenceBase::_validate();
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, mass, 0);
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[0][0], 0);
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[1][1], 0);
-    RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[2][2], 0);
+void RSC_MaterialPhysicalPropertyAtlas::_validate(RS_RSCValidator& validator) const {
+    RSC_EssenceBase::_validate(validator);
+    validator.submitValidatorIfNotExists(
+        "RSC_MaterialPhysicalPropertyAtlas::_validate", this, [this] {
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, mass, 0);
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[0][0], 0);
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[1][1], 0);
+            RSC_EXPECT_GT(RSC_MaterialPhysicalPropertyAtlas, inertia[2][2], 0);
+        }
+    );
 }
 
-void RSC_MaterialPhysicalPropertyAtlas::_read(const RS_CharacterizationPropertyTree& rsc_tree) {
-    RSC_EssenceBase::_read(rsc_tree);
-    material_reference = rsc_tree.get("MaterialReference", material_reference);
-    mass = rsc_tree.get("Mass", mass);
-    com_position = readVec3rf(rsc_tree.get("COMPosition", string("0,0,0")));
-    inertia = readMat3rf(rsc_tree.get("Inertia", string("0,0,0,0,0,0,0,0,0")));
+void RSC_MaterialPhysicalPropertyAtlas::_read(const RS_RSCPropertyTreeReader& tree) {
+    RSC_EssenceBase::_read(tree);
+    material_reference = tree.get("material_reference", material_reference);
+    mass = tree.get("mass", mass);
+    com_position = readVec3rf(tree, "com_position", com_position);
+    inertia = readMat3rf(tree, "inertia");
+}
+
+void RSC_MaterialPhysicalPropertyAtlas::_write(RS_RSCPropertyTreeWriter& tree) const {
+    RSC_EssenceBase::_write(tree);
+    tree.add("material_reference", material_reference);
+    tree.add("mass", mass);
+    writeVec3rf(tree, "com_position", com_position);
+    writeMat3rf(tree, "inertia", inertia);
 }
 
 bool RSC_MaterialOpticalPropertySimpleMicrofacet::operator==(
@@ -105,19 +148,27 @@ bool RSC_MaterialOpticalPropertySimpleMicrofacet::operator==(
            emission_intensity == other.emission_intensity;
 }
 
-void RSC_MaterialOpticalPropertySimpleMicrofacet::_read(
-    const RS_CharacterizationPropertyTree& rsc_tree
-) {
-    RSC_EssenceBase::_read(rsc_tree);
-    material_reference = rsc_tree.get("MaterialReference", material_reference);
-    albedo_texture_reference = rsc_tree.get("AlbedoTextureReference", albedo_texture_reference);
+void RSC_MaterialOpticalPropertySimpleMicrofacet::_read(const RS_RSCPropertyTreeReader& tree) {
+    RSC_EssenceBase::_read(tree);
+    material_reference = tree.get("material_reference", material_reference);
+    albedo_texture_reference = tree.get("albedo_texture_reference", albedo_texture_reference);
     roughness_metalness_texture_reference =
-        rsc_tree.get("RoughnessMetalnessTextureReference", roughness_metalness_texture_reference);
-    is_transparent = rsc_tree.get("IsTransparent", is_transparent);
-    ior = rsc_tree.get("IOR", ior);
-    emission_texture_reference =
-        rsc_tree.get("EmissionTextureReference", emission_texture_reference);
-    emission_intensity = rsc_tree.get("EmissionIntensity", emission_intensity);
+        tree.get("roughness_metalness_texture_reference", roughness_metalness_texture_reference);
+    is_transparent = tree.get("is_transparent", is_transparent);
+    ior = tree.get("ior", ior);
+    emission_texture_reference = tree.get("emission_texture_reference", emission_texture_reference);
+    emission_intensity = tree.get("emission_intensity", emission_intensity);
+}
+
+void RSC_MaterialOpticalPropertySimpleMicrofacet::_write(RS_RSCPropertyTreeWriter& tree) const {
+    RSC_EssenceBase::_write(tree);
+    tree.add("material_reference", material_reference);
+    tree.add("albedo_texture_reference", albedo_texture_reference);
+    tree.add("roughness_metalness_texture_reference", roughness_metalness_texture_reference);
+    tree.add("is_transparent", is_transparent);
+    tree.add("ior", ior);
+    tree.add("emission_texture_reference", emission_texture_reference);
+    tree.add("emission_intensity", emission_intensity);
 }
 
 }  // namespace rsc

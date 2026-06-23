@@ -8,8 +8,8 @@
 
 #include "rise_origin/rsc/rsc_base.h"
 #include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rsc_entity_base.h"
 
 namespace rise {
@@ -28,8 +28,9 @@ class RSC_CosmicBackgroundBase : public RSC_EntityBase {
     }
 
    protected:
-    void _validate() const override {}
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override {}
+    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
+    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
 };
 
 /**
@@ -57,8 +58,10 @@ class RSC_CosmicBackgroundUniform : public RSC_CosmicBackgroundBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -94,8 +97,10 @@ class RSC_CosmicBackgroundGradient : public RSC_CosmicBackgroundBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 /**
@@ -135,8 +140,10 @@ class RSC_CosmicBackgroundHosekWilkie : public RSC_CosmicBackgroundBase {
     }
 
    protected:
-    void _validate() const override;
-    void _read(const RS_CharacterizationPropertyTree& rsc_tree) override;
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
 }  // namespace rsc

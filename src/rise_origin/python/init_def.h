@@ -54,12 +54,19 @@ inline void initRSPYDefinitions(py::module &m) {
     py::class_<RVec3rf>(m, "RVec3rf")
         .def(py::init<>())
         .def(py::init<RFloat, RFloat, RFloat>(), py::arg("x"), py::arg("y"), py::arg("z"))
+        .def(py::init([](const py::sequence &s) {
+            if (py::len(s) != 3) {
+                throw std::runtime_error("RVec3rf expects a sequence of 3 values");
+            }
+            return RVec3rf(s[0].cast<RFloat>(), s[1].cast<RFloat>(), s[2].cast<RFloat>());
+        }))
         .def_static("zero", &RVec3rf::zero)
         .def_static("one", &RVec3rf::one)
         .def_static("full", &RVec3rf::full, py::arg("value"))
         .def_readwrite("x", &RVec3rf::x)
         .def_readwrite("y", &RVec3rf::y)
         .def_readwrite("z", &RVec3rf::z);
+    py::implicitly_convertible<py::sequence, RVec3rf>();
 
     py::class_<RQuat3rf>(m, "RQuat3rf")
         .def(py::init<>())
@@ -70,11 +77,20 @@ inline void initRSPYDefinitions(py::module &m) {
             py::arg("z"),
             py::arg("w")
         )
+        .def(py::init([](const py::sequence &s) {
+            if (py::len(s) != 4) {
+                throw std::runtime_error("RQuat3rf expects a sequence of 4 values");
+            }
+            return RQuat3rf(
+                s[0].cast<RFloat>(), s[1].cast<RFloat>(), s[2].cast<RFloat>(), s[3].cast<RFloat>()
+            );
+        }))
         .def_static("unit", &RQuat3rf::unit)
         .def_readwrite("x", &RQuat3rf::x)
         .def_readwrite("y", &RQuat3rf::y)
         .def_readwrite("z", &RQuat3rf::z)
         .def_readwrite("w", &RQuat3rf::w);
+    py::implicitly_convertible<py::sequence, RQuat3rf>();
 
     py::class_<RMat3rf>(m, "RMat3rf")
         .def(py::init<>())
@@ -137,18 +153,34 @@ inline void initRSPYDefinitions(py::module &m) {
             py::arg("g"),
             py::arg("b")
         )
+        .def(py::init([](const py::sequence &s) {
+            if (py::len(s) != 3) {
+                throw std::runtime_error("RColor3b expects a sequence of 3 values");
+            }
+            return RColor3b(
+                s[0].cast<unsigned char>(), s[1].cast<unsigned char>(), s[2].cast<unsigned char>()
+            );
+        }))
         .def_static("zero", &RColor3b::zero)
         .def_readwrite("r", &RColor3b::r)
         .def_readwrite("g", &RColor3b::g)
         .def_readwrite("b", &RColor3b::b);
+    py::implicitly_convertible<py::sequence, RColor3b>();
 
     py::class_<RColor3f>(m, "RColor3f")
         .def(py::init<>())
         .def(py::init<float, float, float>(), py::arg("r"), py::arg("g"), py::arg("b"))
+        .def(py::init([](const py::sequence &s) {
+            if (py::len(s) != 3) {
+                throw std::runtime_error("RColor3f expects a sequence of 3 values");
+            }
+            return RColor3f(s[0].cast<float>(), s[1].cast<float>(), s[2].cast<float>());
+        }))
         .def_static("zero", &RColor3f::zero)
         .def_readwrite("r", &RColor3f::r)
         .def_readwrite("g", &RColor3f::g)
         .def_readwrite("b", &RColor3f::b);
+    py::implicitly_convertible<py::sequence, RColor3f>();
 
     py::class_<RBound3rf>(m, "RBound3rf")
         .def(py::init<>())
@@ -161,6 +193,19 @@ inline void initRSPYDefinitions(py::module &m) {
             py::arg("max_y"),
             py::arg("max_z")
         )
+        .def(py::init([](const py::sequence &s) {
+            if (py::len(s) != 6) {
+                throw std::runtime_error("RBound3rf expects a sequence of 6 values");
+            }
+            return RBound3rf(
+                s[0].cast<RFloat>(),
+                s[1].cast<RFloat>(),
+                s[2].cast<RFloat>(),
+                s[3].cast<RFloat>(),
+                s[4].cast<RFloat>(),
+                s[5].cast<RFloat>()
+            );
+        }))
         .def_static("zero", &RBound3rf::zero)
         .def_static("lowest", &RBound3rf::lowest)
         .def_static("highest", &RBound3rf::highest)
@@ -170,6 +215,7 @@ inline void initRSPYDefinitions(py::module &m) {
         .def_readwrite("max_y", &RBound3rf::max_y)
         .def_readwrite("min_z", &RBound3rf::min_z)
         .def_readwrite("max_z", &RBound3rf::max_z);
+    py::implicitly_convertible<py::sequence, RBound3rf>();
 
     py::class_<RBound3rui>(m, "RBound3rui")
         .def(py::init<>())
@@ -182,6 +228,19 @@ inline void initRSPYDefinitions(py::module &m) {
             py::arg("max_y"),
             py::arg("max_z")
         )
+        .def(py::init([](const py::sequence &s) {
+            if (py::len(s) != 6) {
+                throw std::runtime_error("RBound3rui expects a sequence of 6 values");
+            }
+            return RBound3rui(
+                s[0].cast<RIndex>(),
+                s[1].cast<RIndex>(),
+                s[2].cast<RIndex>(),
+                s[3].cast<RIndex>(),
+                s[4].cast<RIndex>(),
+                s[5].cast<RIndex>()
+            );
+        }))
         .def_static("zero", &RBound3rui::zero)
         .def_static("lowest", &RBound3rui::lowest)
         .def_static("highest", &RBound3rui::highest)
@@ -191,6 +250,7 @@ inline void initRSPYDefinitions(py::module &m) {
         .def_readwrite("max_y", &RBound3rui::max_y)
         .def_readwrite("min_z", &RBound3rui::min_z)
         .def_readwrite("max_z", &RBound3rui::max_z);
+    py::implicitly_convertible<py::sequence, RBound3rui>();
 
     py::class_<RBound3ri>(m, "RBound3ri")
         .def(py::init<>())
@@ -209,6 +269,19 @@ inline void initRSPYDefinitions(py::module &m) {
             py::arg("max_y"),
             py::arg("max_z")
         )
+        .def(py::init([](const py::sequence &s) {
+            if (py::len(s) != 6) {
+                throw std::runtime_error("RBound3ri expects a sequence of 6 values");
+            }
+            return RBound3ri(
+                s[0].cast<RSignedIndex>(),
+                s[1].cast<RSignedIndex>(),
+                s[2].cast<RSignedIndex>(),
+                s[3].cast<RSignedIndex>(),
+                s[4].cast<RSignedIndex>(),
+                s[5].cast<RSignedIndex>()
+            );
+        }))
         .def_static("zero", &RBound3ri::zero)
         .def_static("lowest", &RBound3ri::lowest)
         .def_static("highest", &RBound3ri::highest)
@@ -218,6 +291,7 @@ inline void initRSPYDefinitions(py::module &m) {
         .def_readwrite("max_y", &RBound3ri::max_y)
         .def_readwrite("min_z", &RBound3ri::min_z)
         .def_readwrite("max_z", &RBound3ri::max_z);
+    py::implicitly_convertible<py::sequence, RBound3ri>();
 
     py::enum_<RSE_MathExprOperator>(m, "RSE_MathExprOperator")
         .value("RSE_ME_END", RSE_ME_END)

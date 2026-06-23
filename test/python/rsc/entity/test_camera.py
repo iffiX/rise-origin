@@ -8,8 +8,6 @@ from rise_origin.rsc.entity import (
     CameraPerspectiveFree,
     CameraPerspectiveRecord,
     CameraPerspectiveRigidBodyLinked,
-    StructureVoxel,
-    StructureVoxelBody,
 )
 
 
@@ -27,16 +25,6 @@ def test_camera_embedded_record():
         "cam", record=CameraPerspectiveRecord("sight", has_rgb=True)
     )
     assert camera.record.has_rgb is True
-
-
-def test_rigidbodylinked_attached_to_resolves():
-    body = StructureVoxelBody.box(2, 2, 2, voxel_size=0.02)
-    StructureVoxel("dog", bodies=[body])
-    eye = CameraPerspectiveRigidBodyLinked(
-        "eye", attached_to=body, relative_anchor=(0.1, 0, 0)
-    )
-    assert eye.structure_name == "dog"
-    assert eye.body_sid == 0
 
 
 def test_rigidbodylinked_explicit_ids():

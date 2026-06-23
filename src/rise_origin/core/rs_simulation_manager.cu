@@ -8,8 +8,8 @@
 #include "rise_origin/core/rs_kernel_manager.h"
 #include "rise_origin/core/rs_simulation_executor.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rise_origin/utils/string/rs_format.h"
 #include "rise_origin/utils/rs_iterators.h"
+#include "rise_origin/utils/string/rs_format.h"
 #include "rs_simulation_manager.h"
 
 using namespace std;
@@ -29,8 +29,7 @@ void RS_SimulationManager::init() {
     if (logging::get("root")) _sm_logger = logging::get("root")->clone("simulation manager");
     host_provider = getMemoryProvider({RSE_DEVICE_TYPE_CPU, 0});
     device_provider = getMemoryProvider(device);
-    if (_sm_logger) 
-        RS_LOG(_sm_logger, info, "Simulation manager initialized.");
+    if (_sm_logger) RS_LOG(_sm_logger, info, "Simulation manager initialized.");
 }
 
 void RS_SimulationManager::free() {
@@ -49,9 +48,9 @@ RS_WorldLocalHandle RS_SimulationManager::run(RSC_World world, RS_WorldCallback 
             RS_HostExecutionException("A simulation is already run by the simulation manager.")
         );
 
-    // Execution settings live in the world's simulation sub-characterization. The executor caches the
-    // per-step ones in its init(); here we only need the manager-level ones.
-    const auto &sim_rsc = world.simulation;
+    // Execution settings live in the world's simulation sub-characterization. The executor caches
+    // the per-step ones in its init(); here we only need the manager-level ones.
+    const RSC_Simulation &sim_rsc = world.simulation;
     RFloat max_time = sim_rsc.runtime.max_time;
 
     simulation = make_shared<RS_Simulation>();
@@ -107,8 +106,17 @@ bool RS_SimulationManager::_initSim(
 ) {
     sim->setStatusAndStatusInfo(RSE_WORLD_INITIALIZING, "");
 
-    if (!world.is_valid) {
-        sim->setStatusAndStatusInfo(RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG, world.invalid_reason);
+    try {
+        RS_Timer timer;
+        sim->validator.validate(world);
+        RS_LOG(
+            _sm_logger,
+            debug,
+            _getLogFormatter(sim->name),
+            format("World validation takes {}", timer.elapsedTimeString())
+        );
+    } catch (RS_BaseException &e) {
+        sim->setStatusAndStatusInfo(RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG, e.what());
         return false;
     }
 
@@ -210,14 +218,6 @@ void RS_SimulationManager::_runSim(
 
     RSE_WorldStatus end_status = RSE_WORLD_END_SUCCESS;
     while (kernel.getHostTime() < max_time) {
-        if (kernel.isPaused()) {
-            if (sim->status != RSE_WORLD_PAUSED) {
-                sim->setStatusAndStatusInfo(RSE_WORLD_PAUSED, "");
-                RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "paused.");
-            }
-            this_thread::sleep_for(chrono::milliseconds(10));
-            continue;
-        }
         if (kernel.isStopConditionMet() || kernel.isTerminated()) {
             sim->setStatusAndStatusInfo(RSE_WORLD_TERMINATING, "");
             RS_LOG(
@@ -235,6 +235,14 @@ void RS_SimulationManager::_runSim(
 
             _flushSimRecorders(sim);
             break;
+        }
+        if (kernel.isPaused()) {
+            if (sim->status != RSE_WORLD_PAUSED) {
+                sim->setStatusAndStatusInfo(RSE_WORLD_PAUSED, "");
+                RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "paused.");
+            }
+            this_thread::sleep_for(chrono::milliseconds(10));
+            continue;
         }
 
         if (!exec.step()) {
@@ -316,8 +324,7 @@ void RS_SimulationManager::_syncSimRecorders(const std::shared_ptr<RS_Simulation
             )
             .wait();
 
-        auto intersect_region_records =
-            sim->kernel_manager->getRecorderIntersectRegionRecords();
+        auto intersect_region_records = sim->kernel_manager->getRecorderIntersectRegionRecords();
         thread_pool
             .submitLoop(
                 0,
