@@ -4,6 +4,10 @@
 #ifndef RS_KERNEL_STRUCTURE_VOXEL_MANAGER_H
 #define RS_KERNEL_STRUCTURE_VOXEL_MANAGER_H
 
+#include <list>
+#include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -119,8 +123,6 @@ class RS_KernelStructureVoxelManager {
         RS_KernelManager *kernel_manager,
         const SupportedRSC &structure_rsc
     );
-
-    ~RS_KernelStructureVoxelManager();
 
     /**
      * @brief Commit the built structure to the kernel context.
@@ -355,8 +357,8 @@ class RS_KernelStructureVoxelManager {
      * @brief Physical kind (soft / fixed / rigid) for the segment's material,
      *        resolved at init from the unified material manager.
      */
-    RSE_StructureVoxelMaterialType
-    getSegmentPhysicalType(RIndex body_sid, RIndex segment_bid) const;
+    RSE_StructureVoxelMaterialType getSegmentPhysicalType(RIndex body_sid, RIndex segment_bid)
+        const;
 
     /**
      * @brief Count voxels of a given segment whose grid indices fall inside
@@ -367,6 +369,16 @@ class RS_KernelStructureVoxelManager {
         RIndex segment_bid,
         const RBound3ri &voxel_range
     ) const;
+
+    /**
+     * @brief Set the build cache byte budget, evicting down to it.
+     */
+    static void setBuildCacheByteSize(RBigSize byte_size);
+
+    /**
+     * @brief Drop every cached body build, keeping the byte budget.
+     */
+    static void clearBuildCache();
 
    private:
     /**
@@ -863,6 +875,58 @@ class RS_KernelStructureVoxelManager {
     using VoxelHashmap =
         device::RS_HashStableFlatMap<RS_VoxelKey, RIndex, uint32_t, RS_VoxelKeyHasher, 8>;
 
+    // Lightweight per-voxel record kept after commit for getSegmentVoxelNumInRange.
+    struct VoxelOccupancyData {
+        RIndex body_sid;
+        RIndex segment_bid;
+        RIndex rigid_body_sid;
+        RSignedIndex index_x, index_y, index_z;
+    };
+
+    struct BuildCachedBody {
+        // Pre-filter temporary voxels as built, with body-local sids and a stale pose
+        std::vector<VoxelData> all_voxels;
+
+        // This body's links as built, with body-local voxel sids
+        std::vector<LinkData> links;
+
+        // Per segment, which material references it contains; geometry-only, reused on any hit
+        std::map<RIndex, std::vector<bool>> segment_material_flags;
+
+        // Resolved material references used to produce the build, compared on a hit
+        std::vector<MaterialResolvedData> materials;
+
+        // Scoped provider that owns the hashmap memory
+        std::unique_ptr<RS_MemoryScopedProvider> provider;
+
+        // Coordinate hashmap over all_voxels, reused read-only on a hit
+        mutable VoxelHashmap hashmap;
+
+        // True when the cached build was produced for a fixed structure
+        bool is_fixed = false;
+
+        // Voxel, link and rigid body sid offsets at cache time, so reuse rebases by a delta
+        RIndex base_voxel_sid = RS_NULL_INDEX;
+        RIndex base_link_sid = RS_NULL_INDEX;
+        RIndex base_rigid_body_sid = RS_NULL_INDEX;
+
+        // Total retained bytes, for byte-budget accounting
+        RBigSize byte_size = 0;
+    };
+
+    // LRU of per-body builds, shared by every manager instance.
+    struct BuildCache {
+        std::unordered_map<
+            const rsc::RSC_StructureVoxelBody *,
+            std::pair<
+                std::shared_ptr<const BuildCachedBody>,
+                std::list<const rsc::RSC_StructureVoxelBody *>::iterator>>
+            map;
+        std::list<const rsc::RSC_StructureVoxelBody *> lru;
+        RBigSize budget = 0;
+        RBigSize total = 0;
+    };
+
     template <RSE_FloatType FloatMemAccuracy>
     class KernelStructureData {
        public:
@@ -937,9 +1001,6 @@ class RS_KernelStructureVoxelManager {
     /// Maps (body_sid, segment_bid) -> rigid_body_sid
     std::map<RS_OrderedPair<RIndex, RIndex>, RIndex> _rigid_body_sid_map;
 
-    /// Maps (body_sid) -> hashmap(x, y, z) -> voxel_tmp_index
-    std::unordered_map<RIndex, VoxelHashmap> _voxel_tmp_index_map;
-
     /// Structure data
     std::vector<VoxelData> _voxels;
     std::vector<LinkData> _links;
@@ -948,10 +1009,12 @@ class RS_KernelStructureVoxelManager {
     std::vector<ConstraintJointData> _constraint_joints;
     std::vector<VoxelMaterialData> _voxel_materials;
     std::vector<LinkMaterialData> _link_materials;
-    std::vector<std::pair<RIndex, RIndex>> _fixed_connected_rigid_body_sid;
 
-    /// Stores all voxels, indexable by tmp_index
-    std::unordered_map<RIndex, std::vector<VoxelData>> _all_voxels;
+    /// Lightweight voxel records kept after commit, replacing the freed _voxels array
+    std::vector<VoxelOccupancyData> _voxel_occupancy;
+
+    /// Rigid body origins kept after commit, replacing the freed _rigid_bodies array
+    std::vector<RVec3rf> _rigid_body_origin_b_position;
 
     /// Signal data
     RSize _expansion_signal_num = 0;
@@ -982,80 +1045,166 @@ class RS_KernelStructureVoxelManager {
     device::RS_Array<RIndex, 1> _constraint_joint_record_sid;
     device::RS_Array<RHandle, 1> _constraint_joint_record_handles;
 
-    /// Concrete view of the variant characterization held by this manager.
+    /// Build cache shared by every manager, with its own lock
+    static BuildCache _build_cache;
+    static std::mutex _build_cache_mutex;
+
+    /**
+     * @brief Concrete view of this manager's variant characterization.
+     */
     const rsc::RSC_StructureVoxel &_structure() const { return _rsc.as<rsc::RSC_StructureVoxel>(); }
     rsc::RSC_StructureVoxel &_structure() { return _rsc.as<rsc::RSC_StructureVoxel>(); }
 
-    /// Resolve every dependent material's physical kind and scalar data via the unified
-    /// material manager's query interface. Populates `_mat_resolved_data` (indexed by material_sid)
-    /// and `_dependent_material_gid_set`.
+    /**
+     * @brief Resolve each dependent material's physical kind and data.
+     */
     void _resolveMaterials();
 
+    /**
+     * @brief Whether resolved materials match a cached build.
+     */
+    bool _isMaterialCoherent(const std::vector<MaterialResolvedData> &cached_materials) const;
+
+    /**
+     * @brief Build one body's voxels, links and rigid bodies.
+     */
     void _addBody(const rsc::RSC_StructureVoxelBody &body_rsc);
 
+    /**
+     * @brief Add one constraint joint between two rigid bodies.
+     */
     void _addConstraint(const rsc::RSC_StructureVoxelConstraint &constraint_rsc);
 
+    /**
+     * @brief Build the voxel and link material tables.
+     */
     void _addMaterials();
 
+    /**
+     * @brief Allocate the controller signal slots for this structure.
+     */
     void _addSignals();
 
+    /**
+     * @brief Make a constraint joint from a constraint characterization.
+     */
     ConstraintJointData _createBasicConstraintJoint(
         const rsc::RSC_StructureVoxelConstraint &constraint_rsc,
         logic::RSE_ConstraintJointType constraint_type,
         RIndex joint_sid
     );
 
+    /**
+     * @brief Graph-color the constraint joints for parallel solving.
+     */
     void _colorConstraintJoints();
 
+    /**
+     * @brief Check the structure stays within kernel size limits.
+     */
     void _checkStructureLimits() const;
 
+    /**
+     * @brief Check every rigid body has a valid inertia.
+     */
     void _checkRigidBodyInertia() const;
 
+    /**
+     * @brief Gather all host build data into device arrays.
+     */
     template <RSE_FloatType FloatMemAccuracy>
     KernelStructureData<FloatMemAccuracy> _getAll() const;
 
+    /**
+     * @brief Keep lightweight query forms and free the heavy build arrays.
+     */
+    void _cleanupGeneratedData();
+
+    /**
+     * @brief Push the built structure data to the device.
+     */
     void _initKernelData();
 
+    /**
+     * @brief Free the structure data from the device.
+     */
     void _freeKernelData();
 
+    /**
+     * @brief Push the recorder record layouts to the device.
+     */
     void _initKernelRecordData();
 
+    /**
+     * @brief Free the recorder record layouts from the device.
+     */
     void _freeKernelRecordData();
 
+    /**
+     * @brief Push the controller signal layouts to the device.
+     */
     void _initKernelSignalData();
 
+    /**
+     * @brief Free the controller signal layouts from the device.
+     */
     void _freeKernelSignalData();
 
-    /// Set this structure's entry in `host_data.structure_emissive_voxel_handles_map`
-    /// to the voxel handles of its emissive voxels, then rebuild
-    /// `ctx.structure_emissive_voxel_handles` by concatenating and sorting all
-    /// map entries.
+    /**
+     * @brief Register this structure's emissive voxel handles.
+     */
     void _initKernelEmissiveVoxelHandlesData(RSize voxel_offset);
 
-    /// Erase this structure's entry from
-    /// `host_data.structure_emissive_voxel_handles_map`, then rebuild
-    /// `ctx.structure_emissive_voxel_handles` by concatenating and sorting the
-    /// remaining map entries.
+    /**
+     * @brief Unregister this structure's emissive voxel handles.
+     */
     void _freeKernelEmissiveVoxelHandlesData();
 
-    /// Shared body of freeze()/unfreeze(): flip every voxel and rigid body to is_static (or
-    /// restore to is_fixed) and toggle the compute, signal and record layouts. The voxel and
-    /// voxel material layouts stay active so the structure remains collidable and rendered.
+    /**
+     * @brief Toggle simulation while keeping the structure rendered.
+     */
     void _freezeKernelData(bool is_freeze);
 
+    /**
+     * @brief Convert an RSC hinge control mode to the joint mode.
+     */
     static logic::RSE_ConstraintJointHingeControlMode _convertToConstraintJointHingeControlMode(
         rsc::RSE_StructureVoxelHingeControlMode mode
     );
 
+    /**
+     * @brief Convert an RSC prismatic control mode to the joint mode.
+     */
     static logic::RSE_ConstraintJointPrismaticControlMode
     _convertToConstraintJointPrismaticControlMode(rsc::RSE_StructureVoxelPrismaticControlMode mode);
 
+    /**
+     * @brief Pick spaced-out structure scope ids for a name.
+     */
     static std::vector<RIndex>
     _selectSID(const std::string &structure_name, RSize select_num, RSize range);
 
+    /**
+     * @brief Partition a body's voxel grid into cuboids.
+     */
     static std::vector<Cuboid> _partitionSpace(RSize x_size, RSize y_size, RSize z_size);
 
+    /**
+     * @brief Compute the structure's world space bounding box.
+     */
     static RBound3f _computeWorldBound(const rsc::RSC_StructureVoxel &structure_rsc);
+
+    /**
+     * @brief Look up a body's cached build and get a persistent shared ptr reference.
+     */
+    static std::shared_ptr<const BuildCachedBody> _tryGetCachedBody(
+        const rsc::RSC_StructureVoxelBody *key
+    );
+
+    /**
+     * @brief Cache a body build, evicting down to budget.
+     */
+    static void _putCachedBody(const rsc::RSC_StructureVoxelBody *key, BuildCachedBody entry);
 };
 
 /**

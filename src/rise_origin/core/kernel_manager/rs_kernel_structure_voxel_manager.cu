@@ -30,6 +30,9 @@ using namespace rise::logic;
 
 namespace rise {
 
+RS_KernelStructureVoxelManager::BuildCache RS_KernelStructureVoxelManager::_build_cache;
+std::mutex RS_KernelStructureVoxelManager::_build_cache_mutex;
+
 /*****************************************************************
  * RS_KernelStructureVoxelManager
  *****************************************************************/
@@ -127,10 +130,7 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
         _rigid_body_surface_voxel_num,
         _joint_num
     );
-}
-
-RS_KernelStructureVoxelManager::~RS_KernelStructureVoxelManager() {
-    for (auto &voxel_tmp_index_map : _voxel_tmp_index_map) voxel_tmp_index_map.second.free();
+    RS_LOG(_kernel_manager->getLogger(), info, "Added structure {}", _structure().name);
 }
 
 void RS_KernelStructureVoxelManager::commit() {
@@ -141,6 +141,11 @@ void RS_KernelStructureVoxelManager::commit() {
     _initKernelRecordData();
     _kernel_manager->exitKernelDataCriticalZone();
     _is_kernel_data_inited = true;
+
+    // The build is now on the device, so free the heavy host arrays and keep only the lightweight
+    // forms the post-commit queries read.
+    _cleanupGeneratedData();
+
     RS_LOG(
         _kernel_manager->getLogger(),
         debug,
@@ -354,7 +359,7 @@ RVec3rf RS_KernelStructureVoxelManager::getRigidBodyPositionFromRelativeAnchor(
     auto &body_rsc = _structure().bodies[body_sid];
     auto relative_diff = relative_anchor - body_rsc.relative_origin_position;
     auto body_local_anchor = body_rsc.relative_orientation.inverse().rotateVec3D(relative_diff);
-    auto result = body_local_anchor - _rigid_bodies[rigid_body_sid].origin_b_position;
+    auto result = body_local_anchor - _rigid_body_origin_b_position[rigid_body_sid];
     return result;
 }
 
@@ -381,7 +386,7 @@ RSize RS_KernelStructureVoxelManager::getSegmentVoxelNumInRange(
 ) const {
     RSize count = 0;
 
-    for (const auto &voxel : _voxels) {
+    for (const auto &voxel : _voxel_occupancy) {
         // Check if voxel belongs to the specified body and segment
         if (voxel.body_sid != body_sid || voxel.segment_bid != segment_bid) {
             continue;
@@ -401,6 +406,25 @@ RSize RS_KernelStructureVoxelManager::getSegmentVoxelNumInRange(
     }
 
     return count;
+}
+
+void RS_KernelStructureVoxelManager::setBuildCacheByteSize(RBigSize byte_size) {
+    std::lock_guard<std::mutex> lock(_build_cache_mutex);
+    _build_cache.budget = byte_size;
+    while (_build_cache.total > _build_cache.budget && !_build_cache.lru.empty()) {
+        const rsc::RSC_StructureVoxelBody *victim = _build_cache.lru.back();
+        auto it = _build_cache.map.find(victim);
+        _build_cache.total -= it->second.first->byte_size;
+        _build_cache.map.erase(it);
+        _build_cache.lru.pop_back();
+    }
+}
+
+void RS_KernelStructureVoxelManager::clearBuildCache() {
+    std::lock_guard<std::mutex> lock(_build_cache_mutex);
+    _build_cache.map.clear();
+    _build_cache.lru.clear();
+    _build_cache.total = 0;
 }
 
 void RS_KernelStructureVoxelManager::_resolveMaterials() {
@@ -478,226 +502,317 @@ void RS_KernelStructureVoxelManager::_resolveMaterials() {
     }
 }
 
+bool RS_KernelStructureVoxelManager::_isMaterialCoherent(
+    const std::vector<MaterialResolvedData> &cached_materials
+) const {
+    if (cached_materials.size() != _mat_resolved_data.size()) return false;
+    for (RSize i = 0; i < cached_materials.size(); i++) {
+        const auto &a = cached_materials[i];
+        const auto &b = _mat_resolved_data[i];
+        if (a.phys_type != b.phys_type || a.is_transparent != b.is_transparent ||
+            a.is_emissive != b.is_emissive || a.density != b.density || a.is_atlas != b.is_atlas ||
+            a.mass != b.mass || !(a.com_position == b.com_position) || !(a.inertia == b.inertia)) {
+            return false;
+        }
+    }
+    return true;
+}
+
 void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody &body_rsc) {
     RS_Timer timer;
 
     RIndex body_sid = _body_num++;
+    const bool is_fixed = _structure().is_fixed;
 
     RSize thread_count = _kernel_manager->getThreadPool()->size();
     RS_Barrier barrier(thread_count);
-
-    _voxel_tmp_index_map[body_sid].init(_scoped_host_provider.get());
 
     auto initial_body_orientation = _structure().orientation * body_rsc.relative_orientation;
     auto initial_body_origin_position =
         _structure().origin_position +
         _structure().orientation.rotateVec3D(body_rsc.relative_origin_position);
-    auto cuboids = _partitionSpace(body_rsc.x_voxels, body_rsc.y_voxels, body_rsc.z_voxels);
 
-    RS_LOG(
-        _kernel_manager->getLogger(),
-        debug,
-        "Add body {} preparation time {}",
-        body_sid,
-        timer.elapsedTimeString()
-    );
-    timer.reset();
+    // Sid offsets for this body, captured before any voxel, link or rigid body is added, so a
+    // reused build can rebase its body-local sids onto this structure's range.
+    RIndex added_voxel_start = _voxel_num;
+    RIndex added_link_start = _links.size();
+    RIndex added_rigid_body_start = _rigid_body_num;
+
+    // Reuse a cached build of this shared body when one exists. A fixed and a non-fixed structure
+    // build the same body differently, so a fixed mismatch falls back to a full rebuild.
+    const rsc::RSC_StructureVoxelBody *cache_key = &body_rsc;
+    auto cached = _tryGetCachedBody(cache_key);
+    if (cached && cached->is_fixed != is_fixed) cached = nullptr;
+    const bool is_coherent = cached && _isMaterialCoherent(cached->materials);
+
+    // Working voxels for this body and the coordinate hashmap. On a miss they are built fresh and
+    // moved into the cache; on a hit the voxels are a short-lived copy and the hashmap is reused.
+    std::vector<VoxelData> all_voxels;
+    RSize all_voxel_num = 0;
+    std::unique_ptr<RS_MemoryScopedProvider> hashmap_provider;
+    VoxelHashmap local_hashmap;
+    VoxelHashmap *active_hashmap = nullptr;
 
     //----------------------------------------------------------------
     // Step 1: Create temporary voxels
     //----------------------------------------------------------------
+    if (!cached) {
+        auto cuboids = _partitionSpace(body_rsc.x_voxels, body_rsc.y_voxels, body_rsc.z_voxels);
 
-    // Note: some of the temporary voxels, such as rigid voxels that's
-    // not the surface of the rigid body, will not be added to the
-    // global _voxels array
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Add body {} preparation time {}",
+            body_sid,
+            timer.elapsedTimeString()
+        );
+        timer.reset();
 
-    // Thread local info
-    vector<RCoord3> local_min_bound(thread_count, RCoord3::upperBound());
-    vector<RCoord3> local_max_bound(thread_count, RCoord3::lowerBound());
-    // Note: this is the actual physical bound, not coordinate
-    vector<RBound3f> local_space_bound(thread_count, RBound3f::lowest());
-    vector<RSize> local_voxel_count(thread_count, 0);
-    vector<RSize> local_voxel_offset(thread_count, 0);
-    vector<RSize> local_emissive_count(thread_count, 0);
+        // Note: some of the temporary voxels, such as rigid voxels that's
+        // not the surface of the rigid body, will not be added to the
+        // global _voxels array
 
-    // Global info
-    RCoord3 actual_min_bound = RCoord3::upperBound();
-    RCoord3 actual_max_bound = RCoord3::lowerBound();
-    RSize cuboid_count = cuboids.size();
-    RSize voxel_block_size = RS_CEIL_DIV(cuboid_count, thread_count);
+        // Thread local info
+        vector<RCoord3> local_min_bound(thread_count, RCoord3::upperBound());
+        vector<RCoord3> local_max_bound(thread_count, RCoord3::lowerBound());
+        // Note: this is the actual physical bound, not coordinate
+        vector<RBound3f> local_space_bound(thread_count, RBound3f::lowest());
+        vector<RSize> local_voxel_count(thread_count, 0);
+        vector<RSize> local_voxel_offset(thread_count, 0);
+        vector<RSize> local_emissive_count(thread_count, 0);
 
-    auto &tmp_voxels = _all_voxels[body_sid];
-    RSize tmp_voxel_num = 0;
+        // Global info
+        RCoord3 actual_min_bound = RCoord3::upperBound();
+        RCoord3 actual_max_bound = RCoord3::lowerBound();
+        RSize cuboid_count = cuboids.size();
+        RSize voxel_block_size = RS_CEIL_DIV(cuboid_count, thread_count);
 
-    _kernel_manager->getThreadPool()
-        ->submitLoop(
-            0,
-            thread_count,
-            [&](RIndex t) {
-                RCoord3 local_min_bound_v = RCoord3::upperBound();
-                RCoord3 local_max_bound_v = RCoord3::lowerBound();
+        _kernel_manager->getThreadPool()
+            ->submitLoop(
+                0,
+                thread_count,
+                [&](RIndex t) {
+                    RCoord3 local_min_bound_v = RCoord3::upperBound();
+                    RCoord3 local_max_bound_v = RCoord3::lowerBound();
 
-                std::vector<RIndex> local_array_indices;
-                std::vector<RCoord3> local_voxel_coords;
+                    std::vector<RIndex> local_array_indices;
+                    std::vector<RCoord3> local_voxel_coords;
 
-                // -------------------------------------
-                // Phase 1: Collect valid voxel indices.
-                // -------------------------------------
-                RIndex start_c = t * voxel_block_size;
-                RIndex end_c = RS_MIN(start_c + voxel_block_size, cuboid_count);
+                    // -------------------------------------
+                    // Phase 1: Collect valid voxel indices.
+                    // -------------------------------------
+                    RIndex start_c = t * voxel_block_size;
+                    RIndex end_c = RS_MIN(start_c + voxel_block_size, cuboid_count);
 
-                // Gather array indices of all non-empty voxels in per-thread vector.
-                for (RIndex c = start_c; c < end_c; c++) {
-                    const auto &cub = cuboids[c];
-                    for (RIndex z = cub.z_start; z < cub.z_end; z++) {
-                        for (RIndex y = cub.y_start; y < cub.y_end; y++) {
-                            for (RIndex x = cub.x_start; x < cub.x_end; x++) {
-                                RSize array_index = z * body_rsc.x_voxels * body_rsc.y_voxels +
-                                                    y * body_rsc.x_voxels + x;
-                                RCoord3 voxel_coord(
-                                    static_cast<RSignedIndex>(x),
-                                    static_cast<RSignedIndex>(y),
-                                    static_cast<RSignedIndex>(z)
-                                );
+                    // Gather array indices of all non-empty voxels in per-thread vector.
+                    for (RIndex c = start_c; c < end_c; c++) {
+                        const auto &cub = cuboids[c];
+                        for (RIndex z = cub.z_start; z < cub.z_end; z++) {
+                            for (RIndex y = cub.y_start; y < cub.y_end; y++) {
+                                for (RIndex x = cub.x_start; x < cub.x_end; x++) {
+                                    RSize array_index = z * body_rsc.x_voxels * body_rsc.y_voxels +
+                                                        y * body_rsc.x_voxels + x;
+                                    RCoord3 voxel_coord(
+                                        static_cast<RSignedIndex>(x),
+                                        static_cast<RSignedIndex>(y),
+                                        static_cast<RSignedIndex>(z)
+                                    );
 
-                                if (body_rsc.material_reference_sid[array_index] != RS_NULL_INDEX) {
-                                    local_array_indices.push_back(array_index);
-                                    local_voxel_coords.push_back(voxel_coord);
-                                    local_max_bound_v =
-                                        local_max_bound_v.max(voxel_coord + RCoord3::one());
-                                    local_min_bound_v = local_min_bound_v.min(voxel_coord);
+                                    if (body_rsc.material_reference_sid[array_index] !=
+                                        RS_NULL_INDEX) {
+                                        local_array_indices.push_back(array_index);
+                                        local_voxel_coords.push_back(voxel_coord);
+                                        local_max_bound_v =
+                                            local_max_bound_v.max(voxel_coord + RCoord3::one());
+                                        local_min_bound_v = local_min_bound_v.min(voxel_coord);
+                                    }
                                 }
                             }
                         }
                     }
+
+                    local_min_bound[t] = local_min_bound_v;
+                    local_max_bound[t] = local_max_bound_v;
+                    local_voxel_count[t] = local_array_indices.size();
+                    barrier.wait();
+
+                    // ----------------------------------------------------------
+                    // Phase 2: Compute global offsets in the main (t==0) thread.
+                    // ----------------------------------------------------------
+                    if (t == 0) {
+                        actual_min_bound = local_min_bound[0];
+                        actual_max_bound = local_max_bound[0];
+                        local_voxel_offset[0] = 0;
+                        for (RIndex i = 1; i < thread_count; i++) {
+                            actual_min_bound = actual_min_bound.min(local_min_bound[i]);
+                            actual_max_bound = actual_max_bound.max(local_max_bound[i]);
+                            local_voxel_offset[i] =
+                                local_voxel_offset[i - 1] + local_voxel_count[i - 1];
+                        }
+
+                        // The total number of newly added voxels is sum of all local_count.
+                        all_voxel_num =
+                            local_voxel_offset[thread_count - 1] + local_voxel_count.back();
+
+                        // Resize the temporary voxel array
+                        all_voxels.resize(all_voxel_num);
+                    }
+                    barrier.wait();
+
+                    // -----------------------------------------
+                    // Phase 3: Fill the voxel data in parallel.
+                    // -----------------------------------------
+                    RIndex local_offset = local_voxel_offset[t];
+                    RBound3f local_space_bound_v = RBound3f::lowest();
+
+                    for (RSize i = 0; i < local_array_indices.size(); i++) {
+                        RSize array_index = local_array_indices[i];
+                        const RCoord3 &voxel_coord = local_voxel_coords[i];
+
+                        auto voxel = VoxelData::preset();
+
+                        voxel.tmp_index = local_offset + i;
+
+                        // Note: voxel.sid is not set here, it will be set after we find
+                        // the actual needed voxels
+
+                        voxel.body_sid = body_sid;
+                        voxel.array_index = array_index;
+
+                        voxel.index_x = voxel_coord.x;
+                        voxel.index_y = voxel_coord.y;
+                        voxel.index_z = voxel_coord.z;
+
+                        voxel.material_sid = body_rsc.material_reference_sid[array_index];
+
+                        voxel.segment_bid = body_rsc.segment_bid[array_index];
+
+                        voxel.b_position = RVec3rf(
+                            (RFLOAT(voxel_coord.x) + RFLOAT(0.5)) * body_rsc.voxel_size,
+                            (RFLOAT(voxel_coord.y) + RFLOAT(0.5)) * body_rsc.voxel_size,
+                            (RFLOAT(voxel_coord.z) + RFLOAT(0.5)) * body_rsc.voxel_size
+                        );
+                        voxel.g_position = initial_body_origin_position +
+                                           initial_body_orientation.rotateVec3D(voxel.b_position);
+                        voxel.g_orientation = initial_body_orientation;
+
+                        // 0.87 > sqrt(3)/2, diagonal length of voxel
+                        RFloat radius = body_rsc.voxel_size * RFLOAT(0.87);
+                        RBound3f voxel_bound = RBound3f(
+                            voxel.g_position - RVec3rf(radius, radius, radius),
+                            voxel.g_position + RVec3rf(radius, radius, radius)
+                        );
+                        local_space_bound_v = local_space_bound_v.unionWith(voxel_bound);
+
+                        if (_mat_resolved_data[voxel.material_sid].is_emissive) {
+                            ++local_emissive_count[t];
+                        }
+
+                        // material_type is the physical kind; rigid_body_sid is assigned later in
+                        // the gather-rigid-body-voxel step, after the segment-type pass emits rigid
+                        // bodies.
+                        voxel.material_type = _mat_resolved_data[voxel.material_sid].phys_type;
+                        if (!body_rsc.expansion_signal_sid.empty()) {
+                            voxel.expansion_signal_sid = body_rsc.expansion_signal_sid[array_index];
+                        }
+                        if (!body_rsc.expansion_control_mode.empty()) {
+                            voxel.expansion_control_mode =
+                                body_rsc.expansion_control_mode[array_index];
+                        }
+
+                        // Write it back into our temporary voxel array
+                        all_voxels[local_offset + i] = voxel;
+                    }
+
+                    local_space_bound[t] = local_space_bound_v;
                 }
+            )
+            .wait();
 
-                local_min_bound[t] = local_min_bound_v;
-                local_max_bound[t] = local_max_bound_v;
-                local_voxel_count[t] = local_array_indices.size();
-                barrier.wait();
+        // Compute body space bound
+        RBound3f body_space_bound = local_space_bound[0];
+        for (RIndex i = 1; i < local_space_bound.size(); i++) {
+            body_space_bound = body_space_bound.unionWith(local_space_bound[i]);
+        }
 
-                // ----------------------------------------------------------
-                // Phase 2: Compute global offsets in the main (t==0) thread.
-                // ----------------------------------------------------------
-                if (t == 0) {
-                    actual_min_bound = local_min_bound[0];
-                    actual_max_bound = local_max_bound[0];
-                    local_voxel_offset[0] = 0;
-                    for (RIndex i = 1; i < thread_count; i++) {
-                        actual_min_bound = actual_min_bound.min(local_min_bound[i]);
-                        actual_max_bound = actual_max_bound.max(local_max_bound[i]);
-                        local_voxel_offset[i] =
-                            local_voxel_offset[i - 1] + local_voxel_count[i - 1];
+        // Sum per-thread emissive counts into the structure-wide counter.
+        for (RSize n : local_emissive_count) _emissive_voxel_num += n;
+
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Add body {} create all voxels time {}",
+            body_sid,
+            timer.elapsedTimeString()
+        );
+        timer.reset();
+    } else {
+        // Reuse the cached geometry. Copy the voxels, recompute this structure's pose, and on an
+        // incoherent hit refresh each voxel's material type and clear its stale rigid body sid. A
+        // coherent hit keeps the cached material type, roles and surface flags as built.
+        all_voxels = cached->all_voxels;
+        all_voxel_num = all_voxels.size();
+
+        RSize pose_block_size = RS_CEIL_DIV(all_voxel_num, thread_count);
+        vector<RSize> local_emissive_count(thread_count, 0);
+        _kernel_manager->getThreadPool()
+            ->submitLoop(
+                0,
+                thread_count,
+                [&](RIndex t) {
+                    RIndex start = t * pose_block_size;
+                    RIndex end = RS_MIN(start + pose_block_size, all_voxel_num);
+                    for (RIndex v = start; v < end; v++) {
+                        auto &voxel = all_voxels[v];
+                        voxel.g_position = initial_body_origin_position +
+                                           initial_body_orientation.rotateVec3D(voxel.b_position);
+                        voxel.g_orientation = initial_body_orientation;
+                        if (!is_coherent) {
+                            // Materials changed, so the role scan below recomputes type and rigid.
+                            voxel.material_type = _mat_resolved_data[voxel.material_sid].phys_type;
+                            voxel.rigid_body_sid = RS_NULL_INDEX;
+                        } else if (voxel.rigid_body_sid != RS_NULL_INDEX) {
+                            // Materials match, so just rebase the cached rigid body sid by the
+                            // delta.
+                            voxel.rigid_body_sid =
+                                added_rigid_body_start +
+                                (voxel.rigid_body_sid - cached->base_rigid_body_sid);
+                        }
+                        if (_mat_resolved_data[voxel.material_sid].is_emissive)
+                            ++local_emissive_count[t];
                     }
-
-                    // The total number of newly added voxels is sum of all local_count.
-                    tmp_voxel_num = local_voxel_offset[thread_count - 1] + local_voxel_count.back();
-
-                    // Resize the temporary voxel array
-                    tmp_voxels.resize(tmp_voxel_num);
                 }
-                barrier.wait();
+            )
+            .wait();
+        for (RSize n : local_emissive_count) _emissive_voxel_num += n;
 
-                // -----------------------------------------
-                // Phase 3: Fill the voxel data in parallel.
-                // -----------------------------------------
-                RIndex local_offset = local_voxel_offset[t];
-                RBound3f local_space_bound_v = RBound3f::lowest();
-
-                for (RSize i = 0; i < local_array_indices.size(); i++) {
-                    RSize array_index = local_array_indices[i];
-                    const RCoord3 &voxel_coord = local_voxel_coords[i];
-
-                    auto voxel = VoxelData::preset();
-
-                    voxel.tmp_index = local_offset + i;
-
-                    // Note: voxel.sid is not set here, it will be set after we find
-                    // the actual needed voxels
-
-                    voxel.body_sid = body_sid;
-                    voxel.array_index = array_index;
-
-                    voxel.index_x = voxel_coord.x;
-                    voxel.index_y = voxel_coord.y;
-                    voxel.index_z = voxel_coord.z;
-
-                    voxel.material_sid = body_rsc.material_reference_sid[array_index];
-
-                    voxel.segment_bid = body_rsc.segment_bid[array_index];
-
-                    voxel.b_position = RVec3rf(
-                        (RFLOAT(voxel_coord.x) + RFLOAT(0.5)) * body_rsc.voxel_size,
-                        (RFLOAT(voxel_coord.y) + RFLOAT(0.5)) * body_rsc.voxel_size,
-                        (RFLOAT(voxel_coord.z) + RFLOAT(0.5)) * body_rsc.voxel_size
-                    );
-                    voxel.g_position = initial_body_origin_position +
-                                       initial_body_orientation.rotateVec3D(voxel.b_position);
-                    voxel.g_orientation = initial_body_orientation;
-
-                    // 0.87 > sqrt(3)/2, diagonal length of voxel
-                    RFloat radius = body_rsc.voxel_size * RFLOAT(0.87);
-                    RBound3f voxel_bound = RBound3f(
-                        voxel.g_position - RVec3rf(radius, radius, radius),
-                        voxel.g_position + RVec3rf(radius, radius, radius)
-                    );
-                    local_space_bound_v = local_space_bound_v.unionWith(voxel_bound);
-
-                    if (_mat_resolved_data[voxel.material_sid].is_emissive) {
-                        ++local_emissive_count[t];
-                    }
-
-                    // material_type is the physical kind; rigid_body_sid is assigned later in the
-                    // gather-rigid-body-voxel step, after the segment-type pass emits rigid bodies.
-                    voxel.material_type = _mat_resolved_data[voxel.material_sid].phys_type;
-                    if (!body_rsc.expansion_signal_sid.empty()) {
-                        voxel.expansion_signal_sid = body_rsc.expansion_signal_sid[array_index];
-                    }
-                    if (!body_rsc.expansion_control_mode.empty()) {
-                        voxel.expansion_control_mode = body_rsc.expansion_control_mode[array_index];
-                    }
-
-                    // Write it back into our temporary voxel array
-                    tmp_voxels[local_offset + i] = voxel;
-                }
-
-                local_space_bound[t] = local_space_bound_v;
-            }
-        )
-        .wait();
-
-    // Compute body space bound
-    RBound3f body_space_bound = local_space_bound[0];
-    for (RIndex i = 1; i < local_space_bound.size(); i++) {
-        body_space_bound = body_space_bound.unionWith(local_space_bound[i]);
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Add body {} reuse cached all voxels time {}",
+            body_sid,
+            timer.elapsedTimeString()
+        );
+        timer.reset();
     }
-
-    // Sum per-thread emissive counts into the structure-wide counter.
-    for (RSize n : local_emissive_count) _emissive_voxel_num += n;
-
-    RS_LOG(
-        _kernel_manager->getLogger(),
-        debug,
-        "Add body {} create temporary voxel time {}",
-        body_sid,
-        timer.elapsedTimeString()
-    );
-    timer.reset();
 
     //----------------------------------------------------------------
     // Step 2: Process segment types
     //----------------------------------------------------------------
-    // Pass 1: record, per segment, which materials it contains as a bitmask over material
-    // references. This is light (one bit set per temporary voxel) and dedups materials per segment.
-    // A std::map keeps the segment order deterministic so rigid body ids are stable.
-    std::map<RIndex, std::vector<bool>> segment_material_flags;
-    for (auto &voxel : tmp_voxels) {
-        // Pass the vector constructor arguments so the bitmask is built only on first insert.
-        auto [it, inserted] =
-            segment_material_flags.try_emplace(voxel.segment_bid, _mat_resolved_data.size(), false);
-        it->second[voxel.material_sid] = true;
+    // Pass 1: record, per segment, which materials it contains. The flag vectors are sized to the
+    // material count, which coherence guarantees matches the cache, so reuse only on a coherent hit
+    // and rebuild otherwise.
+    std::map<RIndex, std::vector<bool>> built_segment_material_flags;
+    if (!is_coherent) {
+        for (auto &voxel : all_voxels) {
+            auto [it, inserted] = built_segment_material_flags.try_emplace(
+                voxel.segment_bid, _mat_resolved_data.size(), false
+            );
+            it->second[voxel.material_sid] = true;
+        }
     }
+    const auto &segment_material_flags = is_coherent ? cached->segment_material_flags
+                                                     : built_segment_material_flags;
 
     // Pass 2: validate each segment is a single uniform allowed kind (all soft, all rigid, all
     // fixed, all rigid-fixed, all atlas with one shared atlas property, or all atlas-fixed with one
@@ -799,13 +914,23 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
         }
     }
 
-    RS_LOG(
-        _kernel_manager->getLogger(),
-        debug,
-        "Add body {} process segment types time {}",
-        body_sid,
-        timer.elapsedTimeString()
-    );
+    if (cached) {
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Add body {} reuse cached segment types time {}",
+            body_sid,
+            timer.elapsedTimeString()
+        );
+    } else {
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Add body {} process segment types time {}",
+            body_sid,
+            timer.elapsedTimeString()
+        );
+    }
     timer.reset();
 
     //----------------------------------------------------------------
@@ -814,196 +939,209 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
     // Each voxel maps directly to one hashmap entry. The 2-flat hashmap's total capacity is about
     // the requested max_entry_num, so request twice the voxel count for a ~50% load factor. On
     // overflow, double the capacity, clear, and re-insert every voxel from the start.
-    auto &voxel_tmp_index_map = _voxel_tmp_index_map[body_sid];
+    if (!cached) {
+        hashmap_provider =
+            std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getHostProvider());
+        local_hashmap.init(hashmap_provider.get());
+        active_hashmap = &local_hashmap;
+        auto &voxel_tmp_index_map = local_hashmap;
 
-    RSize voxel_tmp_index_capacity = RS_MAX(tmp_voxel_num * 2, RSize(1));
-    RSize voxel_tmp_insert_block_size = RS_CEIL_DIV(tmp_voxel_num, thread_count);
+        RSize voxel_tmp_index_capacity = RS_MAX(all_voxel_num * 2, RSize(1));
+        RSize voxel_tmp_insert_block_size = RS_CEIL_DIV(all_voxel_num, thread_count);
 
-    RSize voxel_tmp_insert_retry = 10;
-    bool is_voxel_tmp_insert_successful = true;
+        RSize voxel_tmp_insert_retry = 10;
+        bool is_voxel_tmp_insert_successful = true;
 
-    voxel_tmp_index_map.resize(voxel_tmp_index_capacity, false);
-    voxel_tmp_index_map.clear();
+        voxel_tmp_index_map.resize(voxel_tmp_index_capacity, false);
+        voxel_tmp_index_map.clear();
 
-    _kernel_manager->getThreadPool()
-        ->submitLoop(
-            0,
-            thread_count,
-            [&](RIndex t) {
-                while (voxel_tmp_insert_retry > 0) {
-                    RIndex start = t * voxel_tmp_insert_block_size;
-                    RIndex end = RS_MIN(start + voxel_tmp_insert_block_size, tmp_voxel_num);
+        _kernel_manager->getThreadPool()
+            ->submitLoop(
+                0,
+                thread_count,
+                [&](RIndex t) {
+                    while (voxel_tmp_insert_retry > 0) {
+                        RIndex start = t * voxel_tmp_insert_block_size;
+                        RIndex end = RS_MIN(start + voxel_tmp_insert_block_size, all_voxel_num);
 
-                    for (; start < end; start++) {
-                        auto &voxel = tmp_voxels[start];
-                        if (!voxel_tmp_index_map.insert(
-                                RS_VoxelKey(RCoord3(voxel.index_x, voxel.index_y, voxel.index_z)),
-                                voxel.tmp_index
-                            )) {
-                            is_voxel_tmp_insert_successful = false;
+                        for (; start < end; start++) {
+                            auto &voxel = all_voxels[start];
+                            if (!voxel_tmp_index_map.insert(
+                                    RS_VoxelKey(
+                                        RCoord3(voxel.index_x, voxel.index_y, voxel.index_z)
+                                    ),
+                                    voxel.tmp_index
+                                )) {
+                                is_voxel_tmp_insert_successful = false;
+                                break;
+                            }
+                        }
+
+                        barrier.wait();
+                        if (is_voxel_tmp_insert_successful) {
                             break;
                         }
-                    }
+                        barrier.wait();
+                        if (t == 0) {
+                            voxel_tmp_insert_retry--;
 
-                    barrier.wait();
-                    if (is_voxel_tmp_insert_successful) {
-                        break;
-                    }
-                    barrier.wait();
-                    if (t == 0) {
-                        voxel_tmp_insert_retry--;
-
-                        if (voxel_tmp_insert_retry > 0) {
-                            is_voxel_tmp_insert_successful = true;
-                            voxel_tmp_index_capacity *= 2;
-                            voxel_tmp_index_map.resize(voxel_tmp_index_capacity, false);
-                            voxel_tmp_index_map.clear();
-                            RS_LOG(
-                                _kernel_manager->getLogger(),
-                                debug,
-                                "Create voxel hashmap pass {} failed, resize voxel hashmap to "
-                                "capacity {} and retry from start",
-                                10 - voxel_tmp_insert_retry,
-                                voxel_tmp_index_capacity
-                            );
+                            if (voxel_tmp_insert_retry > 0) {
+                                is_voxel_tmp_insert_successful = true;
+                                voxel_tmp_index_capacity *= 2;
+                                voxel_tmp_index_map.resize(voxel_tmp_index_capacity, false);
+                                voxel_tmp_index_map.clear();
+                                RS_LOG(
+                                    _kernel_manager->getLogger(),
+                                    debug,
+                                    "Create voxel hashmap pass {} failed, resize voxel hashmap to "
+                                    "capacity {} and retry from start",
+                                    10 - voxel_tmp_insert_retry,
+                                    voxel_tmp_index_capacity
+                                );
+                            }
                         }
+                        barrier.wait();
                     }
-                    barrier.wait();
                 }
-            }
-        )
-        .wait();
+            )
+            .wait();
 
-    if (!is_voxel_tmp_insert_successful) {
-        RS_THROW(RS_RuntimeException("Failed to insert all voxels in hashmap"));
+        if (!is_voxel_tmp_insert_successful) {
+            RS_THROW(RS_RuntimeException("Failed to insert all voxels in hashmap"));
+        }
+
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Add body {} create voxel hashmap time {}",
+            body_sid,
+            timer.elapsedTimeString()
+        );
+        timer.reset();
+    } else {
+        // The cached coordinate map is geometry-only, so reuse it on any hit. Only the rebuilt
+        // scans on an incoherent hit actually read it.
+        active_hashmap = &cached->hashmap;
     }
 
-    RS_LOG(
-        _kernel_manager->getLogger(),
-        debug,
-        "Add body {} create voxel hashmap time {}",
-        body_sid,
-        timer.elapsedTimeString()
-    );
-    timer.reset();
-
     //----------------------------------------------------------------
-    // Step 4: Process properties of tmp_voxels
+    // Step 4: Process properties of all_voxels
     //----------------------------------------------------------------
-    _kernel_manager->getThreadPool()
-        ->submitBlocks(
-            0,
-            tmp_voxel_num,
-            [&](RIndex start, RIndex end) {
-                for (RIndex v = start; v < end; v++) {
-                    auto &voxel = tmp_voxels[v];
+    if (!is_coherent) {
+        _kernel_manager->getThreadPool()
+            ->submitBlocks(
+                0,
+                all_voxel_num,
+                [&](RIndex start, RIndex end) {
+                    for (RIndex v = start; v < end; v++) {
+                        auto &voxel = all_voxels[v];
 
-                    // Per face, assign the role:
-                    // RSE_VOXEL_FACE_AIR: the neighbor cell is empty space.
-                    // RSE_VOXEL_FACE_INTERIOR: the neighbor shares this voxel's material and
-                    // segment.
-                    // RSE_VOXEL_FACE_TRANSPARENT_BOUNDARY: the neighbor is a different transparent
-                    // material, or a different segment.
-                    // RSE_VOXEL_FACE_OPAQUE_BOUNDARY: the neighbor is a different non-transparent
-                    // material, or a different segment.
-                    // is_surface is set when any face is empty space, or, for a non-fixed body,
-                    // faces a different segment.
-                    bool is_surface = false;
-                    bool has_soft_neighbor = false;
-                    for (int l = 0; l < 6; l++) {
-                        RCoord3 neighbor_coord(
-                            voxel.index_x +
-                                linkDirectionToXOffset(static_cast<RSE_LinkDirection>(l)),
-                            voxel.index_y +
-                                linkDirectionToYOffset(static_cast<RSE_LinkDirection>(l)),
-                            voxel.index_z +
-                                linkDirectionToZOffset(static_cast<RSE_LinkDirection>(l))
-                        );
+                        // Per face, assign the role:
+                        // RSE_VOXEL_FACE_AIR: the neighbor cell is empty space.
+                        // RSE_VOXEL_FACE_INTERIOR: the neighbor shares this voxel's material and
+                        // segment.
+                        // RSE_VOXEL_FACE_TRANSPARENT_BOUNDARY: the neighbor is a different
+                        // transparent material, or a different segment.
+                        // RSE_VOXEL_FACE_OPAQUE_BOUNDARY: the neighbor is a different
+                        // non-transparent material, or a different segment. is_surface is set when
+                        // any face is empty space, or, for a non-fixed body, faces a different
+                        // segment.
+                        bool is_surface = false;
+                        bool has_soft_neighbor = false;
+                        for (int l = 0; l < 6; l++) {
+                            RCoord3 neighbor_coord(
+                                voxel.index_x +
+                                    linkDirectionToXOffset(static_cast<RSE_LinkDirection>(l)),
+                                voxel.index_y +
+                                    linkDirectionToYOffset(static_cast<RSE_LinkDirection>(l)),
+                                voxel.index_z +
+                                    linkDirectionToZOffset(static_cast<RSE_LinkDirection>(l))
+                            );
 
-                        auto neighbor_voxel = voxel_tmp_index_map.find(RS_VoxelKey(neighbor_coord));
+                            auto neighbor_voxel = active_hashmap->find(RS_VoxelKey(neighbor_coord));
 
-                        RSE_VoxelFaceRole role;
-                        if (!neighbor_voxel) {
-                            is_surface = true;
-                            role = RSE_VOXEL_FACE_AIR;
-                        } else {
-                            auto &neighbor = tmp_voxels[*neighbor_voxel];
-                            bool is_cross_segment = !_structure().is_fixed &&
-                                                    neighbor.segment_bid != voxel.segment_bid;
-                            if (is_cross_segment) {
+                            RSE_VoxelFaceRole role;
+                            if (!neighbor_voxel) {
                                 is_surface = true;
-                            }
-                            if (neighbor.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT) {
-                                has_soft_neighbor = true;
-                            }
-                            // Two non-soft segments are separate parts that do not stick
-                            // together, so the face between them is a real air gap. A soft
-                            // neighbor instead bonds across the seam through a link.
-                            bool is_non_soft_air_gap =
-                                is_cross_segment &&
-                                voxel.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT &&
-                                neighbor.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT;
-                            if (is_non_soft_air_gap) {
                                 role = RSE_VOXEL_FACE_AIR;
-                            } else if (neighbor.material_sid == voxel.material_sid &&
-                                       neighbor.segment_bid == voxel.segment_bid) {
-                                role = RSE_VOXEL_FACE_INTERIOR;
                             } else {
-                                role = _mat_resolved_data[neighbor.material_sid].is_transparent
-                                           ? RSE_VOXEL_FACE_TRANSPARENT_BOUNDARY
-                                           : RSE_VOXEL_FACE_OPAQUE_BOUNDARY;
+                                auto &neighbor = all_voxels[*neighbor_voxel];
+                                bool is_cross_segment = !_structure().is_fixed &&
+                                                        neighbor.segment_bid != voxel.segment_bid;
+                                if (is_cross_segment) {
+                                    is_surface = true;
+                                }
+                                if (neighbor.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT) {
+                                    has_soft_neighbor = true;
+                                }
+                                // Two non-soft segments are separate parts that do not stick
+                                // together, so the face between them is a real air gap. A soft
+                                // neighbor instead bonds across the seam through a link.
+                                bool is_non_soft_air_gap =
+                                    is_cross_segment &&
+                                    voxel.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT &&
+                                    neighbor.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT;
+                                if (is_non_soft_air_gap) {
+                                    role = RSE_VOXEL_FACE_AIR;
+                                } else if (neighbor.material_sid == voxel.material_sid &&
+                                           neighbor.segment_bid == voxel.segment_bid) {
+                                    role = RSE_VOXEL_FACE_INTERIOR;
+                                } else {
+                                    role = _mat_resolved_data[neighbor.material_sid].is_transparent
+                                               ? RSE_VOXEL_FACE_TRANSPARENT_BOUNDARY
+                                               : RSE_VOXEL_FACE_OPAQUE_BOUNDARY;
+                                }
                             }
+                            setFaceRole(voxel.role_state, l, role);
                         }
-                        setFaceRole(voxel.role_state, l, role);
-                    }
-                    voxel.is_surface = is_surface;
-                    voxel.is_render_active = isRenderActive(voxel.role_state);
-                    voxel.is_contact_active = isContactActive(voxel.role_state);
-                    voxel.has_soft_neighbor = has_soft_neighbor;
+                        voxel.is_surface = is_surface;
+                        voxel.is_render_active = isRenderActive(voxel.role_state);
+                        voxel.is_contact_active = isContactActive(voxel.role_state);
+                        voxel.has_soft_neighbor = has_soft_neighbor;
 
-                    // Assign the rigid body now that the segment-type pass has emitted rigid
-                    // bodies.
-                    if (!_structure().is_fixed &&
-                        (voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID ||
-                         voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED)) {
-                        voxel.rigid_body_sid =
-                            _rigid_body_sid_map.at({body_sid, voxel.segment_bid});
+                        // Assign the rigid body now that the segment-type pass has emitted rigid
+                        // bodies.
+                        if (!_structure().is_fixed &&
+                            (voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID ||
+                             voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED)) {
+                            voxel.rigid_body_sid =
+                                _rigid_body_sid_map.at({body_sid, voxel.segment_bid});
+                        }
                     }
                 }
-            }
-        )
-        .wait();
+            )
+            .wait();
 
-    RS_LOG(
-        _kernel_manager->getLogger(),
-        debug,
-        "Add body {} process voxel properties time {}",
-        body_sid,
-        timer.elapsedTimeString()
-    );
-    timer.reset();
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Add body {} process voxel properties time {}",
+            body_sid,
+            timer.elapsedTimeString()
+        );
+        timer.reset();
+    }
 
     //----------------------------------------------------------------
     // Step 5: Find valid voxels, assign sid, and save them
     //----------------------------------------------------------------
-    RIndex added_voxel_start = _voxel_num;
     if (_structure().is_fixed) {
         // For a fixed body, only add voxels that are ray-traceable or collidable.
-        for (RIndex v = 0; v < tmp_voxel_num; v++) {
-            if (tmp_voxels[v].is_render_active || tmp_voxels[v].is_contact_active) {
-                tmp_voxels[v].sid = _voxel_num++;
-                _voxels.emplace_back(tmp_voxels[v]);
+        for (RIndex v = 0; v < all_voxel_num; v++) {
+            if (all_voxels[v].is_render_active || all_voxels[v].is_contact_active) {
+                all_voxels[v].sid = _voxel_num++;
+                _voxels.emplace_back(all_voxels[v]);
             }
         }
     } else {
         // For a non-fixed body, add every soft voxel, plus rigid/fixed voxels that are
         // ray-traceable, collidable, or a soft link endpoint.
-        for (RIndex v = 0; v < tmp_voxel_num; v++) {
-            if (tmp_voxels[v].material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT ||
-                tmp_voxels[v].is_render_active || tmp_voxels[v].is_contact_active ||
-                tmp_voxels[v].has_soft_neighbor) {
-                tmp_voxels[v].sid = _voxel_num++;
-                _voxels.emplace_back(tmp_voxels[v]);
+        for (RIndex v = 0; v < all_voxel_num; v++) {
+            if (all_voxels[v].material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT ||
+                all_voxels[v].is_render_active || all_voxels[v].is_contact_active ||
+                all_voxels[v].has_soft_neighbor) {
+                all_voxels[v].sid = _voxel_num++;
+                _voxels.emplace_back(all_voxels[v]);
             }
         }
     }
@@ -1024,7 +1162,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
         // Step 6: Gather rigid body voxel info
         //----------------------------------------------------------------
         RIndex v_index = 0;
-        for (auto &voxel : tmp_voxels) {
+        for (auto &voxel : all_voxels) {
             if (voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID ||
                 voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED) {
                 _rigid_bodies[voxel.rigid_body_sid].contained_voxel_tmp_indices.emplace_back(
@@ -1052,133 +1190,192 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
         //----------------------------------------------------------------
         // Step 7: Create links
         //----------------------------------------------------------------
+        if (is_coherent) {
+            // Re-emit the cached links rebased onto this structure's voxel sids, deriving each
+            // endpoint's link slot from the link axis instead of rescanning the 6-neighborhood.
+            // Each link owns a distinct slot in _links and a distinct per-voxel direction, so the
+            // emission runs in parallel without contention.
+            RIndex added_link_count = cached->links.size();
+            _link_num += added_link_count;
+            _links.resize(_links.size() + added_link_count);
+            _kernel_manager->getThreadPool()
+                ->submitBlocks(
+                    0,
+                    added_link_count,
+                    [&](RIndex start, RIndex end) {
+                        for (RIndex i = start; i < end; i++) {
+                            const auto &cached_link = cached->links[i];
+                            RIndex link_sid = added_link_start + i;
+                            RIndex voxel_neg_sid = added_voxel_start + (cached_link.voxel_neg_sid -
+                                                                        cached->base_voxel_sid);
+                            RIndex voxel_pos_sid = added_voxel_start + (cached_link.voxel_pos_sid -
+                                                                        cached->base_voxel_sid);
 
-        // Add links, scan for +X, +Y, +Z direction from each voxel
-        // Note: this layout increases cache locality, much more efficient than
-        // scanning for X, then Y, then Z, which increases memory coalescing rate
-        // but has much worse cache performance
-        RIndex added_link_start = _links.size();
-        vector<RSize> local_link_count = vector<RSize>(thread_count, 0);
-        vector<RSize> local_link_offset = vector<RSize>(thread_count, 0);
-        RSize block_size = RS_CEIL_DIV(tmp_voxel_num, thread_count);
+                            LinkData link = cached_link;
+                            link.sid = link_sid;
+                            link.body_sid = body_sid;
+                            link.voxel_neg_sid = voxel_neg_sid;
+                            link.voxel_pos_sid = voxel_pos_sid;
+                            link.voxel_neg_material_sid = _voxels[voxel_neg_sid].material_sid;
+                            link.voxel_pos_material_sid = _voxels[voxel_pos_sid].material_sid;
 
-        _kernel_manager->getThreadPool()
-            ->submitLoop(
-                static_cast<RIndex>(0),
-                thread_count,
-                [&](RIndex t) {
-                    RIndex start = t * block_size;
-                    RIndex end = RS_MIN(start + block_size, tmp_voxel_num);
-                    vector<tuple<RIndex, RIndex, int>> local_links;
+                            int l = static_cast<int>(cached_link.axis) << 1;
+                            auto pos_dir = static_cast<RSE_LinkDirection>(l);
+                            auto neg_dir = static_cast<RSE_LinkDirection>(l + 1);
+                            _voxels[voxel_neg_sid].link_sid[pos_dir] = link_sid;
+                            _voxels[voxel_neg_sid].neighbor_voxel_sid[pos_dir] = voxel_pos_sid;
+                            _voxels[voxel_pos_sid].link_sid[neg_dir] = link_sid;
+                            _voxels[voxel_pos_sid].neighbor_voxel_sid[neg_dir] = voxel_neg_sid;
 
-                    // --------------------
-                    // Phase 1: Find links.
-                    // --------------------
-                    for (RIndex v = start; v < end; v++) {
-                        auto &voxel = tmp_voxels[v];
-                        auto material_type = voxel.material_type;
+                            _links[link_sid] = link;
+                        }
+                    }
+                )
+                .wait();
 
-                        for (int l = 0; l < 6; l += 2) {
-                            if (body_rsc.link.empty() ||
-                                (body_rsc.link[voxel.array_index] & (1 << l))) {
-                                // If link is not specified, default to create link in all
-                                // directions
-                                // If specified, only create link in the specified direction
-                                RCoord3 neighbor_coord(
-                                    voxel.index_x +
-                                        linkDirectionToXOffset(static_cast<RSE_LinkDirection>(l)),
-                                    voxel.index_y +
-                                        linkDirectionToYOffset(static_cast<RSE_LinkDirection>(l)),
-                                    voxel.index_z +
-                                        linkDirectionToZOffset(static_cast<RSE_LinkDirection>(l))
-                                );
-                                if (neighbor_coord.x >= 0 && neighbor_coord.x < body_rsc.x_voxels &&
-                                    neighbor_coord.y >= 0 && neighbor_coord.y < body_rsc.y_voxels &&
-                                    neighbor_coord.z >= 0 && neighbor_coord.z < body_rsc.z_voxels) {
-                                    auto neighbor_index_ptr =
-                                        voxel_tmp_index_map.find(RS_VoxelKey(neighbor_coord));
-                                    if (neighbor_index_ptr != nullptr) {
-                                        RIndex neighbor_index = *neighbor_index_ptr;
-                                        auto neighbor_material_type =
-                                            tmp_voxels[neighbor_index].material_type;
-                                        if (material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT ||
-                                            neighbor_material_type ==
-                                                RSE_STRUCTURE_VOXEL_MATERIAL_SOFT) {
-                                            // Create link only if we find a valid neighbor voxel
-                                            // and one of current/neighbor is soft
-                                            local_links.emplace_back(
-                                                voxel.sid, tmp_voxels[neighbor_index].sid, l
-                                            );
+            RS_LOG(
+                _kernel_manager->getLogger(),
+                debug,
+                "Add body {} reuse cached link time {}",
+                body_sid,
+                timer.elapsedTimeString()
+            );
+            timer.reset();
+        } else {
+            // Add links, scan for +X, +Y, +Z direction from each voxel
+            // Note: this layout increases cache locality, much more efficient than
+            // scanning for X, then Y, then Z, which increases memory coalescing rate
+            // but has much worse cache performance
+            vector<RSize> local_link_count = vector<RSize>(thread_count, 0);
+            vector<RSize> local_link_offset = vector<RSize>(thread_count, 0);
+            RSize block_size = RS_CEIL_DIV(all_voxel_num, thread_count);
+
+            _kernel_manager->getThreadPool()
+                ->submitLoop(
+                    static_cast<RIndex>(0),
+                    thread_count,
+                    [&](RIndex t) {
+                        RIndex start = t * block_size;
+                        RIndex end = RS_MIN(start + block_size, all_voxel_num);
+                        vector<tuple<RIndex, RIndex, int>> local_links;
+
+                        // --------------------
+                        // Phase 1: Find links.
+                        // --------------------
+                        for (RIndex v = start; v < end; v++) {
+                            auto &voxel = all_voxels[v];
+                            auto material_type = voxel.material_type;
+
+                            for (int l = 0; l < 6; l += 2) {
+                                if (body_rsc.link.empty() ||
+                                    (body_rsc.link[voxel.array_index] & (1 << l))) {
+                                    // If link is not specified, default to create link in all
+                                    // directions
+                                    // If specified, only create link in the specified direction
+                                    RCoord3 neighbor_coord(
+                                        voxel.index_x + linkDirectionToXOffset(
+                                                            static_cast<RSE_LinkDirection>(l)
+                                                        ),
+                                        voxel.index_y + linkDirectionToYOffset(
+                                                            static_cast<RSE_LinkDirection>(l)
+                                                        ),
+                                        voxel.index_z + linkDirectionToZOffset(
+                                                            static_cast<RSE_LinkDirection>(l)
+                                                        )
+                                    );
+                                    if (neighbor_coord.x >= 0 &&
+                                        neighbor_coord.x < body_rsc.x_voxels &&
+                                        neighbor_coord.y >= 0 &&
+                                        neighbor_coord.y < body_rsc.y_voxels &&
+                                        neighbor_coord.z >= 0 &&
+                                        neighbor_coord.z < body_rsc.z_voxels) {
+                                        auto neighbor_index_ptr =
+                                            active_hashmap->find(RS_VoxelKey(neighbor_coord));
+                                        if (neighbor_index_ptr != nullptr) {
+                                            RIndex neighbor_index = *neighbor_index_ptr;
+                                            auto neighbor_material_type =
+                                                all_voxels[neighbor_index].material_type;
+                                            if (material_type ==
+                                                    RSE_STRUCTURE_VOXEL_MATERIAL_SOFT ||
+                                                neighbor_material_type ==
+                                                    RSE_STRUCTURE_VOXEL_MATERIAL_SOFT) {
+                                                // Create link only if we find a valid neighbor
+                                                // voxel and one of current/neighbor is soft
+                                                local_links.emplace_back(
+                                                    voxel.sid, all_voxels[neighbor_index].sid, l
+                                                );
+                                            }
                                         }
                                     }
                                 }
                             }
                         }
-                    }
 
-                    local_link_count[t] = local_links.size();
-                    barrier.wait();
+                        local_link_count[t] = local_links.size();
+                        barrier.wait();
 
-                    // ----------------------------------------------------------
-                    // Phase 2: Compute global offsets in the main (t==0) thread.
-                    // ----------------------------------------------------------
-                    if (t == 0) {
-                        local_link_offset[0] = 0;
-                        for (RIndex i = 1; i < thread_count; i++) {
-                            local_link_offset[i] =
-                                local_link_offset[i - 1] + local_link_count[i - 1];
+                        // ----------------------------------------------------------
+                        // Phase 2: Compute global offsets in the main (t==0) thread.
+                        // ----------------------------------------------------------
+                        if (t == 0) {
+                            local_link_offset[0] = 0;
+                            for (RIndex i = 1; i < thread_count; i++) {
+                                local_link_offset[i] =
+                                    local_link_offset[i - 1] + local_link_count[i - 1];
+                            }
+
+                            _link_num +=
+                                local_link_offset[thread_count - 1] + local_link_count.back();
+                            _links.resize(_link_num);
                         }
 
-                        _link_num += local_link_offset[thread_count - 1] + local_link_count.back();
-                        _links.resize(_link_num);
+                        barrier.wait();
+
+                        // ----------------------------------------
+                        // Phase 3: Fill the link data in parallel.
+                        // ----------------------------------------
+                        for (RIndex i = 0; i < local_links.size(); i++) {
+                            RIndex link_sid = local_link_offset[t] + i + added_link_start;
+
+                            auto link = LinkData::preset();
+
+                            RIndex voxel = get<0>(local_links[i]);
+                            RIndex neighbor_voxel = get<1>(local_links[i]);
+                            int l = get<2>(local_links[i]);
+                            // Make sure that link is always pointed to +X, +Y and +Z direction
+                            // from negative voxel to positive voxel
+                            link.sid = link_sid;
+                            link.body_sid = body_sid;
+                            link.axis = linkDirectionToAxis(static_cast<RSE_LinkDirection>(l));
+                            link.voxel_neg_sid = voxel;
+                            link.voxel_pos_sid = neighbor_voxel;
+
+                            link.voxel_neg_material_sid = _voxels[voxel].material_sid;
+                            link.voxel_pos_material_sid = _voxels[neighbor_voxel].material_sid;
+
+                            auto pos_dir = static_cast<RSE_LinkDirection>(l);
+                            _voxels[voxel].link_sid[pos_dir] = link.sid;
+                            _voxels[voxel].neighbor_voxel_sid[pos_dir] = neighbor_voxel;
+
+                            auto neg_dir = static_cast<RSE_LinkDirection>(l + 1);
+                            _voxels[neighbor_voxel].link_sid[neg_dir] = link.sid;
+                            _voxels[neighbor_voxel].neighbor_voxel_sid[neg_dir] = voxel;
+
+                            _links[link_sid] = link;
+                        }
                     }
+                )
+                .wait();
 
-                    barrier.wait();
-
-                    // ----------------------------------------
-                    // Phase 3: Fill the link data in parallel.
-                    // ----------------------------------------
-                    for (RIndex i = 0; i < local_links.size(); i++) {
-                        RIndex link_sid = local_link_offset[t] + i + added_link_start;
-
-                        auto link = LinkData::preset();
-
-                        RIndex voxel = get<0>(local_links[i]);
-                        RIndex neighbor_voxel = get<1>(local_links[i]);
-                        int l = get<2>(local_links[i]);
-                        // Make sure that link is always pointed to +X, +Y and +Z direction
-                        // from negative voxel to positive voxel
-                        link.sid = link_sid;
-                        link.body_sid = body_sid;
-                        link.axis = linkDirectionToAxis(static_cast<RSE_LinkDirection>(l));
-                        link.voxel_neg_sid = voxel;
-                        link.voxel_pos_sid = neighbor_voxel;
-
-                        link.voxel_neg_material_sid = _voxels[voxel].material_sid;
-                        link.voxel_pos_material_sid = _voxels[neighbor_voxel].material_sid;
-
-                        auto pos_dir = static_cast<RSE_LinkDirection>(l);
-                        _voxels[voxel].link_sid[pos_dir] = link.sid;
-                        _voxels[voxel].neighbor_voxel_sid[pos_dir] = neighbor_voxel;
-
-                        auto neg_dir = static_cast<RSE_LinkDirection>(l + 1);
-                        _voxels[neighbor_voxel].link_sid[neg_dir] = link.sid;
-                        _voxels[neighbor_voxel].neighbor_voxel_sid[neg_dir] = voxel;
-
-                        _links[link_sid] = link;
-                    }
-                }
-            )
-            .wait();
-
-        RS_LOG(
-            _kernel_manager->getLogger(),
-            debug,
-            "Add body {} create link time {}",
-            body_sid,
-            timer.elapsedTimeString()
-        );
-        timer.reset();
+            RS_LOG(
+                _kernel_manager->getLogger(),
+                debug,
+                "Add body {} create link time {}",
+                body_sid,
+                timer.elapsedTimeString()
+            );
+            timer.reset();
+        }
 
         // Process at last to make sure that rigid body surface voxels are contiguous
         // in rigid body index and ordered by rigid body index
@@ -1213,11 +1410,11 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                  zip(rigid_body.contained_voxel_tmp_indices,
                      rigid_body.contained_material_rb_positions)) {
                 // Add rigid body voxel if this rigid voxel is a surface voxel
-                auto &voxel = tmp_voxels[voxel_tmp_index];
+                auto &voxel = all_voxels[voxel_tmp_index];
 
                 if (voxel.is_surface) {
                     auto rigid_body_surface_voxel = RigidBodySurfaceVoxelData::preset();
-                    rigid_body_surface_voxel.voxel_sid = tmp_voxels[voxel_tmp_index].sid;
+                    rigid_body_surface_voxel.voxel_sid = all_voxels[voxel_tmp_index].sid;
                     rigid_body_surface_voxel.rigid_body_sid = rigid_body_sid;
                     rigid_body_surface_voxel.voxel_rb_position = material_rb_position;
                     _rigid_body_surface_voxels.emplace_back(rigid_body_surface_voxel);
@@ -1225,6 +1422,14 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                 }
             }
             rigid_body.rigid_body_surface_voxel_end = _rigid_body_surface_voxel_num;
+        }
+
+        // Keep the rigid body origins so _addConstraint and the post-commit queries can read them
+        // after the heavy _rigid_bodies array is freed.
+        _rigid_body_origin_b_position.resize(_rigid_body_num);
+        for (auto rigid_body_sid : added_rigid_body_sid) {
+            _rigid_body_origin_b_position[rigid_body_sid] =
+                _rigid_bodies[rigid_body_sid].origin_b_position;
         }
 
         // Compute each rigid body's mass, center of mass, and local moment of inertia inverse
@@ -1322,6 +1527,27 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
             timer.elapsedTimeString()
         );
         timer.reset();
+    }
+
+    // On a miss, move this freshly built body into the cache so structures sharing it can reuse it.
+    if (!cached) {
+        BuildCachedBody entry;
+        entry.all_voxels = std::move(all_voxels);
+        entry.links.assign(_links.begin() + added_link_start, _links.end());
+        entry.segment_material_flags = std::move(built_segment_material_flags);
+        entry.materials = _mat_resolved_data;
+        entry.provider = std::move(hashmap_provider);
+        entry.hashmap = std::move(local_hashmap);
+        entry.is_fixed = is_fixed;
+        entry.base_voxel_sid = added_voxel_start;
+        entry.base_link_sid = added_link_start;
+        entry.base_rigid_body_sid = added_rigid_body_start;
+        entry.byte_size =
+            static_cast<RBigSize>(entry.all_voxels.size()) * sizeof(VoxelData) +
+            static_cast<RBigSize>(entry.links.size()) * sizeof(LinkData) +
+            static_cast<RBigSize>(entry.materials.size()) * sizeof(MaterialResolvedData) +
+            entry.hashmap.baseBytes() + entry.hashmap.extraBytes();
+        _putCachedBody(cache_key, std::move(entry));
     }
 }
 
@@ -2114,6 +2340,39 @@ RS_KernelStructureVoxelManager::_getAll() const {
     // timer.reset();
 
     return move(data);
+}
+
+void RS_KernelStructureVoxelManager::_cleanupGeneratedData() {
+    // getSegmentVoxelNumInRange reads only these few indices per voxel, so keep the slim record.
+    _voxel_occupancy.resize(_voxels.size());
+    _kernel_manager->getThreadPool()
+        ->submitBlocks(
+            0,
+            _voxels.size(),
+            [&](RIndex start, RIndex end) {
+                for (RIndex i = start; i < end; i++) {
+                    const auto &voxel = _voxels[i];
+                    _voxel_occupancy[i] = VoxelOccupancyData{
+                        voxel.body_sid,
+                        voxel.segment_bid,
+                        voxel.rigid_body_sid,
+                        voxel.index_x,
+                        voxel.index_y,
+                        voxel.index_z
+                    };
+                }
+            }
+        )
+        .wait();
+
+    // Release the heavy build arrays by swapping in empty vectors.
+    _voxels = std::vector<VoxelData>();
+    _links = std::vector<LinkData>();
+    _rigid_bodies = std::vector<RigidBodyData>();
+    _rigid_body_surface_voxels = std::vector<RigidBodySurfaceVoxelData>();
+    _constraint_joints = std::vector<ConstraintJointData>();
+    _voxel_materials = std::vector<VoxelMaterialData>();
+    _link_materials = std::vector<LinkMaterialData>();
 }
 
 void RS_KernelStructureVoxelManager::_initKernelData() {
@@ -3030,6 +3289,46 @@ RBound3f RS_KernelStructureVoxelManager::_computeWorldBound(
     }
 
     return world_bound;
+}
+
+std::shared_ptr<const RS_KernelStructureVoxelManager::BuildCachedBody>
+RS_KernelStructureVoxelManager::_tryGetCachedBody(const rsc::RSC_StructureVoxelBody *key) {
+    std::lock_guard<std::mutex> lock(_build_cache_mutex);
+    auto it = _build_cache.map.find(key);
+    if (it == _build_cache.map.end()) return nullptr;
+    // Move the hit to the most-recently-used front, and pin it with a shared_ptr so an eviction by
+    // another manager defers the free until this build finishes reading.
+    _build_cache.lru.splice(_build_cache.lru.begin(), _build_cache.lru, it->second.second);
+    return it->second.first;
+}
+
+void RS_KernelStructureVoxelManager::_putCachedBody(
+    const rsc::RSC_StructureVoxelBody *key,
+    BuildCachedBody entry
+) {
+    auto shared = std::make_shared<const BuildCachedBody>(std::move(entry));
+    RBigSize bytes = shared->byte_size;
+    std::lock_guard<std::mutex> lock(_build_cache_mutex);
+    // An entry that cannot fit the budget is never retained.
+    if (bytes > _build_cache.budget) return;
+    // Replace any stale entry for the same body.
+    if (auto it = _build_cache.map.find(key); it != _build_cache.map.end()) {
+        _build_cache.total -= it->second.first->byte_size;
+        _build_cache.lru.erase(it->second.second);
+        _build_cache.map.erase(it);
+    }
+    _build_cache.lru.push_front(key);
+    _build_cache.map.emplace(key, std::make_pair(std::move(shared), _build_cache.lru.begin()));
+    _build_cache.total += bytes;
+    // Evict from the least-recently-used tail until the budget holds. The just-inserted entry sits
+    // at the front, so it is never the victim. The free is deferred to any holder still reading.
+    while (_build_cache.total > _build_cache.budget && !_build_cache.lru.empty()) {
+        const rsc::RSC_StructureVoxelBody *victim = _build_cache.lru.back();
+        auto it = _build_cache.map.find(victim);
+        _build_cache.total -= it->second.first->byte_size;
+        _build_cache.map.erase(it);
+        _build_cache.lru.pop_back();
+    }
 }
 
 /*****************************************************************

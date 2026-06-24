@@ -8,6 +8,7 @@
 #include "rise_origin/device/rs_constant_memory.h"
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/rs_iterators.h"
+#include "rise_origin/utils/rs_system.h"
 #include "rise_origin/utils/string/rs_string.h"
 #include "rise_origin/utils/time/rs_timer.h"
 #include "rs_kernel_manager.h"
@@ -106,18 +107,24 @@ void RS_KernelManager::init(
     std::function<void(const RS_WorldMessage&)> message_sink
 ) {
     if (logging::get("root")) _logger = logging::get("root")->clone("kernel manager");
-    _thread_pool = make_shared<RS_ThreadPool>();
+    _thread_pool = make_shared<RS_ThreadPool>(RS_MIN(std::thread::hardware_concurrency(), 32));
     _host_provider = host_provider;
     _device_provider = device_provider;
     _kernel_record_buffer_frame_num = record_buffer_frame_num;
     _message_sink = std::move(message_sink);
     _kernel_synchronization_thread =
         make_unique<thread>(&RS_KernelManager::_kernelSynchronizationThreadFunc, this);
+
+    // Budget the shared structure build cache at a tenth of the host memory free at startup.
+    RS_KernelStructureVoxelManager::setBuildCacheByteSize(RS_System::getAvailableMemory() / 10);
 }
 
 void RS_KernelManager::free() {
     // Not inited
     if (!_thread_pool) return;
+    // Drop cached body builds while the host provider that backs their hashmaps is still alive, so
+    // the scoped providers do not outlive it and free into dangling memory at process exit.
+    RS_KernelStructureVoxelManager::clearBuildCache();
     _thread_pool = nullptr;
     _device_provider = nullptr;
     _host_provider = nullptr;
