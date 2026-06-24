@@ -69,7 +69,9 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     _record_gid = _record_registration.gid();
     _signal_gid = _signal_registration.gid();
 
-    _scoped_provider =
+    _scoped_host_provider =
+        std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getHostProvider());
+    _scoped_device_provider =
         std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getDeviceProvider());
 
     RS_Timer timer;
@@ -484,7 +486,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
     RSize thread_count = _kernel_manager->getThreadPool()->size();
     RS_Barrier barrier(thread_count);
 
-    _voxel_tmp_index_map[body_sid].init(&RS_MemoryDefaultProvider::getInstance());
+    _voxel_tmp_index_map[body_sid].init(_scoped_host_provider.get());
 
     auto initial_body_orientation = _structure().orientation * body_rsc.relative_orientation;
     auto initial_body_origin_position =
@@ -1537,7 +1539,7 @@ void RS_KernelStructureVoxelManager::_addSignals() {
         _expansion_signal_num, _hinge_signal_num, _prismatic_signal_num
     );
 
-    RS_MemoryProvider *memory_provider = _scoped_provider.get();
+    RS_MemoryProvider *memory_provider = _scoped_device_provider.get();
     _host_signal_buffer = memory_provider->allocateHost(total_size, true);
     _device_signal_buffer = memory_provider->allocate(total_size, true);
     _host_signal_buffer.set(0);
@@ -1558,14 +1560,10 @@ void RS_KernelStructureVoxelManager::_colorConstraintJoints() {
     if (_constraint_joint_num == 0) return;
 
     RS_Array<bool, 2> constraint_share_body(
-        {_constraint_joint_num, _constraint_joint_num}, &RS_MemoryDefaultProvider::getInstance()
+        {_constraint_joint_num, _constraint_joint_num}, _scoped_host_provider.get()
     );
-    RS_Array<RIndex, 1> constraint_colors(
-        _constraint_joint_num, &RS_MemoryDefaultProvider::getInstance()
-    );
-    RS_Array<bool, 1> constraint_color_is_used(
-        _constraint_joint_num, &RS_MemoryDefaultProvider::getInstance()
-    );
+    RS_Array<RIndex, 1> constraint_colors(_constraint_joint_num, _scoped_host_provider.get());
+    RS_Array<bool, 1> constraint_color_is_used(_constraint_joint_num, _scoped_host_provider.get());
 
     constraint_share_body.fill(false);
     constraint_colors.fill(RS_NULL_INDEX);
@@ -1733,23 +1731,23 @@ RS_KernelStructureVoxelManager::_getAll() const {
     KernelStructureData<FloatMemAccuracy> data;
 
     RS_MemoryProvider *provider = _kernel_manager->getDeviceProvider();
-    RS_MemoryProvider *default_provider = &RS_MemoryDefaultProvider::getInstance();
+    RS_MemoryProvider *host_provider = _scoped_host_provider.get();
 
     // RS_Timer timer;
 
     RS_MemoryPtr voxel_materials =
-        default_provider->allocate(sizeof(VoxelMaterialMem) * _voxel_materials.size(), true);
+        host_provider->allocate(sizeof(VoxelMaterialMem) * _voxel_materials.size(), true);
     RS_MemoryPtr link_materials =
-        default_provider->allocate(sizeof(LinkMaterialMem) * _link_materials.size(), true);
-    RS_MemoryPtr voxels = default_provider->allocate(sizeof(VoxelMem) * _voxels.size(), true);
-    RS_MemoryPtr links = default_provider->allocate(sizeof(LinkMem) * _links.size(), true);
+        host_provider->allocate(sizeof(LinkMaterialMem) * _link_materials.size(), true);
+    RS_MemoryPtr voxels = host_provider->allocate(sizeof(VoxelMem) * _voxels.size(), true);
+    RS_MemoryPtr links = host_provider->allocate(sizeof(LinkMem) * _links.size(), true);
     RS_MemoryPtr rigid_bodies =
-        default_provider->allocate(sizeof(RigidBodyMem) * _rigid_bodies.size(), true);
-    RS_MemoryPtr rigid_body_surface_voxels = default_provider->allocate(
+        host_provider->allocate(sizeof(RigidBodyMem) * _rigid_bodies.size(), true);
+    RS_MemoryPtr rigid_body_surface_voxels = host_provider->allocate(
         sizeof(RigidBodySurfaceVoxelMem) * _rigid_body_surface_voxels.size(), true
     );
     RS_MemoryPtr constraint_joints =
-        default_provider->allocate(sizeof(ConstraintJointMem) * _constraint_joints.size(), true);
+        host_provider->allocate(sizeof(ConstraintJointMem) * _constraint_joints.size(), true);
 
     map<RS_OrderedPair<RIndex, RIndex>, RIndex> voxel_material_map;
 
@@ -2490,7 +2488,7 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
 }
 
 void RS_KernelStructureVoxelManager::_initKernelRecordData() {
-    auto memory_provider = _scoped_provider.get();
+    auto memory_provider = _scoped_device_provider.get();
     auto buffer_frame_num = _kernel_manager->getKernelRecordBufferFrameNum();
     const rsc::RSC_StructureVoxelRecord &record_cfg = _structure().record;
 

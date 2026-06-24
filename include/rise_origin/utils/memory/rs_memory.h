@@ -494,8 +494,6 @@ inline void RS_MemoryProvider::copy(
 
 class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
    public:
-    RS_ThreadPool pool;
-
     RS_MemoryDefaultProvider() {
         type = RSE_MEMORY_PROVIDER_TYPE_DEFAULT;
         device = {RSE_DEVICE_TYPE_CPU, 0};
@@ -550,8 +548,6 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
     ) override {
         if (ptr.provider() != this)
             RS_THROW(RS_HostExecutionException("Cannot set memory allocated by another provider"));
-
-        pool.wait();
         if (ptr.device().type == RSE_DEVICE_TYPE_CPU) {
             std::memset((ptr + offset).data, value, size);
         }
@@ -579,96 +575,11 @@ class RS_MemoryDefaultProvider final : public RS_MemoryProvider {
                 enumToString(src.device().type),
                 src.device().id
             ));
-
-        pool.wait();
         std::memcpy(dst.data, src.data, size);
     }
 
     void
-    sync(bool sync_main = true, bool sync_copy_to = true, bool sync_copy_from = true) override {
-        pool.wait();
-    }
-
-    template <typename ComputeFunction, bool Debug = false, typename... Args>
-    void run(RS_MemoryProviderRunConfig config, Args... args) {
-        if (!config.validate())
-            RS_THROW(RS_InvalidArgumentException("Invalid config: {}", config.toString()));
-
-        if (config.thread_num == 0) return;
-
-        ComputeFunction::validate();
-        if constexpr (!ComputeFunction::isCPUSupported()) {
-            RS_THROW(RS_DeviceExecutionException(
-                "Compute function is not supported by the default provider"
-            ));
-        } else {
-            config.block_size = config.block_size == RS_AUTO_BLOCK_SIZE
-                                    ? RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE
-                                    : config.block_size;
-
-            RSize block_num = RS_CEIL_DIV(config.thread_num, config.block_size);
-
-            RSize parallel_block_num = pool.size();
-
-            auto host_shared_mem = allocate(
-                ComputeFunction::sharedMemLayoutSize() * config.block_size * parallel_block_num,
-                true
-            );
-
-            auto host_stack_mem = allocate(
-                RS_DEVICE_CPU_FIBER_STACK_SIZE * config.block_size * parallel_block_num, true
-            );
-
-            pool.submitLoop(
-                    0, block_num, [=](RSize b) {
-                        RS_CPUBlock cpu_block;
-                        RIndex worker_thread_index =
-                            RS_ThreadPool::RS_SynchronizedThreadPoolWorker::index;
-                        if constexpr (ComputeFunction::sharedMemLayoutSize() > 0) {
-                            cpu_block.run<ComputeFunction, Args...>(
-                                b,
-                                config.block_size,
-                                RS_MIN(
-                                    config.block_size, config.thread_num - b * config.block_size
-                                ),
-                                RS_DEVICE_CPU_FIBER_STACK_SIZE,
-                                (host_stack_mem + worker_thread_index * config.block_size *
-                                                      RS_DEVICE_CPU_FIBER_STACK_SIZE)
-                                    .ptr(),
-                                (host_shared_mem + worker_thread_index * config.block_size *
-                                                       ComputeFunction::sharedMemLayoutSize())
-                                    .ptr(),
-                                args...
-                            );
-                        } else {
-                            cpu_block.run<ComputeFunction, Args...>(
-                                b,
-                                config.block_size,
-                                RS_MIN(
-                                    config.block_size, config.thread_num - b * config.block_size
-                                ),
-                                RS_DEVICE_CPU_FIBER_STACK_SIZE,
-                                (host_stack_mem + worker_thread_index * config.block_size *
-                                                      RS_DEVICE_CPU_FIBER_STACK_SIZE)
-                                    .ptr(),
-                                static_cast<void*>(nullptr),
-                                args...
-                            );
-                        }
-                    }
-            ).wait();
-            // Since the executor is stateless, we need to wait for all tasks to finish and
-            // deallocate the shared memory
-            host_shared_mem.free();
-            host_stack_mem.free();
-        }
-    }
-
-    template <typename... Args>
-    void capture(const char* key, Args&&... args) {
-        auto all = std::forward_as_tuple(std::forward<Args>(args)...);
-        std::get<sizeof...(Args) - 1>(all)();
-    }
+    sync(bool sync_main = true, bool sync_copy_to = true, bool sync_copy_from = true) override {}
 };
 
 /**

@@ -20,7 +20,8 @@ namespace rise {
  * RS_KernelCosmicBackgroundManager
  *****************************************************************/
 RS_KernelCosmicBackgroundManager::RS_KernelCosmicBackgroundManager(
-    RS_KernelManager* kernel_manager, const SupportedRSC& cosmic_rsc
+    RS_KernelManager* kernel_manager,
+    const SupportedRSC& cosmic_rsc
 )
     : _kernel_manager(kernel_manager), _rsc(cosmic_rsc) {
     // Reference the Uniform background's texture so it cannot be removed while alive.
@@ -31,7 +32,9 @@ RS_KernelCosmicBackgroundManager::RS_KernelCosmicBackgroundManager(
             RSE_TextureStorageFormat storage_format =
                 tex_mgr.getTextureStorageFormat(uniform.texture_reference);
             _texture_reference = RS_KernelTextureReference(
-                _kernel_manager, uniform.texture_reference, RSE_TEXTURE_COLOR_SPACE_SRGB,
+                _kernel_manager,
+                uniform.texture_reference,
+                RSE_TEXTURE_COLOR_SPACE_SRGB,
                 storage_format
             );
         }
@@ -242,7 +245,10 @@ void RS_KernelCosmicBackgroundManager::_updateKernelHosekWilkieData(
 }
 
 double RS_KernelCosmicBackgroundManager::_evalHosekChannel(
-    const ArHosekSkyModelState* state, int ch, double cos_theta, double cos_gamma
+    const ArHosekSkyModelState* state,
+    int ch,
+    double cos_theta,
+    double cos_gamma
 ) {
     const double* c = state->configs[ch];
     double gamma = std::acos(cos_gamma);

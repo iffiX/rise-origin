@@ -13,12 +13,13 @@ namespace rise {
  * RS_KernelFloorManager
  *****************************************************************/
 RS_KernelFloorManager::RS_KernelFloorManager(
-    RS_KernelManager* kernel_manager, const SupportedRSC& floor_rsc
+    RS_KernelManager* kernel_manager,
+    const SupportedRSC& floor_rsc
 )
     : _kernel_manager(kernel_manager), _rsc(floor_rsc) {
-    _scoped_provider =
+    _scoped_device_provider =
         std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getDeviceProvider());
-    auto* provider = _scoped_provider.get();
+    auto* provider = _scoped_device_provider.get();
 
     // Reference the floor's material so it cannot be removed while the floor is alive.
     auto& material_manager = _kernel_manager->getKernelMaterialManager();
@@ -97,10 +98,9 @@ RS_KernelFloorManager::RS_KernelFloorManager(
 
 void RS_KernelFloorManager::commit() {
     // The material vision slot is committed before this, so the handle is resolvable.
-    RHandle vision_material =
-        _kernel_manager->getKernelMaterialManager().findVisionMaterialHandle(
-            _material_reference.name()
-        );
+    RHandle vision_material = _kernel_manager->getKernelMaterialManager().findVisionMaterialHandle(
+        _material_reference.name()
+    );
     _kernel_manager->enterKernelDataCriticalZone();
     _initKernelData(vision_material);
     _kernel_manager->exitKernelDataCriticalZone();
@@ -138,9 +138,7 @@ void RS_KernelFloorManager::dereference() {
 
 RSize RS_KernelFloorManager::getUseCount() const { return _use_count; }
 
-const RS_KernelFloorManager::SupportedRSC& RS_KernelFloorManager::getRSC() const {
-    return _rsc;
-}
+const RS_KernelFloorManager::SupportedRSC& RS_KernelFloorManager::getRSC() const { return _rsc; }
 
 void RS_KernelFloorManager::_initKernelData(RHandle vision_material) {
     auto* provider = _kernel_manager->getDeviceProvider();
@@ -358,7 +356,9 @@ RS_KernelFloorReference::RS_KernelFloorReference(RS_KernelManager* kernel_manage
     : _kernel_manager(kernel_manager) {
     auto& floor = _kernel_manager->getKernelFloorManager();
     if (!floor) {
-        RS_THROW(RS_InvalidCharacterizationException("Floor is not registered in the kernel manager"));
+        RS_THROW(
+            RS_InvalidCharacterizationException("Floor is not registered in the kernel manager")
+        );
     }
     floor->reference();
 }
@@ -370,7 +370,8 @@ RS_KernelFloorReference::RS_KernelFloorReference(RS_KernelFloorReference&& other
     other._kernel_manager = nullptr;
 }
 
-RS_KernelFloorReference& RS_KernelFloorReference::operator=(RS_KernelFloorReference&& other
+RS_KernelFloorReference& RS_KernelFloorReference::operator=(
+    RS_KernelFloorReference&& other
 ) noexcept {
     if (this != &other) {
         _release();

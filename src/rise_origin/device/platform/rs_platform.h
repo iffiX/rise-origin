@@ -87,9 +87,6 @@ void castProviderPtrAndCall(RS_MemoryProvider* provider, Function function) {
         case RSE_MEMORY_PROVIDER_TYPE_CPU:
             function(dynamic_cast<RS_MemoryCPUProvider*>(base));
             break;
-        case RSE_MEMORY_PROVIDER_TYPE_DEFAULT:
-            function(dynamic_cast<RS_MemoryDefaultProvider*>(base));
-            break;
         default:
             RS_THROW(RS_InvalidArgumentException("Invalid memory provider"));
     }
@@ -133,9 +130,6 @@ void castProviderPtrAndCall(RS_MemoryProvider* provider, Function function) {
     switch (provider->type) {
         case RSE_MEMORY_PROVIDER_TYPE_CPU:
             function(dynamic_cast<RS_MemoryCPUProvider*>(provider));
-            break;
-        case RSE_MEMORY_PROVIDER_TYPE_DEFAULT:
-            function(dynamic_cast<RS_MemoryDefaultProvider*>(provider));
             break;
         default:
             RS_THROW(RS_InvalidArgumentException("Invalid memory provider"));

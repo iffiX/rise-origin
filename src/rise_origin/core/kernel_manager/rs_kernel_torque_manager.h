@@ -6,9 +6,9 @@
 
 #include "rise_origin/core/rs_world_signal.h"
 #include "rise_origin/rsc/signal/rsc_mechanical.h"
-#include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/memory/rs_memory.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/memory/rs_memory.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rs_kernel_gid_registration.h"
 #include "rs_kernel_structure_voxel_manager.h"
 
@@ -27,9 +27,7 @@ class RS_KernelTorqueManager {
      * @brief Bind the signal, reference its emitting structure, and build the host data. Torque
      *        applies to rigid bodies only.
      */
-    RS_KernelTorqueManager(
-        RS_KernelManager *kernel_manager, const SupportedRSC &torque_rsc
-    );
+    RS_KernelTorqueManager(RS_KernelManager *kernel_manager, const SupportedRSC &torque_rsc);
 
     /**
      * @brief Commit the built signal to the kernel context.
@@ -84,7 +82,7 @@ class RS_KernelTorqueManager {
 
    private:
     RS_KernelManager *_kernel_manager = nullptr;
-    std::unique_ptr<RS_MemoryScopedProvider> _scoped_provider;
+    std::unique_ptr<RS_MemoryScopedProvider> _scoped_device_provider;
 
     RS_KernelStructureVoxelReference _structure_reference;
     RS_KernelGidRegistration _signal_registration;

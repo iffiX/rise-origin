@@ -74,7 +74,7 @@ class RS_KernelFloorManager {
 
    private:
     RS_KernelManager *_kernel_manager = nullptr;
-    std::unique_ptr<RS_MemoryScopedProvider> _scoped_provider;
+    std::unique_ptr<RS_MemoryScopedProvider> _scoped_device_provider;
 
     RS_KernelMaterialReference _material_reference;
 

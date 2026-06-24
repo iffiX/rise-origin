@@ -15,7 +15,7 @@ RS_KernelForceManager::RS_KernelForceManager(
     : _kernel_manager(kernel_manager), _rsc(force_rsc) {
     const auto &force = _rsc.as<rsc::RSC_Force>();
 
-    _scoped_provider =
+    _scoped_device_provider =
         std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getDeviceProvider());
 
     // Resolve structure + segment context so commit() can proceed.
@@ -61,8 +61,8 @@ RS_KernelForceManager::RS_KernelForceManager(
     // Allocate per-manager host and device buffers backing one unified force
     // signal entry (one 3D vector).
     RBigSize total_size = RS_WorldForceSignal::getRequiredMemorySize(1);
-    _host_signal_buffer = _scoped_provider->allocateHost(total_size, true);
-    _device_signal_buffer = _scoped_provider->allocate(total_size, true);
+    _host_signal_buffer = _scoped_device_provider->allocateHost(total_size, true);
+    _device_signal_buffer = _scoped_device_provider->allocate(total_size, true);
     _host_signal_buffer.set(0);
     _device_signal_buffer.set(0);
 
@@ -113,9 +113,7 @@ RS_WorldForceSignal RS_KernelForceManager::getControllerSignal() {
 
 const RS_KernelForceManager::SupportedRSC &RS_KernelForceManager::getRSC() const { return _rsc; }
 
-std::string RS_KernelForceManager::getSignalName() const {
-    return _rsc.as<rsc::RSC_Force>().name;
-}
+std::string RS_KernelForceManager::getSignalName() const { return _rsc.as<rsc::RSC_Force>().name; }
 
 std::string RS_KernelForceManager::getStructureName() const {
     return _rsc.as<rsc::RSC_Force>().structure_name;
@@ -185,14 +183,16 @@ void RS_KernelForceManager::_freeKernelData() {
 
             // Remove force memory from appropriate vector and layout
             if (_is_rigid) {
-                RIndex force_mem_index = ctx.host_data->force_rigid_layout.find(_structure_reference.gid());
+                RIndex force_mem_index =
+                    ctx.host_data->force_rigid_layout.find(_structure_reference.gid());
                 // Remove from rigid force memory vector
                 ctx.force_rigid.erase(force_mem_index);
 
                 // Update host layout
                 ctx.host_data->force_rigid_layout.remove(force_mem_index);
             } else {
-                RIndex force_mem_index = ctx.host_data->force_soft_layout.find(_structure_reference.gid());
+                RIndex force_mem_index =
+                    ctx.host_data->force_soft_layout.find(_structure_reference.gid());
                 // Remove from soft force memory vector
                 ctx.force_soft.erase(force_mem_index);
 

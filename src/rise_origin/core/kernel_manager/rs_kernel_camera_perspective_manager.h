@@ -200,7 +200,7 @@ class RS_KernelCameraPerspectiveManager {
 
    private:
     RS_KernelManager *_kernel_manager = nullptr;
-    std::unique_ptr<RS_MemoryScopedProvider> _scoped_provider;
+    std::unique_ptr<RS_MemoryScopedProvider> _scoped_device_provider;
 
     RS_KernelGidRegistration _entity_registration;
     RS_KernelGidRegistration _record_registration;
@@ -317,7 +317,8 @@ class RS_KernelCameraPerspectiveReference {
     ~RS_KernelCameraPerspectiveReference();
 
     RS_KernelCameraPerspectiveReference(RS_KernelCameraPerspectiveReference &&other) noexcept;
-    RS_KernelCameraPerspectiveReference &operator=(RS_KernelCameraPerspectiveReference &&other
+    RS_KernelCameraPerspectiveReference &operator=(
+        RS_KernelCameraPerspectiveReference &&other
     ) noexcept;
     RS_KernelCameraPerspectiveReference(const RS_KernelCameraPerspectiveReference &) = delete;
     RS_KernelCameraPerspectiveReference &operator=(const RS_KernelCameraPerspectiveReference &) =

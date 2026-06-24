@@ -142,8 +142,7 @@ RSize RS_KernelTextureManager::getTextureUseCount(const std::string &name) const
     return it == _name_entries.end() ? 0 : it->second.use_count;
 }
 
-std::vector<RS_KernelTextureManager::SupportedRSC>
-RS_KernelTextureManager::getTextureRSCs() const {
+std::vector<RS_KernelTextureManager::SupportedRSC> RS_KernelTextureManager::getTextureRSCs() const {
     std::vector<SupportedRSC> texture_rscs;
     texture_rscs.reserve(_name_entries.size());
     for (const auto &[name, entry] : _name_entries) texture_rscs.push_back(entry.source_rsc);
@@ -180,7 +179,8 @@ bool RS_KernelTextureManager::isGrid(const std::string &name) const {
     return it != _name_entries.end() && it->second.source_rsc.is<RSC_TextureGrid>();
 }
 
-RSE_TextureStorageFormat RS_KernelTextureManager::getTextureStorageFormat(const std::string &name
+RSE_TextureStorageFormat RS_KernelTextureManager::getTextureStorageFormat(
+    const std::string &name
 ) const {
     auto it = _name_entries.find(name);
     if (it == _name_entries.end())
@@ -216,7 +216,9 @@ void RS_KernelTextureManager::_freeKernelData() {
 }
 
 RHandle RS_KernelTextureManager::_uploadGrid(
-    const RSC_TextureGrid &grid, RIndex grid_id, RSE_TextureColorSpace color_space
+    const RSC_TextureGrid &grid,
+    RIndex grid_id,
+    RSE_TextureColorSpace color_space
 ) {
     RHandle handle = RS_NULL_HANDLE;
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
@@ -225,7 +227,7 @@ RHandle RS_KernelTextureManager::_uploadGrid(
         // Update host layout.
         ctx.host_data->texture_grid_layout.add(1, grid_id);
         ctx.host_data->texture_grid_layout.syncDeviceLayout(ctx.texture_grid_layout);
-        
+
         // Update device layout.
         handle = ctx.host_data->texture_grid_layout.segmentOffset(
             ctx.host_data->texture_grid_layout.find(grid_id)
@@ -289,7 +291,8 @@ RS_KernelTextureReference::RS_KernelTextureReference(RS_KernelTextureReference &
     other._kernel_manager = nullptr;
 }
 
-RS_KernelTextureReference &RS_KernelTextureReference::operator=(RS_KernelTextureReference &&other
+RS_KernelTextureReference &RS_KernelTextureReference::operator=(
+    RS_KernelTextureReference &&other
 ) noexcept {
     if (this != &other) {
         _release();

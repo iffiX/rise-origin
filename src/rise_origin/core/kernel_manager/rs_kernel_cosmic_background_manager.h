@@ -31,7 +31,10 @@ class RS_KernelCosmicBackgroundManager {
      * @brief Bind to the kernel manager, reference the Uniform texture, and cook the background
      *        state host side.
      */
-    RS_KernelCosmicBackgroundManager(RS_KernelManager *kernel_manager, const SupportedRSC &cosmic_rsc);
+    RS_KernelCosmicBackgroundManager(
+        RS_KernelManager *kernel_manager,
+        const SupportedRSC &cosmic_rsc
+    );
 
     /**
      * @brief Commit the cosmic background to the kernel context.
@@ -87,7 +90,8 @@ class RS_KernelCosmicBackgroundManager {
 
     bool _is_kernel_data_inited = false;
 
-    /// Frozen state tracked for dispatch uniformity; a cosmic background has no kernel data to pause.
+    /// Frozen state tracked for dispatch uniformity; a cosmic background has no kernel data to
+    /// pause.
     bool _is_frozen = false;
 
     /// Live use_count from external consumers.
@@ -117,7 +121,10 @@ class RS_KernelCosmicBackgroundManager {
     /// Per-channel Hosek-Wilkie radiance at (cos_theta, cos_gamma), mirroring
     /// the kernel-side _evalCosmicBackgroundHosekWilkie formula in double precision.
     static double _evalHosekChannel(
-        const ArHosekSkyModelState *state, int ch, double cos_theta, double cos_gamma
+        const ArHosekSkyModelState *state,
+        int ch,
+        double cos_theta,
+        double cos_gamma
     );
 };
 
@@ -131,7 +138,8 @@ class RS_KernelCosmicBackgroundReference {
     ~RS_KernelCosmicBackgroundReference();
 
     RS_KernelCosmicBackgroundReference(RS_KernelCosmicBackgroundReference &&other) noexcept;
-    RS_KernelCosmicBackgroundReference &operator=(RS_KernelCosmicBackgroundReference &&other
+    RS_KernelCosmicBackgroundReference &operator=(
+        RS_KernelCosmicBackgroundReference &&other
     ) noexcept;
     RS_KernelCosmicBackgroundReference(const RS_KernelCosmicBackgroundReference &) = delete;
     RS_KernelCosmicBackgroundReference &operator=(const RS_KernelCosmicBackgroundReference &) =

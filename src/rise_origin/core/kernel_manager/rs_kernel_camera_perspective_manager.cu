@@ -21,7 +21,7 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     const SupportedRSC& camera_rsc
 )
     : _kernel_manager(kernel_manager), _rsc(camera_rsc) {
-    _scoped_provider =
+    _scoped_device_provider =
         std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getDeviceProvider());
     auto entity_name = _rsc.visit([](auto& c) -> std::string { return c.name; });
     _entity_registration =
@@ -31,7 +31,7 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     _signal_registration =
         RS_KernelGidRegistration(_kernel_manager, RSE_KERNEL_GID_SIGNAL, entity_name + ":signal");
 
-    auto memory_provider = _scoped_provider.get();
+    auto memory_provider = _scoped_device_provider.get();
     auto buffer_frame_num = _kernel_manager->getKernelRecordBufferFrameNum();
 
     RSize pixel_num = 0;
@@ -594,7 +594,7 @@ void RS_KernelCameraPerspectiveManager::_freeKernelData() {
 void RS_KernelCameraPerspectiveManager::_addSignals() {
     RBigSize total_size = RS_WorldCameraPerspectiveSignal::getRequiredMemorySize(1, 1, 1);
 
-    RS_MemoryProvider* memory_provider = _scoped_provider.get();
+    RS_MemoryProvider* memory_provider = _scoped_device_provider.get();
     _host_signal_buffer = memory_provider->allocateHost(total_size, true);
     _device_signal_buffer = memory_provider->allocate(total_size, true);
     _host_signal_buffer.set(0);

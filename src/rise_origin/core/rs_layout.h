@@ -108,9 +108,8 @@ class RS_DeviceLayout {
 class RSCF_ResolveThreadHandleFromLayout
     : public RS_ComputeFunction<RSCF_ResolveThreadHandleFromLayout> {
    public:
-   template <typename Array1DLike>
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    run(RS_DeviceLayout layout, Array1DLike handles) {
+    template <typename Array1DLike>
+    HOST_DEVICE_INLINE_QUALIFIER static void run(RS_DeviceLayout layout, Array1DLike handles) {
         RIndex i = index1D();
         auto search_result = layout.searchForBelongedSegment(i);
         handles[i] = search_result.global_index;
@@ -119,9 +118,80 @@ class RSCF_ResolveThreadHandleFromLayout
 
 }  // namespace device
 
+/**
+ * @brief Computes a layout's over-allocated reserved capacity from its packed total capacity.
+ *
+ * The reserve grows at 2x below double_below_threshold, is exact above exact_above_threshold, and
+ * fades linearly between the two.
+ */
+class RS_LayoutGrowthPolicy {
+   public:
+    RSize double_below_threshold = (1u << 20);
+    RSize exact_above_threshold = (16u << 20);
+    RSize minimum_capacity = 16384;
+
+    RS_LayoutGrowthPolicy() = default;
+
+    /**
+     * @brief Constructs a growth policy.
+     *
+     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
+     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param minimum_capacity Lower bound on the reserve while non-empty.
+     */
+    RS_LayoutGrowthPolicy(
+        RSize double_below_threshold,
+        RSize exact_above_threshold,
+        RSize minimum_capacity = 16384
+    );
+
+    /**
+     * @brief Returns the growth multiplier for a packed total capacity.
+     *
+     * @param total_capacity Current packed total capacity.
+     * @return Multiplier in [1, 2].
+     */
+    [[nodiscard]] double getMultiplier(RSize total_capacity) const;
+
+    /**
+     * @brief Returns the reserve for the current packed total, re-targeting only outside the band
+     *        [total_capacity, total_capacity * multiplier].
+     *
+     * @param total_capacity Current packed total capacity.
+     * @param old_reserved_capacity Previously stored reserved capacity.
+     * @return New reserved capacity.
+     */
+    [[nodiscard]] RSize
+    getReservedCapacity(RSize total_capacity, RSize old_reserved_capacity) const;
+};
+
 class RS_CompactLayout {
    public:
-    RS_CompactLayout() = default;
+    /**
+     * @brief Constructs a compact layout with growth policy thresholds.
+     *
+     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
+     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param minimum_capacity Lower bound on the reserve while non-empty.
+     */
+    RS_CompactLayout(
+        RSize double_below_threshold = (1u << 20),
+        RSize exact_above_threshold = (16u << 20),
+        RSize minimum_capacity = 16384
+    );
+
+    /**
+     * @brief Replaces the growth policy thresholds.
+     *
+     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
+     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param minimum_capacity Lower bound on the reserve while non-empty.
+     */
+    void setGrowthPolicy(
+        RSize double_below_threshold,
+        RSize exact_above_threshold,
+        RSize minimum_capacity
+    );
 
     void clear();
 
@@ -160,6 +230,8 @@ class RS_CompactLayout {
    private:
     uint64_t _version_id = 0;
     RSize _total_active_size = 0;
+    RSize _total_reserved_capacity = 0;
+    RS_LayoutGrowthPolicy _growth;
     std::vector<RSize> _segment_sizes;
     std::vector<RSize> _segment_offsets;
     std::vector<RSize> _segment_size_prefix_sums;
@@ -169,11 +241,36 @@ class RS_CompactLayout {
     std::unordered_map<RIndex, RIndex> _segment_id_to_index;
 
     void _updateSegmentOffsetsAndSizePrefixSums(RIndex update_start_index);
+    void _refreshReservedCapacity();
 };
 
 class RS_PooledLayout {
    public:
-    RS_PooledLayout() = default;
+    /**
+     * @brief Constructs a pooled layout with growth policy thresholds.
+     *
+     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
+     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param minimum_capacity Lower bound on the reserve while non-empty.
+     */
+    RS_PooledLayout(
+        RSize double_below_threshold = (1u << 20),
+        RSize exact_above_threshold = (16u << 20),
+        RSize minimum_capacity = 16384
+    );
+
+    /**
+     * @brief Replaces the growth policy thresholds.
+     *
+     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
+     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param minimum_capacity Lower bound on the reserve while non-empty.
+     */
+    void setGrowthPolicy(
+        RSize double_below_threshold,
+        RSize exact_above_threshold,
+        RSize minimum_capacity
+    );
 
     void clear();
 
@@ -213,6 +310,8 @@ class RS_PooledLayout {
     uint64_t _version_id = 0;
     RSize _total_active_size = 0;
     RSize _total_capacity = 0;
+    RSize _total_reserved_capacity = 0;
+    RS_LayoutGrowthPolicy _growth;
     std::vector<RSize> _segment_sizes;
     std::vector<RSize> _segment_offsets;
     std::vector<RIndex> _segment_indices;
@@ -220,6 +319,7 @@ class RS_PooledLayout {
     std::unordered_map<RIndex, RIndex> _segment_id_to_index;
 
     void _updateSegmentIDToIndex();
+    void _refreshReservedCapacity();
 };
 
 class RS_ReductionLayout {

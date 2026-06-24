@@ -26,9 +26,7 @@ void RS_KernelSpatialManager::free() {
     _is_floor_triangle_modified = true;
 }
 
-void RS_KernelSpatialManager::markVoxelPartitionModified() {
-    _is_voxel_partition_modified = true;
-}
+void RS_KernelSpatialManager::markVoxelPartitionModified() { _is_voxel_partition_modified = true; }
 
 bool RS_KernelSpatialManager::isVoxelPartitionModified() const {
     return _is_voxel_partition_modified;
@@ -44,13 +42,10 @@ bool RS_KernelSpatialManager::isFloorTriangleModified() const {
     return _is_floor_triangle_modified;
 }
 
-void RS_KernelSpatialManager::clearFloorTriangleModified() {
-    _is_floor_triangle_modified = false;
-}
+void RS_KernelSpatialManager::clearFloorTriangleModified() { _is_floor_triangle_modified = false; }
 
 void RS_KernelSpatialManager::_initKernelData() {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
-
         auto mem_provider = _kernel_manager->getDeviceProvider();
         auto &ctx = k_ptr->ctx;
         ctx.static_voxel_bvh.init(mem_provider);

@@ -881,7 +881,8 @@ class RS_KernelStructureVoxelManager {
     };
 
     RS_KernelManager *_kernel_manager = nullptr;
-    std::unique_ptr<RS_MemoryScopedProvider> _scoped_provider;
+    std::unique_ptr<RS_MemoryScopedProvider> _scoped_host_provider;
+    std::unique_ptr<RS_MemoryScopedProvider> _scoped_device_provider;
 
     RS_KernelGidRegistration _entity_registration;
     RS_KernelGidRegistration _record_registration;

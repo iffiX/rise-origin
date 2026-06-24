@@ -15,7 +15,7 @@ RS_KernelTorqueManager::RS_KernelTorqueManager(
     : _kernel_manager(kernel_manager), _rsc(torque_rsc) {
     const auto &torque = _rsc.as<rsc::RSC_Torque>();
 
-    _scoped_provider =
+    _scoped_device_provider =
         std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getDeviceProvider());
 
     // Resolve structure + segment context so commit() can proceed.
@@ -56,8 +56,8 @@ RS_KernelTorqueManager::RS_KernelTorqueManager(
     // Allocate per-manager host and device buffers backing one unified torque
     // signal entry (one 3D vector).
     RBigSize total_size = RS_WorldTorqueSignal::getRequiredMemorySize(1);
-    _host_signal_buffer = _scoped_provider->allocateHost(total_size, true);
-    _device_signal_buffer = _scoped_provider->allocate(total_size, true);
+    _host_signal_buffer = _scoped_device_provider->allocateHost(total_size, true);
+    _device_signal_buffer = _scoped_device_provider->allocate(total_size, true);
     _host_signal_buffer.set(0);
     _device_signal_buffer.set(0);
 
@@ -156,7 +156,8 @@ void RS_KernelTorqueManager::_freeKernelData() {
             auto &ctx = k_ptr->ctx;
 
             // Remove torque memory from vector and layout
-            RIndex torque_mem_index = ctx.host_data->torque_rigid_layout.find(_structure_reference.gid());
+            RIndex torque_mem_index =
+                ctx.host_data->torque_rigid_layout.find(_structure_reference.gid());
             ctx.torque_rigid.erase(torque_mem_index);
             ctx.host_data->torque_rigid_layout.remove(torque_mem_index);
 

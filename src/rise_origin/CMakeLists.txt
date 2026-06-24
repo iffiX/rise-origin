@@ -79,7 +79,7 @@ set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
 ################################################################
 # rise_origin_instance executable
 ################################################################
-add_executable(rise_origin_instance applications/instance/main.cpp)
+add_executable(rise_origin_instance apps/instance/main.cpp)
 target_link_libraries(rise_origin_instance PUBLIC rise_origin_core)
 
 ################################################################

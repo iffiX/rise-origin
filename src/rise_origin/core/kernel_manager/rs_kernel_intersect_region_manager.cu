@@ -18,7 +18,7 @@ RS_KernelIntersectRegionManager::RS_KernelIntersectRegionManager(
     const SupportedRSC& region_rsc
 )
     : _kernel_manager(kernel_manager), _rsc(region_rsc) {
-    _scoped_provider =
+    _scoped_device_provider =
         std::make_unique<RS_MemoryScopedProvider>(_kernel_manager->getDeviceProvider());
 
     _record_registration =
@@ -61,7 +61,7 @@ RS_KernelIntersectRegionManager::RS_KernelIntersectRegionManager(
 
     // Stage an empty membership record so delivery is valid before the first record step.
     RBigSize empty_size = RS_WorldIntersectRegionRecord::getRequiredMemorySize(0);
-    _host_record_buffer = _scoped_provider->allocateHost(empty_size, true);
+    _host_record_buffer = _scoped_device_provider->allocateHost(empty_size, true);
     _host_record_buffer.set(0);
     _host_record.initFromMemory(_host_record_buffer.ptr(), 0);
     _host_record.record_gid = _record_registration.gid();
@@ -111,7 +111,7 @@ void RS_KernelIntersectRegionManager::setIntersectRegionRecord(
     // Grow the host arena monotonically to the largest membership set ever seen.
     if (size > _membership_capacity) {
         RBigSize required = RS_WorldIntersectRegionRecord::getRequiredMemorySize(size);
-        _host_record_buffer = _scoped_provider->allocateHost(required, true);
+        _host_record_buffer = _scoped_device_provider->allocateHost(required, true);
         _membership_capacity = size;
     }
 

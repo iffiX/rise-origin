@@ -10,11 +10,11 @@
 #include "rise_origin/core/rs_world_record.h"
 #include "rise_origin/logic/record/rs_intersect_region_m.h"
 #include "rise_origin/rsc/record/rsc_intersect_region.h"
-#include "rise_origin/utils/rs_def.h"
-#include "rise_origin/utils/memory/rs_memory.h"
-#include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/data/rs_variant.h"
+#include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/memory/rs_memory.h"
+#include "rise_origin/utils/rs_def.h"
 #include "rs_kernel_gid_registration.h"
 #include "rs_kernel_structure_voxel_manager.h"
 
@@ -38,7 +38,10 @@ class RS_KernelIntersectRegionManager {
      * @brief Register the record, build the region host data, and, for the linked variant,
      *        reference the host structure and resolve its rigid body.
      */
-    RS_KernelIntersectRegionManager(RS_KernelManager *kernel_manager, const SupportedRSC &region_rsc);
+    RS_KernelIntersectRegionManager(
+        RS_KernelManager *kernel_manager,
+        const SupportedRSC &region_rsc
+    );
 
     /**
      * @brief Commit the region source mem to the kernel context.
@@ -87,7 +90,9 @@ class RS_KernelIntersectRegionManager {
      *        pairs[offset, offset + size). A zero size yields an empty record.
      */
     void setIntersectRegionRecord(
-        const std::vector<logic::RS_IntersectRegionPair> &pairs, RSize offset, RSize size
+        const std::vector<logic::RS_IntersectRegionPair> &pairs,
+        RSize offset,
+        RSize size
     );
 
     /**
@@ -129,7 +134,7 @@ class RS_KernelIntersectRegionManager {
 
    private:
     RS_KernelManager *_kernel_manager = nullptr;
-    std::unique_ptr<RS_MemoryScopedProvider> _scoped_provider;
+    std::unique_ptr<RS_MemoryScopedProvider> _scoped_device_provider;
 
     RS_KernelGidRegistration _record_registration;
     RS_KernelStructureVoxelReference _structure_reference;

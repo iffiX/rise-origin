@@ -3,6 +3,8 @@
 
 #include <fmt/format.h>
 
+#include <cmath>
+
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/rs_iterators.h"
 #include "rs_layout.h"
@@ -10,6 +12,54 @@
 using namespace std;
 
 namespace rise {
+
+RS_LayoutGrowthPolicy::RS_LayoutGrowthPolicy(
+    RSize double_below_threshold,
+    RSize exact_above_threshold,
+    RSize minimum_capacity
+)
+    : double_below_threshold(double_below_threshold),
+      exact_above_threshold(exact_above_threshold),
+      minimum_capacity(minimum_capacity) {}
+
+double RS_LayoutGrowthPolicy::getMultiplier(RSize total_capacity) const {
+    if (total_capacity <= double_below_threshold) return 2.0;
+    if (total_capacity >= exact_above_threshold) return 1.0;
+    double t = static_cast<double>(total_capacity - double_below_threshold) /
+               static_cast<double>(exact_above_threshold - double_below_threshold);
+    return 2.0 - t;
+}
+
+RSize RS_LayoutGrowthPolicy::getReservedCapacity(
+    RSize total_capacity,
+    RSize old_reserved_capacity
+) const {
+    if (total_capacity == 0) return 0;
+    RSize target = static_cast<RSize>(
+        std::ceil(static_cast<double>(total_capacity) * getMultiplier(total_capacity))
+    );
+    target = RS_MAX(target, minimum_capacity);
+    // Re-target only when the old reserve is outside [total_capacity, target], else keep it.
+    return (old_reserved_capacity < total_capacity || old_reserved_capacity > target)
+               ? target
+               : old_reserved_capacity;
+}
+
+RS_CompactLayout::RS_CompactLayout(
+    RSize double_below_threshold,
+    RSize exact_above_threshold,
+    RSize minimum_capacity
+)
+    : _growth(double_below_threshold, exact_above_threshold, minimum_capacity) {}
+
+void RS_CompactLayout::setGrowthPolicy(
+    RSize double_below_threshold,
+    RSize exact_above_threshold,
+    RSize minimum_capacity
+) {
+    _growth =
+        RS_LayoutGrowthPolicy(double_below_threshold, exact_above_threshold, minimum_capacity);
+}
 
 void RS_CompactLayout::clear() {
     _version_id++;
@@ -21,6 +71,7 @@ void RS_CompactLayout::clear() {
     _segment_indices.clear();
     _segment_is_active.clear();
     _segment_id_to_index.clear();
+    _refreshReservedCapacity();
 }
 
 void RS_CompactLayout::add(RSize size, RIndex segment_id, bool is_active) {
@@ -33,6 +84,7 @@ void RS_CompactLayout::add(RSize size, RIndex segment_id, bool is_active) {
         _total_active_size += size;
     }
     _updateSegmentOffsetsAndSizePrefixSums(_segment_sizes.size() - 1);
+    _refreshReservedCapacity();
 }
 
 void RS_CompactLayout::setSegmentIsActive(RIndex index, bool is_active) {
@@ -65,6 +117,7 @@ void RS_CompactLayout::remove(RIndex index) {
             _segment_id_to_index[_segment_indices[i]] = i;
         }
         _updateSegmentOffsetsAndSizePrefixSums(index);
+        _refreshReservedCapacity();
     }
 }
 
@@ -96,9 +149,7 @@ bool RS_CompactLayout::segmentIsActive(RIndex index) const {
 
 RSize RS_CompactLayout::size() const { return _total_active_size; }
 
-RSize RS_CompactLayout::capacity() const {
-    return _segment_size_prefix_sums.empty() ? 0 : _segment_size_prefix_sums.back();
-}
+RSize RS_CompactLayout::capacity() const { return _total_reserved_capacity; }
 
 RIndex RS_CompactLayout::find(RIndex segment_id) const {
     if (auto it = _segment_id_to_index.find(segment_id); it != _segment_id_to_index.end()) {
@@ -152,6 +203,28 @@ void RS_CompactLayout::_updateSegmentOffsetsAndSizePrefixSums(RIndex update_star
     }
 }
 
+void RS_CompactLayout::_refreshReservedCapacity() {
+    RSize total_capacity = _segment_size_prefix_sums.empty() ? 0 : _segment_size_prefix_sums.back();
+    _total_reserved_capacity =
+        _growth.getReservedCapacity(total_capacity, _total_reserved_capacity);
+}
+
+RS_PooledLayout::RS_PooledLayout(
+    RSize double_below_threshold,
+    RSize exact_above_threshold,
+    RSize minimum_capacity
+)
+    : _growth(double_below_threshold, exact_above_threshold, minimum_capacity) {}
+
+void RS_PooledLayout::setGrowthPolicy(
+    RSize double_below_threshold,
+    RSize exact_above_threshold,
+    RSize minimum_capacity
+) {
+    _growth =
+        RS_LayoutGrowthPolicy(double_below_threshold, exact_above_threshold, minimum_capacity);
+}
+
 void RS_PooledLayout::clear() {
     _version_id++;
     _total_active_size = 0;
@@ -161,6 +234,7 @@ void RS_PooledLayout::clear() {
     _segment_indices.clear();
     _segment_is_active.clear();
     _segment_id_to_index.clear();
+    _refreshReservedCapacity();
 }
 
 void RS_PooledLayout::add(RSize size, RIndex segment_id, bool is_active) {
@@ -218,6 +292,7 @@ void RS_PooledLayout::add(RSize size, RIndex segment_id, bool is_active) {
     _segment_id_to_index[segment_id] = _segment_sizes.size() - 1;
     _total_active_size += is_active ? size : 0;
     _total_capacity += size;
+    _refreshReservedCapacity();
 }
 
 void RS_PooledLayout::setSegmentIsActive(RIndex index, bool is_active) {
@@ -280,7 +355,7 @@ bool RS_PooledLayout::segmentIsActive(RIndex index) const {
 
 RSize RS_PooledLayout::size() const { return _total_active_size; }
 
-RSize RS_PooledLayout::capacity() const { return _total_capacity; }
+RSize RS_PooledLayout::capacity() const { return _total_reserved_capacity; }
 
 RIndex RS_PooledLayout::find(RIndex segment_id) const {
     if (auto it = _segment_id_to_index.find(segment_id); it != _segment_id_to_index.end()) {
@@ -296,13 +371,6 @@ const std::vector<RSize>& RS_PooledLayout::getSegmentOffsets() const { return _s
 const std::vector<RIndex>& RS_PooledLayout::getSegmentIds() const { return _segment_indices; }
 
 const std::vector<bool>& RS_PooledLayout::getSegmentIsActive() const { return _segment_is_active; }
-
-void RS_PooledLayout::_updateSegmentIDToIndex() {
-    _segment_id_to_index.clear();
-    for (RIndex i = 0; i < _segment_sizes.size(); i++) {
-        _segment_id_to_index[_segment_indices[i]] = i;
-    }
-}
 
 void RS_PooledLayout::syncDeviceLayout(device::RS_DeviceLayout& device_layout) const {
     if (device_layout.segments.capacity() < segmentNum()) {
@@ -330,6 +398,18 @@ void RS_PooledLayout::syncDeviceLayout(device::RS_DeviceLayout& device_layout) c
     device_layout.segment_size_prefix_sums.writeSlice(
         tmp_segment_size_prefix_sums.data(), tmp_segment_size_prefix_sums.size(), 0
     );
+}
+
+void RS_PooledLayout::_updateSegmentIDToIndex() {
+    _segment_id_to_index.clear();
+    for (RIndex i = 0; i < _segment_sizes.size(); i++) {
+        _segment_id_to_index[_segment_indices[i]] = i;
+    }
+}
+
+void RS_PooledLayout::_refreshReservedCapacity() {
+    _total_reserved_capacity =
+        _growth.getReservedCapacity(_total_capacity, _total_reserved_capacity);
 }
 
 void RS_ReductionLayout::associateInputLayout(const RS_PooledLayout& input_layout) {

@@ -52,7 +52,8 @@ class RS_KernelManager;
  * - commit() uploads the device grid slot for every dirty grid texture with a live reference
  *   and frees it for every dirty grid texture with no reference left.
  * - findTextureHandle(name) reads the grid slot offset, valid after commit().
- * - removeTexture(name) erases the characterization; throws if any consumer still holds a reference.
+ * - removeTexture(name) erases the characterization; throws if any consumer still holds a
+ * reference.
  *
  * CONSTANT textures never allocate a device slot — callers use isConstant() +
  * getConstant() instead of holding a handle. GRID textures allocate a slot in
@@ -183,7 +184,9 @@ class RS_KernelTextureManager {
 
     /// Allocate a device grid slot for grid_id and write the grid params; returns its offset.
     RHandle _uploadGrid(
-        const rsc::RSC_TextureGrid &grid, RIndex grid_id, RSE_TextureColorSpace color_space
+        const rsc::RSC_TextureGrid &grid,
+        RIndex grid_id,
+        RSE_TextureColorSpace color_space
     );
 
     /// Free the device grid slot for grid_id.
