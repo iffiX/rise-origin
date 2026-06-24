@@ -121,41 +121,33 @@ class RSCF_ResolveThreadHandleFromLayout
 /**
  * @brief Computes a layout's over-allocated reserved capacity from its packed total capacity.
  *
- * The reserve grows at 2x below double_below_threshold, is exact above exact_above_threshold, and
- * fades linearly between the two.
+ * At or below double_below_threshold the reserve is twice the total; above it the reserve is the
+ * total plus a fixed growth_elements chunk. The reserve is never below minimum_capacity.
  */
 class RS_LayoutGrowthPolicy {
    public:
     RSize double_below_threshold = (1u << 20);
-    RSize exact_above_threshold = (16u << 20);
-    RSize minimum_capacity = 16384;
+    RSize growth_elements = (1u << 17);
+    RSize minimum_capacity = 128;
 
     RS_LayoutGrowthPolicy() = default;
 
     /**
      * @brief Constructs a growth policy.
      *
-     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
-     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param double_below_threshold Packed total at or below which the reserve is twice the total.
+     * @param growth_elements Fixed chunk added to the total above the threshold.
      * @param minimum_capacity Lower bound on the reserve while non-empty.
      */
     RS_LayoutGrowthPolicy(
         RSize double_below_threshold,
-        RSize exact_above_threshold,
-        RSize minimum_capacity = 16384
+        RSize growth_elements,
+        RSize minimum_capacity = 128
     );
 
     /**
-     * @brief Returns the growth multiplier for a packed total capacity.
-     *
-     * @param total_capacity Current packed total capacity.
-     * @return Multiplier in [1, 2].
-     */
-    [[nodiscard]] double getMultiplier(RSize total_capacity) const;
-
-    /**
      * @brief Returns the reserve for the current packed total, re-targeting only outside the band
-     *        [total_capacity, total_capacity * multiplier].
+     *        [total_capacity, target].
      *
      * @param total_capacity Current packed total capacity.
      * @param old_reserved_capacity Previously stored reserved capacity.
@@ -170,28 +162,25 @@ class RS_CompactLayout {
     /**
      * @brief Constructs a compact layout with growth policy thresholds.
      *
-     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
-     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param double_below_threshold Packed total at or below which the reserve is twice the total.
+     * @param growth_elements Fixed chunk added to the total above the threshold.
      * @param minimum_capacity Lower bound on the reserve while non-empty.
      */
     RS_CompactLayout(
         RSize double_below_threshold = (1u << 20),
-        RSize exact_above_threshold = (16u << 20),
-        RSize minimum_capacity = 16384
+        RSize growth_elements = (1u << 17),
+        RSize minimum_capacity = 128
     );
 
     /**
      * @brief Replaces the growth policy thresholds.
      *
-     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
-     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param double_below_threshold Packed total at or below which the reserve is twice the total.
+     * @param growth_elements Fixed chunk added to the total above the threshold.
      * @param minimum_capacity Lower bound on the reserve while non-empty.
      */
-    void setGrowthPolicy(
-        RSize double_below_threshold,
-        RSize exact_above_threshold,
-        RSize minimum_capacity
-    );
+    void
+    setGrowthPolicy(RSize double_below_threshold, RSize growth_elements, RSize minimum_capacity);
 
     void clear();
 
@@ -249,28 +238,25 @@ class RS_PooledLayout {
     /**
      * @brief Constructs a pooled layout with growth policy thresholds.
      *
-     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
-     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param double_below_threshold Packed total at or below which the reserve is twice the total.
+     * @param growth_elements Fixed chunk added to the total above the threshold.
      * @param minimum_capacity Lower bound on the reserve while non-empty.
      */
     RS_PooledLayout(
         RSize double_below_threshold = (1u << 20),
-        RSize exact_above_threshold = (16u << 20),
-        RSize minimum_capacity = 16384
+        RSize growth_elements = (1u << 17),
+        RSize minimum_capacity = 128
     );
 
     /**
      * @brief Replaces the growth policy thresholds.
      *
-     * @param double_below_threshold Packed total at or below which the reserve grows at 2x.
-     * @param exact_above_threshold Packed total at or above which the reserve is exact.
+     * @param double_below_threshold Packed total at or below which the reserve is twice the total.
+     * @param growth_elements Fixed chunk added to the total above the threshold.
      * @param minimum_capacity Lower bound on the reserve while non-empty.
      */
-    void setGrowthPolicy(
-        RSize double_below_threshold,
-        RSize exact_above_threshold,
-        RSize minimum_capacity
-    );
+    void
+    setGrowthPolicy(RSize double_below_threshold, RSize growth_elements, RSize minimum_capacity);
 
     void clear();
 

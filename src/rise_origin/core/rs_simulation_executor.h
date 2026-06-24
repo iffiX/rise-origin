@@ -48,8 +48,8 @@ class RS_SimulationExecutor {
     bool _sentinel_enabled = true;
     RSE_FloatType _simulation_compute_accuracy = RSE_FLOAT_32;
 
-    // Dynamic per-subsystem run intervals (base-step counts), recomputed by _runDtUpdate whenever the
-    // global time step is recomputed. interval_i = max(1, floor(needed_i / time_step)).
+    // Dynamic per-subsystem run intervals (base-step counts), recomputed by _runDtUpdate whenever
+    // the global time step is recomputed. interval_i = max(1, floor(needed_i / time_step)).
     bool _has_computed_dt = false;
     RSize _softbody_and_rigidbody_update_interval = 1;
     RSize _rigidbody_contact_and_constraint_update_interval = 1;
@@ -74,7 +74,6 @@ class RS_SimulationExecutor {
     // Reduce setup
     RS_MemoryPtr _reduce_input_buffer;
     RS_MemoryPtr _reduce_output_buffer;
-    RS_MemoryPtr _reduce_host_buffer;
     device::RS_Reduce _reduce;
     device::RS_ReduceByGroup _reduce_by_group;
 
@@ -119,7 +118,7 @@ class RS_SimulationExecutor {
     device::RS_Vector<RHandle> _getLaunchHandles(const std::string &name);
     bool _resolveVoxelMobilityPartitionIfNeeded();
     void _resolveVoxelBVHDynamicPartition();
-    void _resizeReduceBufferIfNeeded(RBigSize needed_size);
+    void _resizeReduceBufferIfNeeded(RBigSize needed_input_size, RBigSize needed_output_size);
 
     /**
      * @brief Base-step count a subsystem runs on: max(1, floor(needed / time_step)).

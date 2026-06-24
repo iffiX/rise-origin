@@ -25,8 +25,8 @@
 #include "rise_origin/logic/vision/rs_camera_c.h"
 #include "rise_origin/logic/vision/rs_vision_denoise_c.h"
 #include "rise_origin/logic/vision/rs_vision_ray_c.h"
-#include "rise_origin/utils/rs_conf.h"
 #include "rise_origin/utils/meta/rs_constexpr.h"
+#include "rise_origin/utils/rs_conf.h"
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/rs_iterators.h"
 #include "rs_simulation.h"
@@ -99,9 +99,9 @@ void RS_SimulationExecutor::init(RS_Simulation *simulation) {
     _kernel_manager = simulation->kernel_manager.get();
     _kernel = &_kernel_manager->kernel;
 
-    // Cache the static execution settings once, at init. Later user edits to the simulation 
-    // characterization do not change how this run executes. The per-subsystem run intervals 
-    // are not cached here; they are dynamic, recomputed by _runDtUpdate from the current 
+    // Cache the static execution settings once, at init. Later user edits to the simulation
+    // characterization do not change how this run executes. The per-subsystem run intervals
+    // are not cached here; they are dynamic, recomputed by _runDtUpdate from the current
     // global time step.
     auto sim_rsc = _kernel_manager->getSimulationRSC();
     _time = sim_rsc.time;
@@ -124,7 +124,6 @@ void RS_SimulationExecutor::free() {
 
     _reduce_input_buffer.free();
     _reduce_output_buffer.free();
-    _reduce_host_buffer.free();
     _reduce.free();
     _reduce_by_group.free();
     _scan.free();
@@ -230,7 +229,7 @@ RFloat RS_SimulationExecutor::_runDtUpdate(bool &is_dt_normal) {
         auto link_handles = _getLaunchHandles("link");
         auto dynamic_voxel_handles = _getLaunchHandles("dynamic_voxel");
         _resizeReduceBufferIfNeeded(
-            RS_MAX(link_handles.size(), dynamic_voxel_handles.size()) * sizeof(RFloat)
+            RS_MAX(link_handles.size(), dynamic_voxel_handles.size()) * sizeof(RFloat), 0
         );
         if (link_handles.size() > 0) {
             p_ptr->template run<
@@ -433,7 +432,7 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
          * Voxel NaN check
          ****************************************************************/
         if (voxel_handles.size() > 0) {
-            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f));
+            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f), 0);
             p_ptr->template run<
                 RSCF_LaunchSetOrGetWithHandles<RSCF_GetIsVoxelNanMetric, KernelType>>(
                 {voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
@@ -453,7 +452,7 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
          * Voxel frequency check
          ****************************************************************/
         if (voxel_handles.size() > 0) {
-            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f));
+            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f), 0);
             p_ptr->template run<
                 RSCF_LaunchSetOrGetWithHandles<RSCF_GetVoxelFrequencyMetric, KernelType>>(
                 {voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
@@ -478,7 +477,7 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
          * Link frequency check
          ****************************************************************/
         if (link_handles.size() > 0) {
-            _resizeReduceBufferIfNeeded(link_handles.size() * sizeof(RFloat));
+            _resizeReduceBufferIfNeeded(link_handles.size() * sizeof(RFloat), 0);
             p_ptr->template run<
                 RSCF_LaunchSetOrGetWithHandles<RSCF_GetLinkFrequencyMetric, KernelType>>(
                 {link_handles.size(), RS_AUTO_BLOCK_SIZE, false}, link_handles, _reduce_input_buffer
@@ -491,8 +490,7 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
                 RFloat dt = 1 / (k_ptr->softbody_integration_frequency_multiplier * sqrt(f));
                 if (link_active_sizes[seg] > 0 && (!std::isfinite(f) || dt < RFloat(1e-7)))
                     offenders.emplace(
-                        link_active_ids[seg],
-                        format("degenerate link frequency {} (dt {}s)", f, dt)
+                        link_active_ids[seg], format("degenerate link frequency {} (dt {}s)", f, dt)
                     );
             }
         }
@@ -503,7 +501,7 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
         if (voxel_handles.size() > 0) {
             const RFloat range = RFloat(RS_WORLD_MAX_RANGE);
             RBound3f world_box(-range, -range, -range, range, range, range);
-            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f));
+            _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f), 0);
             p_ptr->template run<
                 RSCF_LaunchSetOrGetWithHandles<RSCF_GetVoxelBoundMetric, KernelType>>(
                 {voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
@@ -615,9 +613,13 @@ void RS_SimulationExecutor::_runRigidbodyCoupling() {
         auto rigid_body_surface_voxel_handles = _getLaunchHandles("rigid_body_surface_voxel");
 
         // Gather each surface voxel's soft coupling correction and reduce onto its body.
+        const std::vector<RSize> reduction_group_sizes =
+            ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
+                .getInputSegmentSizes();
         _resizeReduceBufferIfNeeded(
             ctx.structure_rigid_body_surface_voxel_to_rigid_body_reduction_input_layout.size() *
-            sizeof(RS_CouplingCorrection)
+                sizeof(RS_CouplingCorrection),
+            reduction_group_sizes.size() * sizeof(RS_CouplingCorrection)
         );
         p_ptr->template run<RSCF_LaunchSetOrGetWithLayout<
             typename RS_RigidBodySurfaceVoxelCompute<
@@ -632,8 +634,7 @@ void RS_SimulationExecutor::_runRigidbodyCoupling() {
         _reduce_by_group.reduce<RS_CouplingCorrection, RS_ReduceCouplingCorrectionOp>(
             _reduce_input_buffer,
             _reduce_output_buffer,
-            ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
-                .getInputSegmentSizes(),
+            reduction_group_sizes,
             RS_CouplingCorrection::zero()
         );
         p_ptr->template run<RSCF_LaunchSetOrGetWithLayout<
@@ -1156,9 +1157,8 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             _kernel_manager->syncKernelIfNeeded();
             if (emissive_num > 0) {
                 p_ptr->template run<RSCF_LaunchDirect<
-                    RS_VisionRayCompute<>::RSCF_WriteEmissiveLightWeights, KernelType>>(
-                    {emissive_num, RS_AUTO_BLOCK_SIZE, false}
-                );
+                    RS_VisionRayCompute<>::RSCF_WriteEmissiveLightWeights,
+                    KernelType>>({emissive_num, RS_AUTO_BLOCK_SIZE, false});
             }
             _scan.template inclusiveSum<float, float>(ctx.light_weight, ctx.light_cdf);
 
@@ -1323,7 +1323,7 @@ void RS_SimulationExecutor::_updateIntersectRegionRecord() {
                 if (region_num == 0) return;
 
                 // Materialize the region BVH leaves from the live source mem and rebuild it.
-                ctx.intersect_region_bvh.resize(region_num);
+                ctx.intersect_region_bvh.resize(region_num, false);
                 p_ptr->template run<
                     RSCF_LaunchDirect<typename IRC::RSCF_UpdateIntersectRegion, KernelType>>(
                     {region_num, RS_AUTO_BLOCK_SIZE, false},
@@ -1668,7 +1668,7 @@ void RS_SimulationExecutor::_rebuildFloorTriangleBVHIfNeeded() {
                 return;
             }
 
-            ctx.floor_triangle_bvh.resize(triangle_count);
+            ctx.floor_triangle_bvh.resize(triangle_count, false);
 
             p_ptr->template run<RSCF_LaunchDirect<
                 RS_MeshTriangleCompute::RSCF_FillTriangleBVHLeafData,
@@ -1690,7 +1690,8 @@ void RS_SimulationExecutor::_rebuildFloorTriangleBVHIfNeeded() {
 }
 
 void RS_SimulationExecutor::_buildVoxelBVH(
-    logic::RS_VoxelBVH &bvh, device::RS_Vector<RHandle> &handles
+    logic::RS_VoxelBVH &bvh,
+    device::RS_Vector<RHandle> &handles
 ) {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
@@ -1699,7 +1700,7 @@ void RS_SimulationExecutor::_buildVoxelBVH(
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
                 RSize num_active = handles.size();
-                bvh.resize(num_active);
+                bvh.resize(num_active, false);
                 if (num_active > 0) {
                     p_ptr->template run<RSCF_LaunchDirect<
                         typename RS_VoxelCompute<ComputeAccuracy>::RSCF_FillVoxelBVHLeafData,
@@ -1731,9 +1732,7 @@ void RS_SimulationExecutor::_refitVoxelBVH(logic::RS_VoxelBVH &bvh) {
                 p_ptr->template run<RSCF_LaunchDirect<
                     typename RS_VoxelCompute<ComputeAccuracy>::RSCF_RefitVoxelBVHLeafData,
                     KernelType>>(
-                    {leaf_count, RS_AUTO_BLOCK_SIZE, false},
-                    bvh.object_identifiers,
-                    bvh.leaf_bounds
+                    {leaf_count, RS_AUTO_BLOCK_SIZE, false}, bvh.object_identifiers, bvh.leaf_bounds
                 );
 
                 bvh.refit();
@@ -2017,19 +2016,21 @@ void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
     });
 }
 
-void RS_SimulationExecutor::_resizeReduceBufferIfNeeded(RBigSize needed_size) {
-    if (_reduce_input_buffer.mem_provider == nullptr || _reduce_input_buffer.size() < needed_size) {
-        // Just allocate same amount of memory for both input and output, simpler
-        // Output size is always smaller or equal to input size
+void RS_SimulationExecutor::_resizeReduceBufferIfNeeded(
+    RBigSize needed_input_size,
+    RBigSize needed_output_size
+) {
+    // Each buffer grows independently so the per-segment output is not over-allocated to the
+    // per-element input size. Allocates even at size 0 so the buffer stays bound to the provider.
+    if (_reduce_input_buffer.mem_provider == nullptr ||
+        _reduce_input_buffer.size() < needed_input_size) {
         _reduce_input_buffer.free();
+        _reduce_input_buffer = _device_provider->allocate(needed_input_size, true);
+    }
+    if (_reduce_output_buffer.mem_provider == nullptr ||
+        _reduce_output_buffer.size() < needed_output_size) {
         _reduce_output_buffer.free();
-        _reduce_host_buffer.free();
-
-        // Will allocate even if its 0 (then it's associated with mem provider)
-        _reduce_input_buffer = _device_provider->allocate(needed_size, true);
-        _reduce_output_buffer = _device_provider->allocate(needed_size, true);
-        // Host-side staging for reading reduced per-segment results back to the host.
-        _reduce_host_buffer = _device_provider->allocateHost(needed_size, true);
+        _reduce_output_buffer = _device_provider->allocate(needed_output_size, true);
     }
 }
 

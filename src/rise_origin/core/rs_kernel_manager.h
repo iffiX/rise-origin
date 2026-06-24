@@ -20,8 +20,8 @@
 #include "kernel_manager/rs_kernel_camera_perspective_manager.h"
 #include "kernel_manager/rs_kernel_cosmic_background_manager.h"
 #include "kernel_manager/rs_kernel_floor_manager.h"
-#include "kernel_manager/rs_kernel_gid_registration.h"
 #include "kernel_manager/rs_kernel_force_manager.h"
+#include "kernel_manager/rs_kernel_gid_registration.h"
 #include "kernel_manager/rs_kernel_intersect_region_manager.h"
 #include "kernel_manager/rs_kernel_material_manager.h"
 #include "kernel_manager/rs_kernel_spatial_manager.h"
@@ -33,9 +33,9 @@
 #include "rise_origin/core/rs_world_signal.h"
 #include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/data/rs_any.h"
+#include "rise_origin/utils/memory/rs_memory.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_logging.h"
-#include "rise_origin/utils/memory/rs_memory.h"
 #include "rs_kernel.h"
 
 namespace rise {
@@ -338,8 +338,8 @@ class RS_KernelManager {
     RS_KernelSpatialManager &getKernelSpatialManager();
     RS_KernelTextureManager &getKernelTextureManager();
     RS_KernelMaterialManager &getKernelMaterialManager();
-    const std::unique_ptr<RS_KernelCosmicBackgroundManager> &getKernelCosmicBackgroundManager(
-    ) const;
+    const std::unique_ptr<RS_KernelCosmicBackgroundManager> &
+    getKernelCosmicBackgroundManager() const;
     const std::unique_ptr<RS_KernelFloorManager> &getKernelFloorManager() const;
 
     std::unordered_map<std::string, std::unique_ptr<RS_KernelStructureVoxelManager>> &
@@ -383,7 +383,7 @@ class RS_KernelManager {
     std::condition_variable _command_queue_cv;
 
     std::recursive_mutex _command_execution_mutex;
-    
+
     std::recursive_mutex _kernel_data_mutex;
 
     bool _is_transaction_open = false;
@@ -445,6 +445,8 @@ class RS_KernelManager {
 
     void _beginModificationTransaction();
     void _endModificationTransaction();
+
+    void _configureLayoutGrowthPolicies(RS_ContextHostData *host_data);
 
     void _setSimulationRSC(const rsc::RSC_Simulation &simulation, RIndex message_id);
 

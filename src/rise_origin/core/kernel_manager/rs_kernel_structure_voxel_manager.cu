@@ -2008,7 +2008,6 @@ RS_KernelStructureVoxelManager::_getAll() const {
                 [&](RIndex i) {
                     auto &rigid_body_surface_voxel = _rigid_body_surface_voxels[i];
                     auto rigid_body_surface_voxel_out = RigidBodySurfaceVoxelMem();
-                    rigid_body_surface_voxel_out.structure_gid = _structure_gid;
                     rigid_body_surface_voxel_out.voxel_sid = rigid_body_surface_voxel.voxel_sid;
                     rigid_body_surface_voxel_out.rigid_body_sid =
                         rigid_body_surface_voxel.rigid_body_sid;

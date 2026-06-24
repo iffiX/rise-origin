@@ -298,6 +298,8 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
             .associateInputLayout(k.ctx.host_data->structure_rigid_body_surface_voxel_layout);
         k.ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
             .associateOutputLayout(k.ctx.host_data->structure_rigid_body_layout);
+
+        _configureLayoutGrowthPolicies(k.ctx.host_data);
     });
 
     RS_LOG(_logger, debug, "initKernel takes {}", timer.elapsedTimeString());
@@ -1539,6 +1541,74 @@ void RS_KernelManager::_endModificationTransaction() {
     _is_transaction_open = false;
     _command_execution_mutex.unlock();
     RS_LOG(_logger, debug, "End modification transaction.");
+}
+
+void RS_KernelManager::_configureLayoutGrowthPolicies(RS_ContextHostData* host_data) {
+    std::string capacity_string = _device_provider->getProperty("memory_capacity");
+    if (capacity_string.empty()) return;
+
+    RBigSize capacity_bytes = std::stoull(capacity_string);
+    if (capacity_bytes == 0) return;
+
+    const bool is_f64 = kernel.ctx_accuracy == RSE_FLOAT_64;
+
+    // Convert the memory budget into an element budget using each layout's own element size, then
+    // double the reserve below 40% of the budget and grow by a 2% chunk above it.
+    auto apply = [&](RS_PooledLayout& layout, RBigSize element_bytes, RSize minimum_capacity) {
+        RSize capacity_elements = static_cast<RSize>(capacity_bytes / element_bytes);
+        RSize double_below_threshold = static_cast<RSize>(capacity_elements * 0.4);
+        RSize growth_elements = static_cast<RSize>(capacity_elements * 0.02);
+        layout.setGrowthPolicy(double_below_threshold, growth_elements, minimum_capacity);
+    };
+
+    apply(
+        host_data->structure_link_material_layout,
+        is_f64 ? sizeof(logic::RS_LinkMaterialMem<RSE_FLOAT_64>)
+               : sizeof(logic::RS_LinkMaterialMem<RSE_FLOAT_32>),
+        1024
+    );
+    apply(
+        host_data->structure_voxel_material_layout,
+        is_f64 ? sizeof(logic::RS_VoxelMaterialMem<RSE_FLOAT_64>)
+               : sizeof(logic::RS_VoxelMaterialMem<RSE_FLOAT_32>),
+        1024
+    );
+    apply(
+        host_data->structure_link_layout,
+        is_f64 ? sizeof(logic::RS_LinkMem<RSE_FLOAT_64>) : sizeof(logic::RS_LinkMem<RSE_FLOAT_32>),
+        16384
+    );
+    apply(
+        host_data->structure_voxel_layout,
+        is_f64 ? sizeof(logic::RS_VoxelMem<RSE_FLOAT_64>)
+               : sizeof(logic::RS_VoxelMem<RSE_FLOAT_32>),
+        16384
+    );
+    apply(
+        host_data->structure_rigid_body_layout,
+        is_f64 ? sizeof(logic::RS_RigidBodyMem<RSE_FLOAT_64>)
+               : sizeof(logic::RS_RigidBodyMem<RSE_FLOAT_32>),
+        1024
+    );
+    apply(
+        host_data->structure_rigid_body_surface_voxel_layout,
+        is_f64 ? sizeof(logic::RS_RigidBodySurfaceVoxelMem<RSE_FLOAT_64>)
+               : sizeof(logic::RS_RigidBodySurfaceVoxelMem<RSE_FLOAT_32>),
+        16384
+    );
+    apply(
+        host_data->structure_constraint_joint_layout,
+        is_f64 ? sizeof(logic::RS_ConstraintJointMem<RSE_FLOAT_64>)
+               : sizeof(logic::RS_ConstraintJointMem<RSE_FLOAT_32>),
+        1024
+    );
+
+    RS_LOG(
+        _logger,
+        debug,
+        "Layout growth policies configured (memory_capacity={} bytes)",
+        capacity_bytes
+    );
 }
 
 void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, RIndex message_id) {

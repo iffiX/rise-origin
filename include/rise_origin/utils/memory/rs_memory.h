@@ -6,6 +6,7 @@
 
 #include <cassert>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "rise_origin/utils/concurrency/rs_cpu_block.h"
@@ -97,6 +98,8 @@ class RS_MemoryProvider {
     };
 
     virtual ~RS_MemoryProvider() = default;
+
+    virtual std::string getProperty(const std::string& key) const { return ""; }
 
     virtual RS_MemoryProvider* base() { return this; }
 
@@ -608,6 +611,10 @@ class RS_MemoryScopedProvider final : public RS_MemoryProvider {
 
     RS_MemoryScopedProvider(const RS_MemoryScopedProvider&) = delete;
     RS_MemoryScopedProvider& operator=(const RS_MemoryScopedProvider&) = delete;
+
+    std::string getProperty(const std::string& key) const override {
+        return _real->getProperty(key);
+    }
 
     RS_MemoryProvider* base() override { return _real->base(); }
 

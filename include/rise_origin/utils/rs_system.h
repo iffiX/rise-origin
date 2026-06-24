@@ -146,6 +146,40 @@ class RS_System {
         return 0;
 #endif
     }
+    
+    static RBigSize getUsedMemory() {
+#if defined(RS_SYSTEM_IS_LINUX) || defined(RS_SYSTEM_IS_DARWIN)
+        long total_pages = ::sysconf(_SC_PHYS_PAGES);
+        long available_pages = ::sysconf(_SC_AVPHYS_PAGES);
+        long page_size = ::sysconf(_SC_PAGE_SIZE);
+        if (total_pages <= 0 || available_pages < 0 || page_size <= 0) return 0;
+        return static_cast<RBigSize>(total_pages - available_pages) *
+               static_cast<RBigSize>(page_size);
+#elif defined(RS_SYSTEM_IS_WINDOWS)
+        MEMORYSTATUSEX status;
+        status.dwLength = sizeof(status);
+        if (!::GlobalMemoryStatusEx(&status)) return 0;
+        return static_cast<RBigSize>(status.ullTotalPhys - status.ullAvailPhys);
+#else
+        return 0;
+#endif
+    }
+
+    static RBigSize getTotalMemory() {
+#if defined(RS_SYSTEM_IS_LINUX) || defined(RS_SYSTEM_IS_DARWIN)
+        long pages = ::sysconf(_SC_PHYS_PAGES);
+        long page_size = ::sysconf(_SC_PAGE_SIZE);
+        if (pages <= 0 || page_size <= 0) return 0;
+        return static_cast<RBigSize>(pages) * static_cast<RBigSize>(page_size);
+#elif defined(RS_SYSTEM_IS_WINDOWS)
+        MEMORYSTATUSEX status;
+        status.dwLength = sizeof(status);
+        if (!::GlobalMemoryStatusEx(&status)) return 0;
+        return static_cast<RBigSize>(status.ullTotalPhys);
+#else
+        return 0;
+#endif
+    }
 };
 
 }  // namespace rise

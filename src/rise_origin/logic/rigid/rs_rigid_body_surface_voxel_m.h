@@ -23,9 +23,6 @@ class RS_RigidBodySurfaceVoxelMem {
     /*****************************************************************
      * Pre-set attributes
      *****************************************************************/
-    /// Structure gid of this rigid body surface voxel
-    RIndex structure_gid = RS_NULL_INDEX;
-
     /// Voxel structure scope ID
     RIndex voxel_sid = RS_NULL_INDEX;
 
@@ -52,7 +49,6 @@ class RS_RigidBodySurfaceVoxelMem {
 #define REFLECT_RS_RIGID_BODY_SURFACE_VOXEL_MEM(rigid_body_surface_voxel_mem_type) \
     REFL_AUTO(                                                                     \
         type(rigid_body_surface_voxel_mem_type),                                   \
-        field(structure_gid),                                                      \
         field(voxel_sid),                                                          \
         field(rigid_body_sid),                                                     \
         field(voxel_rb_position),                                                  \

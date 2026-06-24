@@ -599,6 +599,25 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
         device = {RSE_DEVICE_TYPE_UNKNOWN, RS_NULL_INDEX};
     }
 
+    std::string getProperty(const std::string &key) const override {
+        if (key == "default_auto_block_size")
+            return std::to_string(RS_DEVICE_CUDA_DEFAULT_BLOCK_SIZE);
+        if (key == "memory_used" || key == "memory_capacity") {
+            if (!mutex) return "";
+            std::lock_guard<std::recursive_mutex> lock(*mutex.get());
+            int current_device;
+            RcudaGetDevice(&current_device);
+            if (device.id != current_device) RcudaSetDevice(device.id);
+            size_t free_bytes = 0;
+            size_t total_bytes = 0;
+            RcudaMemGetInfo(&free_bytes, &total_bytes);
+            if (device.id != current_device) RcudaSetDevice(current_device);
+            if (key == "memory_used") return std::to_string(total_bytes - free_bytes);
+            return std::to_string(total_bytes);
+        }
+        return "";
+    }
+
     RS_MemoryPtr allocate(RBigSize size, bool sync = true) override {
         if (!mutex) RS_THROW(RS_UninitializedException("CUDA provider is not initialized"));
 

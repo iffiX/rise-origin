@@ -15,29 +15,20 @@ namespace rise {
 
 RS_LayoutGrowthPolicy::RS_LayoutGrowthPolicy(
     RSize double_below_threshold,
-    RSize exact_above_threshold,
+    RSize growth_elements,
     RSize minimum_capacity
 )
     : double_below_threshold(double_below_threshold),
-      exact_above_threshold(exact_above_threshold),
+      growth_elements(growth_elements),
       minimum_capacity(minimum_capacity) {}
-
-double RS_LayoutGrowthPolicy::getMultiplier(RSize total_capacity) const {
-    if (total_capacity <= double_below_threshold) return 2.0;
-    if (total_capacity >= exact_above_threshold) return 1.0;
-    double t = static_cast<double>(total_capacity - double_below_threshold) /
-               static_cast<double>(exact_above_threshold - double_below_threshold);
-    return 2.0 - t;
-}
 
 RSize RS_LayoutGrowthPolicy::getReservedCapacity(
     RSize total_capacity,
     RSize old_reserved_capacity
 ) const {
     if (total_capacity == 0) return 0;
-    RSize target = static_cast<RSize>(
-        std::ceil(static_cast<double>(total_capacity) * getMultiplier(total_capacity))
-    );
+    RSize target = (total_capacity <= double_below_threshold) ? (total_capacity * 2)
+                                                              : (total_capacity + growth_elements);
     target = RS_MAX(target, minimum_capacity);
     // Re-target only when the old reserve is outside [total_capacity, target], else keep it.
     return (old_reserved_capacity < total_capacity || old_reserved_capacity > target)
@@ -47,18 +38,17 @@ RSize RS_LayoutGrowthPolicy::getReservedCapacity(
 
 RS_CompactLayout::RS_CompactLayout(
     RSize double_below_threshold,
-    RSize exact_above_threshold,
+    RSize growth_elements,
     RSize minimum_capacity
 )
-    : _growth(double_below_threshold, exact_above_threshold, minimum_capacity) {}
+    : _growth(double_below_threshold, growth_elements, minimum_capacity) {}
 
 void RS_CompactLayout::setGrowthPolicy(
     RSize double_below_threshold,
-    RSize exact_above_threshold,
+    RSize growth_elements,
     RSize minimum_capacity
 ) {
-    _growth =
-        RS_LayoutGrowthPolicy(double_below_threshold, exact_above_threshold, minimum_capacity);
+    _growth = RS_LayoutGrowthPolicy(double_below_threshold, growth_elements, minimum_capacity);
 }
 
 void RS_CompactLayout::clear() {
@@ -211,18 +201,17 @@ void RS_CompactLayout::_refreshReservedCapacity() {
 
 RS_PooledLayout::RS_PooledLayout(
     RSize double_below_threshold,
-    RSize exact_above_threshold,
+    RSize growth_elements,
     RSize minimum_capacity
 )
-    : _growth(double_below_threshold, exact_above_threshold, minimum_capacity) {}
+    : _growth(double_below_threshold, growth_elements, minimum_capacity) {}
 
 void RS_PooledLayout::setGrowthPolicy(
     RSize double_below_threshold,
-    RSize exact_above_threshold,
+    RSize growth_elements,
     RSize minimum_capacity
 ) {
-    _growth =
-        RS_LayoutGrowthPolicy(double_below_threshold, exact_above_threshold, minimum_capacity);
+    _growth = RS_LayoutGrowthPolicy(double_below_threshold, growth_elements, minimum_capacity);
 }
 
 void RS_PooledLayout::clear() {

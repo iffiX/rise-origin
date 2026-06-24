@@ -17,6 +17,7 @@
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_env_var.h"
 #include "rise_origin/utils/rs_exception.h"
+#include "rise_origin/utils/rs_system.h"
 #include "rise_origin/utils/time/rs_timer.h"
 
 namespace rise {
@@ -73,6 +74,14 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
         mutex->unlock();
         mutex.reset();
         device = {RSE_DEVICE_TYPE_UNKNOWN, RS_NULL_INDEX};
+    }
+
+    std::string getProperty(const std::string &key) const override {
+        if (key == "default_auto_block_size")
+            return std::to_string(RS_DEVICE_CPU_DEFAULT_BLOCK_SIZE);
+        if (key == "memory_used") return std::to_string(RS_System::getUsedMemory());
+        if (key == "memory_capacity") return std::to_string(RS_System::getTotalMemory());
+        return "";
     }
 
     RS_MemoryPtr allocate(RBigSize size, bool sync = true) override {

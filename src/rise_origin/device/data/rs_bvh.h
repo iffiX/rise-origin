@@ -381,8 +381,7 @@ class RS_BVHBase {
 
     class RS_BVHHostData {
        public:
-        std::unordered_map<ObjectIdentifierType, RIndex, ObjectIdentifierHostHasher>
-            object_indices;
+        std::unordered_map<ObjectIdentifierType, RIndex, ObjectIdentifierHostHasher> object_indices;
 
         RS_Vector<RIndex> indices;
         RS_Vector<RIndex> sorted_indices;
@@ -630,9 +629,8 @@ class RS_BVHBase {
             host_data->sorted_bounds.clear();
             host_data->node_operation_count.clear();
         } else {
-            // Reserve double space for future insertions.
             if (object_identifiers.capacity() < size) {
-                RSize capacity = size * 2;
+                RSize capacity = size;
                 object_identifiers.resize(capacity, copy);
                 spatial_codes.resize(capacity, copy);
 
