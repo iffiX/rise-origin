@@ -23,6 +23,7 @@ void RS_KernelSpatialManager::free() {
     _kernel_manager->exitKernelDataCriticalZone();
     _kernel_manager = nullptr;
     _is_voxel_partition_modified = true;
+    _is_static_voxel_moved = false;
     _is_floor_triangle_modified = true;
 }
 
@@ -35,6 +36,12 @@ bool RS_KernelSpatialManager::isVoxelPartitionModified() const {
 void RS_KernelSpatialManager::clearVoxelPartitionModified() {
     _is_voxel_partition_modified = false;
 }
+
+void RS_KernelSpatialManager::markStaticVoxelMoved() { _is_static_voxel_moved = true; }
+
+bool RS_KernelSpatialManager::isStaticVoxelMoved() const { return _is_static_voxel_moved; }
+
+void RS_KernelSpatialManager::clearStaticVoxelMoved() { _is_static_voxel_moved = false; }
 
 void RS_KernelSpatialManager::markFloorTriangleModified() { _is_floor_triangle_modified = true; }
 

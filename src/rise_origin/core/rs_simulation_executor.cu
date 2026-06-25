@@ -19,6 +19,7 @@
 #include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_c.h"
 #include "rise_origin/logic/signal/rs_force_c.h"
 #include "rise_origin/logic/signal/rs_torque_c.h"
+#include "rise_origin/logic/signal/rs_transform_c.h"
 #include "rise_origin/logic/soft/rs_link_c.h"
 #include "rise_origin/logic/soft/rs_voxel_c.h"
 #include "rise_origin/logic/utils/rs_launch_c.h"
@@ -1091,6 +1092,32 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
                 typename RS_TorqueCompute<ComputeAccuracy>::RSCF_UpdateRigidTorqueTime,
                 KernelType>>({ctx.torque_rigid.size(), RS_AUTO_BLOCK_SIZE, false});
         }
+
+        // Transform signals: whole structure, applied once then reset to identity.
+        if (ctx.transform_mem.size() > 0) {
+            auto voxel_handles = _getLaunchHandles("voxel");
+            p_ptr->template run<RSCF_LaunchWithHandles<
+                typename RS_TransformCompute<ComputeAccuracy>::RSCF_ApplyVoxelTransformSignal,
+                KernelType>>({voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, voxel_handles);
+
+            auto rigid_body_handles = _getLaunchHandles("rigid_body");
+            p_ptr->template run<RSCF_LaunchWithHandles<
+                typename RS_TransformCompute<ComputeAccuracy>::RSCF_ApplyRigidBodyTransformSignal,
+                KernelType>>(
+                {rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false}, rigid_body_handles
+            );
+
+            p_ptr->template run<RSCF_LaunchDirect<
+                typename RS_TransformCompute<ComputeAccuracy>::RSCF_ResetTransformSignal,
+                KernelType>>({ctx.transform_mem.size(), RS_AUTO_BLOCK_SIZE, false});
+
+            // The transforms are applied, so flag a static rebuild for any that moved static
+            // voxels and clear each transform host signal.
+            _kernel_manager->finalizeTransformSignals();
+        }
+
+        // Rebuild the static voxel BVH now if a transform moved static voxels; a no-op otherwise.
+        _rebuildStaticVoxelBVHIfNeeded();
     });
 }
 
@@ -1630,13 +1657,14 @@ void RS_SimulationExecutor::_storeControllerRecords() {
 }
 
 void RS_SimulationExecutor::_rebuildStaticVoxelBVHIfNeeded() {
-    // Static geometry is immobile, so it only rebuilds when the partition membership changed.
+    // Static geometry rebuilds when the partition membership changed or a transform moved it.
     _resolveVoxelMobilityPartitionIfNeeded();
-    if (!_is_static_bvh_dirty) return;
+    if (!_is_static_bvh_dirty && !_kernel_manager->isStaticVoxelMoved()) return;
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         _buildVoxelBVH(k_ptr->ctx.static_voxel_bvh, _handles.at("static_voxel"));
     });
     _is_static_bvh_dirty = false;
+    _kernel_manager->clearStaticVoxelMoved();
 }
 
 void RS_SimulationExecutor::_rebuildDynamicVoxelBVH() {

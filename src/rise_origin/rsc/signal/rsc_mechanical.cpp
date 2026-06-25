@@ -76,6 +76,27 @@ void RSC_Torque::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("segment_bid", segment_bid);
 }
 
+bool RSC_Transform::operator==(const RSC_Transform &other) const {
+    return RSC_SignalBase::operator==(other) && structure_name == other.structure_name;
+}
+
+void RSC_Transform::_validate(RS_RSCValidator &validator) const {
+    RSC_SignalBase::_validate(validator);
+    validator.submitValidatorIfNotExists("RSC_Transform::_validate", this, [this] {
+        RSC_EXPECT_NOT_EMPTY(RSC_Transform, structure_name);
+    });
+}
+
+void RSC_Transform::_read(const RS_RSCPropertyTreeReader &tree) {
+    RSC_SignalBase::_read(tree);
+    structure_name = tree.get<string>("structure_name");
+}
+
+void RSC_Transform::_write(RS_RSCPropertyTreeWriter &tree) const {
+    RSC_SignalBase::_write(tree);
+    tree.add("structure_name", structure_name);
+}
+
 }  // namespace rsc
 
 }  // namespace rise

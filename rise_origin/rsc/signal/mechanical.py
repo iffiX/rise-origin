@@ -1,18 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Muhan Li (iffi/iffiX)
-"""Mechanical signals: per-step force and torque applied to a structure.
+"""Mechanical signals applied to a structure.
 
-A signal is a per-step value an entity reads to drive its behavior; mechanical
-signals inject an external force or torque. They are produced by the controller
-named in ``source_controller_name`` (set each callback step) and applied to the
-targeted structure region or rigid body.
+A signal is a per-step value an entity reads to drive its behavior. Mechanical
+signals are produced by the controller named in ``source_controller_name`` (set
+each callback step) and applied to the targeted structure.
 """
 
-from rise_origin import RS_NULL_INDEX, RSC_Force, RSC_Torque
+from rise_origin import RS_NULL_INDEX, RSC_Force, RSC_Torque, RSC_Transform
 
 from rise_origin.rsc._utils import Bound3ri
 
-__all__ = ["Force", "Torque"]
+__all__ = ["Force", "Torque", "Transform"]
 
 
 class Force(RSC_Force):
@@ -79,3 +78,31 @@ class Torque(RSC_Torque):
         self.structure_name = structure_name
         self.body_sid = body_sid
         self.segment_bid = segment_bid
+
+
+class Transform(RSC_Transform):
+    """A one-shot transform applied to the whole structure.
+
+    The controller sets a translation, rotation, and pivot each callback step.
+    The transform is applied once to every voxel and rigid body of
+    ``structure_name`` regardless of material, then reset to identity, so the
+    next read shows zero translation and a unit quaternion.
+
+    Args:
+        name: Unique signal name.
+        structure_name: Name of the structure the transform is applied to.
+        source_controller_name: Name of the controller that drives this signal's
+            value each callback step.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        *,
+        structure_name: str,
+        source_controller_name: str = "",
+    ) -> None:
+        super().__init__()
+        self.name = name
+        self.source_controller_name = source_controller_name
+        self.structure_name = structure_name

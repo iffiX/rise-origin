@@ -24,6 +24,7 @@
 #include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_m.h"
 #include "rise_origin/logic/signal/rs_force_m.h"
 #include "rise_origin/logic/signal/rs_torque_m.h"
+#include "rise_origin/logic/signal/rs_transform_m.h"
 #include "rise_origin/logic/soft/rs_link_m.h"
 #include "rise_origin/logic/soft/rs_link_material_m.h"
 #include "rise_origin/logic/soft/rs_voxel_m.h"
@@ -119,7 +120,11 @@ struct RS_ContextHostData {
     RS_PooledLayout torque_signal_layout;
     RS_CompactLayout torque_rigid_layout;
 
-    /// Per-structure host map of emissive voxel handles, 
+    // Transform signal layout (whole structure)
+    RS_PooledLayout transform_signal_layout;
+    RS_CompactLayout transform_layout;
+
+    /// Per-structure host map of emissive voxel handles,
     /// maps structure_gid -> emissive voxel handles
     std::unordered_map<RIndex, std::vector<RHandle>> structure_emissive_voxel_handles_map;
 };
@@ -319,6 +324,11 @@ struct RS_Context {
     device::RS_Array<RS_WorldTorqueSignal, 1> torque_signals;
     device::RS_DeviceLayout torque_signal_layout;
     device::RS_Vector<logic::RS_RigidTorqueMem> torque_rigid;
+
+    // Transform data.
+    device::RS_Array<RS_WorldTransformSignal, 1> transform_signals;
+    device::RS_DeviceLayout transform_signal_layout;
+    device::RS_Vector<logic::RS_TransformMem> transform_mem;
 
     RS_ContextHostData *host_data = nullptr;
 };
@@ -681,15 +691,15 @@ struct RS_AnyContext {
     )
 
 #define IR_G_0()
-#define IR_G_1(property)                                                                  \
-    (ctx.intersect_regions                                                                \
+#define IR_G_1(property)                                                                    \
+    (ctx.intersect_regions                                                                  \
          .template get<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
-             intersect_region DEBUG_ARGS(intersect_region_get)                            \
+             intersect_region DEBUG_ARGS(intersect_region_get)                              \
          ))
-#define IR_G_2(intersect_region_idx, property)                                            \
-    (ctx.intersect_regions                                                                \
+#define IR_G_2(intersect_region_idx, property)                                              \
+    (ctx.intersect_regions                                                                  \
          .template get<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
-             intersect_region_idx DEBUG_ARGS(intersect_region_get)                        \
+             intersect_region_idx DEBUG_ARGS(intersect_region_get)                          \
          ))
 #define IR_G_X(x, A, B, FUNC, ...) FUNC
 #define IR_G(...) \
@@ -697,15 +707,15 @@ struct RS_AnyContext {
 
 #define IR_S_0()
 #define IR_S_1()
-#define IR_S_2(property, value)                                                          \
-    ctx.intersect_regions                                                                \
+#define IR_S_2(property, value)                                                            \
+    ctx.intersect_regions                                                                  \
         .template set<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
-            intersect_region, value DEBUG_ARGS(intersect_region_set)                     \
+            intersect_region, value DEBUG_ARGS(intersect_region_set)                       \
         )
-#define IR_S_3(intersect_region_idx, property, value)                                    \
-    ctx.intersect_regions                                                                \
+#define IR_S_3(intersect_region_idx, property, value)                                      \
+    ctx.intersect_regions                                                                  \
         .template set<Pr(typename decltype(ctx.intersect_regions)::ObjectType, property)>( \
-            intersect_region_idx, value DEBUG_ARGS(intersect_region_set)                 \
+            intersect_region_idx, value DEBUG_ARGS(intersect_region_set)                   \
         )
 #define IR_S_X(x, A, B, C, FUNC, ...) FUNC
 #define IR_S(...)            \

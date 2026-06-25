@@ -299,6 +299,10 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.torque_signal_layout.init(_device_provider);
         k.ctx.torque_rigid.init(0, _device_provider);
 
+        k.ctx.transform_signals.init(0, _device_provider);
+        k.ctx.transform_signal_layout.init(_device_provider);
+        k.ctx.transform_mem.init(0, _device_provider);
+
         k.ctx.host_data = new RS_ContextHostData();
 
         k.ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
@@ -326,6 +330,7 @@ void RS_KernelManager::freeKernel() {
     // and references without touching the context, which is freed raw below.
     _kernel_force_managers.clear();
     _kernel_torque_managers.clear();
+    _kernel_transform_managers.clear();
     _kernel_intersect_region_managers.clear();
     _kernel_structure_voxel_managers.clear();
     _kernel_camera_perspective_managers.clear();
@@ -488,6 +493,10 @@ void RS_KernelManager::freeKernel() {
         k.ctx.torque_signal_layout.free();
         k.ctx.torque_rigid.free();
 
+        k.ctx.transform_signals.free();
+        k.ctx.transform_signal_layout.free();
+        k.ctx.transform_mem.free();
+
         delete k.ctx.host_data;
     });
     delete kernel.host_data;
@@ -633,6 +642,11 @@ void RS_KernelManager::syncControllerSignals() {
             manager.second->syncControllerSignal();
         }
     }
+    for (auto& manager : _kernel_transform_managers) {
+        if (manager.second->hasControllerSignal()) {
+            manager.second->syncControllerSignal();
+        }
+    }
 }
 
 unordered_map<string, RS_KernelControllerBundle> RS_KernelManager::getControllerSignalsAndRecords(
@@ -681,6 +695,12 @@ unordered_map<string, RS_KernelControllerBundle> RS_KernelManager::getController
             if (!cn.empty()) result[cn].signals.emplace_back(tm->getControllerSignal());
         }
     }
+    for (auto& [_, xm] : _kernel_transform_managers) {
+        if (xm->hasControllerSignal()) {
+            const string& cn = xm->getRSC().as<RSC_Transform>().source_controller_name;
+            if (!cn.empty()) result[cn].signals.emplace_back(xm->getControllerSignal());
+        }
+    }
 
     // Intersect region: record -> its target controller.
     for (auto& [region_name, region_manager] : _kernel_intersect_region_managers) {
@@ -691,6 +711,13 @@ unordered_map<string, RS_KernelControllerBundle> RS_KernelManager::getController
     }
 
     return result;
+}
+
+void RS_KernelManager::finalizeTransformSignals() {
+    for (auto& manager : _kernel_transform_managers) {
+        if (manager.second->isStaticRebuildPending()) markStaticVoxelMoved();
+        manager.second->clearStaticRebuildPending();
+    }
 }
 
 void RS_KernelManager::setIntersectRegionRecords(
@@ -752,6 +779,10 @@ std::string RS_KernelManager::purgeStructure(RIndex structure_gid) {
             dependent_signals.push_back(mgr->getSignalName());
     }
     for (auto& [key, mgr] : _kernel_torque_managers) {
+        if (mgr->getStructureGid() == structure_gid)
+            dependent_signals.push_back(mgr->getSignalName());
+    }
+    for (auto& [key, mgr] : _kernel_transform_managers) {
         if (mgr->getStructureGid() == structure_gid)
             dependent_signals.push_back(mgr->getSignalName());
     }
@@ -823,6 +854,14 @@ bool RS_KernelManager::isVoxelPartitionModified() const {
 void RS_KernelManager::clearVoxelPartitionModified() {
     _kernel_spatial_manager.clearVoxelPartitionModified();
 }
+
+void RS_KernelManager::markStaticVoxelMoved() { _kernel_spatial_manager.markStaticVoxelMoved(); }
+
+bool RS_KernelManager::isStaticVoxelMoved() const {
+    return _kernel_spatial_manager.isStaticVoxelMoved();
+}
+
+void RS_KernelManager::clearStaticVoxelMoved() { _kernel_spatial_manager.clearStaticVoxelMoved(); }
 
 void RS_KernelManager::markFloorTriangleModified() {
     _kernel_spatial_manager.markFloorTriangleModified();
@@ -1199,6 +1238,11 @@ RSC_SignalVariant RS_KernelManager::findSignal(const std::string& name) {
             return RSC_SignalVariant(tm->getRSC().as<RSC_Torque>());
         }
     }
+    for (auto& [_, xm] : _kernel_transform_managers) {
+        if (xm->getSignalName() == name) {
+            return RSC_SignalVariant(xm->getRSC().as<RSC_Transform>());
+        }
+    }
     RS_THROW(RS_NotFoundException("Signal '{}' not found", name));
 }
 
@@ -1248,6 +1292,9 @@ RSC_World RS_KernelManager::getWorld() {
     }
     for (auto& [_, tm] : _kernel_torque_managers) {
         world.signals.emplace_back(tm->getRSC().as<RSC_Torque>());
+    }
+    for (auto& [_, xm] : _kernel_transform_managers) {
+        world.signals.emplace_back(xm->getRSC().as<RSC_Transform>());
     }
 
     return world;
@@ -1378,6 +1425,11 @@ RS_KernelManager::getKernelForceManagers() {
 unordered_map<string, unique_ptr<RS_KernelTorqueManager>>&
 RS_KernelManager::getKernelTorqueManagers() {
     return _kernel_torque_managers;
+}
+
+unordered_map<string, unique_ptr<RS_KernelTransformManager>>&
+RS_KernelManager::getKernelTransformManagers() {
+    return _kernel_transform_managers;
 }
 
 unordered_map<string, unique_ptr<RS_KernelIntersectRegionManager>>&
@@ -2076,6 +2128,10 @@ void RS_KernelManager::_addSignal(const RSC_SignalVariant& signal, RIndex messag
             auto mgr = std::make_unique<RS_KernelTorqueManager>(this, s);
             _kernel_torque_managers[s.name] = std::move(mgr);
             _stageCommit(RSE_KERNEL_MANAGER_TORQUE, s.name);
+        } else if constexpr (std::is_same_v<T, RSC_Transform>) {
+            auto mgr = std::make_unique<RS_KernelTransformManager>(this, s);
+            _kernel_transform_managers[s.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_TRANSFORM, s.name);
         }
     });
     RIndex gid = RS_NULL_INDEX;
@@ -2097,6 +2153,13 @@ void RS_KernelManager::_removeSignal(const std::string& name, RIndex message_id)
         it->second->decommit();
         _kernel_torque_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_TORQUE, name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeSignal {} succeeded", name)});
+        return;
+    }
+    if (auto it = _kernel_transform_managers.find(name); it != _kernel_transform_managers.end()) {
+        it->second->decommit();
+        _kernel_transform_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_TRANSFORM, name);
         _queueInfo(message_id, RS_WorldMessageText{format("removeSignal {} succeeded", name)});
         return;
     }
@@ -2157,6 +2220,11 @@ void RS_KernelManager::_flushOneCommit(RSE_KernelManagerType type, const std::st
             break;
         case RSE_KERNEL_MANAGER_TORQUE:
             if (auto it = _kernel_torque_managers.find(name); it != _kernel_torque_managers.end())
+                it->second->commit();
+            break;
+        case RSE_KERNEL_MANAGER_TRANSFORM:
+            if (auto it = _kernel_transform_managers.find(name);
+                it != _kernel_transform_managers.end())
                 it->second->commit();
             break;
         case RSE_KERNEL_MANAGER_INTERSECT_REGION:

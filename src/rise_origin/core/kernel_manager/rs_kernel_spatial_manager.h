@@ -20,6 +20,10 @@ class RS_KernelSpatialManager {
     bool isVoxelPartitionModified() const;
     void clearVoxelPartitionModified();
 
+    void markStaticVoxelMoved();
+    bool isStaticVoxelMoved() const;
+    void clearStaticVoxelMoved();
+
     void markFloorTriangleModified();
     bool isFloorTriangleModified() const;
     void clearFloorTriangleModified();
@@ -28,6 +32,7 @@ class RS_KernelSpatialManager {
     RS_KernelManager *_kernel_manager = nullptr;
 
     bool _is_voxel_partition_modified = true;
+    bool _is_static_voxel_moved = false;
     bool _is_floor_triangle_modified = true;
 
     void _initKernelData();

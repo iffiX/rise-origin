@@ -357,8 +357,8 @@ class RS_KernelStructureVoxelManager {
      * @brief Physical kind (soft / fixed / rigid) for the segment's material,
      *        resolved at init from the unified material manager.
      */
-    RSE_StructureVoxelMaterialType getSegmentPhysicalType(RIndex body_sid, RIndex segment_bid)
-        const;
+    RSE_StructureVoxelMaterialType
+    getSegmentPhysicalType(RIndex body_sid, RIndex segment_bid) const;
 
     /**
      * @brief Count voxels of a given segment whose grid indices fall inside
@@ -369,6 +369,12 @@ class RS_KernelStructureVoxelManager {
         RIndex segment_bid,
         const RBound3ri &voxel_range
     ) const;
+
+    /**
+     * @brief Whether the structure currently has any static voxels: it is frozen, permanently
+     *        fixed, or holds a fixed or rigid-fixed segment.
+     */
+    [[nodiscard]] bool hasStaticVoxels() const;
 
     /**
      * @brief Set the build cache byte budget, evicting down to it.

@@ -92,7 +92,7 @@ using RSC_RecordVariant = RS_Variant<
  * @details A signal is a per-step value an entity reads to drive its behavior (e.g. an applied
  * force or torque). Signals are produced by controllers.
  */
-using RSC_SignalVariant = RS_Variant<RSC_Force, RSC_Torque>;
+using RSC_SignalVariant = RS_Variant<RSC_Force, RSC_Torque, RSC_Transform>;
 
 /**
  * @brief Recorder variant

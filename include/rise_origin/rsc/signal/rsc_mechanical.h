@@ -82,6 +82,29 @@ class RSC_Torque : public RSC_SignalBase {
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
+/**
+ * @brief Transform signal applied once to the full structure, then reset to identity.
+ */
+class RSC_Transform : public RSC_SignalBase {
+   public:
+    /// Name of the structure to apply the transform signal to.
+    std::string structure_name;
+
+    bool operator==(const RSC_Transform& other) const;
+
+    template <typename Serializer>
+    void serialize(Serializer& s) {
+        RSC_SignalBase::serialize(s);
+        s("structure_name", structure_name);
+    }
+
+   protected:
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
+};
+
 }  // namespace rsc
 
 }  // namespace rise

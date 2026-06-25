@@ -32,7 +32,8 @@ using RS_WorldSignalVariant = RS_Variant<
     RS_WorldStructureVoxelSignal,
     RS_WorldCameraPerspectiveSignal,
     RS_WorldForceSignal,
-    RS_WorldTorqueSignal>;
+    RS_WorldTorqueSignal,
+    RS_WorldTransformSignal>;
 
 /**
  * @brief A controller: a general, named I/O container.

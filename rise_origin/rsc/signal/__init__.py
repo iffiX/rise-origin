@@ -18,9 +18,9 @@ Example::
 
 from rise_origin import RSC_SignalBase
 
-from rise_origin.rsc.signal.mechanical import Force, Torque
+from rise_origin.rsc.signal.mechanical import Force, Torque, Transform
 
 #: Abstract base of every signal characterization (carries name + source).
 SignalBase = RSC_SignalBase
 
-__all__ = ["SignalBase", "Force", "Torque"]
+__all__ = ["SignalBase", "Force", "Torque", "Transform"]

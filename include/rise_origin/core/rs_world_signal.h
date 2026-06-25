@@ -633,6 +633,154 @@ class RS_WorldTorqueSignal : public RS_WorldTorqueSignalBase {
     }
 };
 
+class RS_WorldTransformSignalBase : public RS_WorldRootSignal {
+   public:
+    /**
+     * Translation signals applied to the whole structure.
+     * One 3D translation vector per signal entry; transform memories select an
+     * entry through their own per-object transform_signal handle (currently
+     * always 0, i.e. one entry per controller).
+     */
+    struct Translation : public RS_WorldObjectSignal {
+        /// 3D translation vector per signal entry
+        RVec3rf* translation = nullptr;
+
+        Translation() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num = 1
+        ) {
+            using namespace world_signal_helper;
+            return align(object_num * sizeof(RVec3rf));  // translation
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num = 1) {
+            using namespace world_signal_helper;
+
+            RS_WorldObjectSignal::initFromMemory(memory, object_num);
+
+            setPtr(translation, memory, 0);
+
+            void* end;
+            setPtr(end, translation, object_num * sizeof(RVec3rf));
+            return end;
+        }
+    };
+
+    /**
+     * Rotation signals applied to the whole structure: a quaternion and the
+     * world pivot it turns about. One rotation and one pivot per signal entry.
+     */
+    struct Rotation : public RS_WorldObjectSignal {
+        /// 4D rotation quaternion per signal entry
+        RQuat3rf* rotation = nullptr;
+
+        /// 3D pivot position the rotation turns about per signal entry
+        RVec3rf* pivot = nullptr;
+
+        Rotation() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num = 1
+        ) {
+            using namespace world_signal_helper;
+            return align(object_num * sizeof(RQuat3rf)) +  // rotation
+                   align(object_num * sizeof(RVec3rf));     // pivot
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num = 1) {
+            using namespace world_signal_helper;
+
+            RS_WorldObjectSignal::initFromMemory(memory, object_num);
+
+            setPtr(rotation, memory, 0);
+            setPtr(pivot, rotation, object_num * sizeof(RQuat3rf));
+
+            void* end;
+            setPtr(end, pivot, object_num * sizeof(RVec3rf));
+            return end;
+        }
+    };
+};
+
+class RS_WorldTransformSignal : public RS_WorldTransformSignalBase {
+   public:
+    /// Structure global id
+    RIndex structure_gid = RS_NULL_INDEX;
+
+    /// Translation signals, one 3D vector per signal index
+    Translation translation_signals;
+
+    /// Rotation signals, one quaternion and pivot per signal index
+    Rotation rotation_signals;
+
+    RS_WorldTransformSignal() = default;
+
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+        RBigSize translation_num = 1,
+        RBigSize rotation_num = 1
+    ) {
+        RBigSize base_size = RS_WorldRootSignal::getRequiredMemorySize();
+        RBigSize translation_size = Translation::getRequiredMemorySize(translation_num);
+        RBigSize rotation_size = Rotation::getRequiredMemorySize(rotation_num);
+
+        RBigSize total_size = base_size + translation_size + rotation_size;
+#ifdef RS_DEBUG_ENABLE_WORLD_SIGNAL
+        printf(
+            "Required memory sizes for transform signal:\n  Base: %u\n  Translation: %u\n  "
+            "Rotation: %u\nTotal required size: %u\n",
+            static_cast<unsigned int>(base_size),
+            static_cast<unsigned int>(translation_size),
+            static_cast<unsigned int>(rotation_size),
+            static_cast<unsigned int>(total_size)
+        );
+#endif
+
+        return total_size;
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
+        void* memory,
+        RBigSize translation_num = 1,
+        RBigSize rotation_num = 1
+    ) {
+        is_valid = true;
+
+#ifdef RS_DEBUG_ENABLE_WORLD_SIGNAL
+        void* start_memory = memory;
+        void* base_start = memory;
+        memory = RS_WorldRootSignal::initFromMemory(memory);
+        RBigSize base_size = static_cast<char*>(memory) - static_cast<char*>(base_start);
+
+        void* translation_start = memory;
+        memory = translation_signals.initFromMemory(memory, translation_num);
+        RBigSize translation_size =
+            static_cast<char*>(memory) - static_cast<char*>(translation_start);
+
+        void* rotation_start = memory;
+        memory = rotation_signals.initFromMemory(memory, rotation_num);
+        RBigSize rotation_size = static_cast<char*>(memory) - static_cast<char*>(rotation_start);
+
+        RBigSize total_size = static_cast<char*>(memory) - static_cast<char*>(start_memory);
+
+        printf(
+            "Occupied memory sizes for transform signal:\n  Base: %u\n  Translation: %u\n  "
+            "Rotation: %u\nTotal occupied size: %u\n",
+            static_cast<unsigned int>(base_size),
+            static_cast<unsigned int>(translation_size),
+            static_cast<unsigned int>(rotation_size),
+            static_cast<unsigned int>(total_size)
+        );
+#else
+        memory = RS_WorldRootSignal::initFromMemory(memory);
+        memory = translation_signals.initFromMemory(memory, translation_num);
+        memory = rotation_signals.initFromMemory(memory, rotation_num);
+#endif
+
+        return memory;
+    }
+};
+
 }  // namespace rise
 
 #endif  // RS_WORLD_SIGNAL_H

@@ -975,6 +975,12 @@ class RSC_Torque(RSC_SignalBase):
     segment_bid: int
 
 
+class RSC_Transform(RSC_SignalBase):
+    def __init__(self) -> None: ...
+
+    structure_name: str
+
+
 ################################################################################
 # Recorders
 ################################################################################
@@ -1048,7 +1054,7 @@ _RSC_RecordAlt = Union[
     RSC_IntersectRegionSphere,
 ]
 
-_RSC_SignalAlt = Union[RSC_Force, RSC_Torque]
+_RSC_SignalAlt = Union[RSC_Force, RSC_Torque, RSC_Transform]
 
 _RSC_RecorderAlt = RSC_RecorderHDF5
 
@@ -1572,6 +1578,24 @@ class RS_WorldTorqueSignal:
     def torque_signals(self) -> RS_WorldTorqueSignal.Torque: ...
 
 
+class RS_WorldTransformSignal:
+    class Translation:
+        def size(self) -> int: ...
+
+        def translation(self) -> np.ndarray: ...
+
+    class Rotation:
+        def size(self) -> int: ...
+
+        def rotation(self) -> np.ndarray: ...
+
+        def pivot(self) -> np.ndarray: ...
+
+    def translation_signals(self) -> RS_WorldTransformSignal.Translation: ...
+
+    def rotation_signals(self) -> RS_WorldTransformSignal.Rotation: ...
+
+
 ################################################################################
 # World Controllers
 ################################################################################
@@ -1589,6 +1613,7 @@ _RS_WorldSignal = Union[
     RS_WorldCameraPerspectiveSignal,
     RS_WorldForceSignal,
     RS_WorldTorqueSignal,
+    RS_WorldTransformSignal,
 ]
 
 

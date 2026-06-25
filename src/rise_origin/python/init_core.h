@@ -534,6 +534,50 @@ class RSPY_WorldTorqueSignal {
     [[nodiscard]] Torque torque_signals() const { return Torque(signal); }
 };
 
+class RSPY_WorldTransformSignal {
+   public:
+    RS_WorldTransformSignal signal;
+    explicit RSPY_WorldTransformSignal(const RS_WorldTransformSignal &sig) : signal(sig) {}
+
+    class Translation {
+       public:
+        RS_WorldTransformSignal signal;
+        explicit Translation(const RS_WorldTransformSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.translation_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> translation() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.translation_signals.translation), size(), 3
+            );
+        }
+    };
+
+    class Rotation {
+       public:
+        RS_WorldTransformSignal signal;
+        explicit Rotation(const RS_WorldTransformSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.rotation_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> rotation() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.rotation_signals.rotation), size(), 4
+            );
+        }
+
+        [[nodiscard]] py::array_t<RFloat> pivot() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.rotation_signals.pivot), size(), 3
+            );
+        }
+    };
+
+    [[nodiscard]] Translation translation_signals() const { return Translation(signal); }
+
+    [[nodiscard]] Rotation rotation_signals() const { return Rotation(signal); }
+};
+
 /*****************************************************************
  * Controller wrapper.
  *****************************************************************/
@@ -575,6 +619,8 @@ class RSPY_WorldController {
                     result.append(py::cast(RSPY_WorldForceSignal(held)));
                 } else if constexpr (std::is_same_v<T, RS_WorldTorqueSignal>) {
                     result.append(py::cast(RSPY_WorldTorqueSignal(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldTransformSignal>) {
+                    result.append(py::cast(RSPY_WorldTransformSignal(held)));
                 }
             });
         }
@@ -951,6 +997,17 @@ inline void initRSPYCore(py::module &m) {
         .def("size", &RSPY_WorldTorqueSignal::Torque::size)
         .def("torque", &RSPY_WorldTorqueSignal::Torque::torque);
     torque_signal.def("torque_signals", &RSPY_WorldTorqueSignal::torque_signals);
+
+    auto transform_signal = py::class_<RSPY_WorldTransformSignal>(m, "RS_WorldTransformSignal");
+    py::class_<RSPY_WorldTransformSignal::Translation>(transform_signal, "Translation")
+        .def("size", &RSPY_WorldTransformSignal::Translation::size)
+        .def("translation", &RSPY_WorldTransformSignal::Translation::translation);
+    py::class_<RSPY_WorldTransformSignal::Rotation>(transform_signal, "Rotation")
+        .def("size", &RSPY_WorldTransformSignal::Rotation::size)
+        .def("rotation", &RSPY_WorldTransformSignal::Rotation::rotation)
+        .def("pivot", &RSPY_WorldTransformSignal::Rotation::pivot);
+    transform_signal.def("translation_signals", &RSPY_WorldTransformSignal::translation_signals);
+    transform_signal.def("rotation_signals", &RSPY_WorldTransformSignal::rotation_signals);
 
     /*****************************************************************
      * Controller

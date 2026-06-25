@@ -1057,6 +1057,10 @@ inline void initRSPYRSC(py::module &m) {
         .def_readwrite("body_sid", &RSC_Torque::body_sid)
         .def_readwrite("segment_bid", &RSC_Torque::segment_bid);
 
+    rspyRSC<RSC_Transform, RSC_SignalBase>(m, "RSC_Transform")
+        .def(py::init<>())
+        .def_readwrite("structure_name", &RSC_Transform::structure_name);
+
     /***************************************************************
      * Recorder
      ***************************************************************/

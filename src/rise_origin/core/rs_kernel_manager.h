@@ -28,6 +28,7 @@
 #include "kernel_manager/rs_kernel_structure_voxel_manager.h"
 #include "kernel_manager/rs_kernel_texture_manager.h"
 #include "kernel_manager/rs_kernel_torque_manager.h"
+#include "kernel_manager/rs_kernel_transform_manager.h"
 #include "rise_origin/core/rs_world_controller.h"
 #include "rise_origin/core/rs_world_handle.h"
 #include "rise_origin/core/rs_world_signal.h"
@@ -52,7 +53,8 @@ RS_ENUM(
     (RSE_KERNEL_MANAGER_COSMIC_BACKGROUND, 3),
     (RSE_KERNEL_MANAGER_FORCE, 4),
     (RSE_KERNEL_MANAGER_TORQUE, 5),
-    (RSE_KERNEL_MANAGER_INTERSECT_REGION, 6)
+    (RSE_KERNEL_MANAGER_TRANSFORM, 6),
+    (RSE_KERNEL_MANAGER_INTERSECT_REGION, 7)
 )
 
 /**
@@ -167,6 +169,12 @@ class RS_KernelManager {
     );
 
     /**
+     * @brief After transform signals are applied, raise the static voxel moved flag for any that
+     *        moved static voxels and reset each transform host signal to identity.
+     */
+    void finalizeTransformSignals();
+
+    /**
      * @brief Route the record-gid-major unique membership pairs to the owning region managers.
      * A single host scan finds each record's contiguous run and hands it to that manager.
      */
@@ -209,6 +217,21 @@ class RS_KernelManager {
      * @brief Clear the voxel partition modified flag after a dynamic voxel BVH rebuild.
      */
     void clearVoxelPartitionModified();
+
+    /**
+     * @brief Mark static voxels moved so the next step rebuilds the static voxel BVH.
+     */
+    void markStaticVoxelMoved();
+
+    /**
+     * @brief Whether static voxels moved since the last static voxel BVH rebuild.
+     */
+    [[nodiscard]] bool isStaticVoxelMoved() const;
+
+    /**
+     * @brief Clear the static voxel moved flag after a static voxel BVH rebuild.
+     */
+    void clearStaticVoxelMoved();
 
     /**
      * @brief Mark the floor triangles modified so the next step rebuilds the floor triangle BVH.
@@ -350,6 +373,8 @@ class RS_KernelManager {
     getKernelForceManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelTorqueManager>> &
     getKernelTorqueManagers();
+    std::unordered_map<std::string, std::unique_ptr<RS_KernelTransformManager>> &
+    getKernelTransformManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelIntersectRegionManager>> &
     getKernelIntersectRegionManagers();
 
@@ -434,6 +459,8 @@ class RS_KernelManager {
     std::unordered_map<std::string, std::unique_ptr<RS_KernelForceManager>> _kernel_force_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelTorqueManager>>
         _kernel_torque_managers;
+    std::unordered_map<std::string, std::unique_ptr<RS_KernelTransformManager>>
+        _kernel_transform_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelIntersectRegionManager>>
         _kernel_intersect_region_managers;
 

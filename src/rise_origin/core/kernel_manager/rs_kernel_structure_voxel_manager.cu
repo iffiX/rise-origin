@@ -408,6 +408,19 @@ RSize RS_KernelStructureVoxelManager::getSegmentVoxelNumInRange(
     return count;
 }
 
+bool RS_KernelStructureVoxelManager::hasStaticVoxels() const {
+    // A frozen or permanently fixed structure holds every voxel and rigid body static.
+    if (_is_frozen || _structure().is_fixed) return true;
+
+    // Otherwise any fixed or rigid-fixed segment contributes static voxels.
+    for (const auto &[key, phys_type] : _segment_phys_type_map) {
+        if (phys_type == RSE_STRUCTURE_VOXEL_MATERIAL_FIXED ||
+            phys_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED)
+            return true;
+    }
+    return false;
+}
+
 void RS_KernelStructureVoxelManager::setBuildCacheByteSize(RBigSize byte_size) {
     std::lock_guard<std::mutex> lock(_build_cache_mutex);
     _build_cache.budget = byte_size;
