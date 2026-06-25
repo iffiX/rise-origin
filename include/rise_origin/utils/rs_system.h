@@ -98,9 +98,9 @@ class RS_System {
     static constexpr RSE_SystemType getSystemType() {
 #ifdef RS_SYSTEM_IS_LINUX
         return RSE_SYSTEM_TYPE_LINUX;
-#elif RS_SYSTEM_IS_DARWIN
+#elif defined(RS_SYSTEM_IS_DARWIN)
         return RSE_SYSTEM_TYPE_DARWIN;
-#elif RS_SYSTEM_IS_WINDOWS
+#elif defined(RS_SYSTEM_IS_WINDOWS)
         return RSE_SYSTEM_TYPE_WINDOWS;
 #else
         return RSE_SYSTEM_TYPE_UNKNOWN;

@@ -60,12 +60,12 @@ target_compile_options(rise_origin_core PUBLIC ${RISE_DEVICE_OPTIONS}
 ################################################################
 # MSVC + nvcc conformance flags
 ################################################################
-# MSVC needs explicit math constants, no Windows.h min/max macros, the
-# standard-conformant preprocessor/lambda processors, and a larger object
-# section limit for the templated CUDA TUs.
+# MSVC needs explicit math constants, no Windows.h min/max macros, no Windows.h
+# GDI macros, the standard-conformant preprocessor/lambda processors, and a
+# larger object section limit for the templated CUDA TUs.
 if (MSVC)
     target_compile_definitions(rise_origin_core PUBLIC
-            NOMINMAX _USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS)
+            NOMINMAX NOGDI WIN32_LEAN_AND_MEAN _USE_MATH_DEFINES _CRT_SECURE_NO_WARNINGS)
     target_compile_options(rise_origin_core PUBLIC
             $<$<COMPILE_LANGUAGE:CXX>:/bigobj /utf-8 /EHsc /Zc:preprocessor /Zc:lambda>
             $<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/bigobj -Xcompiler=/utf-8 -Xcompiler=/Zc:preprocessor -Xcompiler=/Zc:lambda>)
