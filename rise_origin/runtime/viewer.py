@@ -324,6 +324,11 @@ class Viewer:
                 self._writer = None
                 self._is_collecting_frames = False
 
+    def _is_world_ended(self) -> bool:
+        """Whether the attached world has run to its end."""
+        handle = self.handle
+        return handle is not None and handle.is_end()
+
     def _resolve_instance(self, instance: InstanceSpec):
         """Turn the ``instance`` spec into an (instance, world) pair."""
         if instance is None:
@@ -481,6 +486,8 @@ class Viewer:
                             QtGui.QImage.Format.Format_RGB888,
                         ).copy()
                 self.update()
+                if viewer._is_world_ended():
+                    self.close()
 
             def paintEvent(self, event) -> None:
                 painter = QtGui.QPainter(self)
