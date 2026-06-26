@@ -110,6 +110,7 @@ void RS_SimulationExecutor::init(RS_Simulation *simulation) {
     _contact_bvh_rebuild_sub_interval = sim_rsc.contact.bvh_rebuild_sub_interval;
     _contact_bvh_refit_sub_interval = sim_rsc.contact.bvh_refit_sub_interval;
     _sentinel_enabled = sim_rsc.sentinel.is_enabled;
+    _sentinel_degenerate_min_dt = sim_rsc.sentinel.degenerate_min_dt;
     _simulation_compute_accuracy = sim_rsc.runtime.compute_accuracy;
 }
 
@@ -314,7 +315,7 @@ RFloat RS_SimulationExecutor::_runDtUpdate(bool &is_dt_normal) {
         }
 
         // Degenerate dt: report not-normal and let step() drive the sentinel.
-        if (!(dt >= RFloat(1e-7))) {
+        if (!(dt >= _sentinel_degenerate_min_dt)) {
             is_dt_normal = false;
             dt = 0;
             return;

@@ -529,17 +529,20 @@ void RSC_SimulationRecord::_write(RS_RSCPropertyTreeWriter &tree) const {
 }
 
 bool RSC_SimulationSentinel::operator==(const RSC_SimulationSentinel &other) const {
-    return RSC_Base::operator==(other) && is_enabled == other.is_enabled;
+    return RSC_Base::operator==(other) && is_enabled == other.is_enabled &&
+           degenerate_min_dt == other.degenerate_min_dt;
 }
 
 void RSC_SimulationSentinel::_validate(RS_RSCValidator &) const {}
 
 void RSC_SimulationSentinel::_read(const RS_RSCPropertyTreeReader &tree) {
     is_enabled = tree.get("is_enabled", is_enabled);
+    degenerate_min_dt = tree.get<RFloat>("degenerate_min_dt", degenerate_min_dt);
 }
 
 void RSC_SimulationSentinel::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("is_enabled", is_enabled);
+    tree.add("degenerate_min_dt", degenerate_min_dt);
 }
 
 bool RSC_SimulationRuntime::operator==(const RSC_SimulationRuntime &other) const {

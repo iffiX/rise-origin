@@ -576,7 +576,8 @@ inline void initRSPYRSC(py::module &m) {
 
     rspyRSC<RSC_SimulationSentinel, RSC_Base>(m, "RSC_SimulationSentinel")
         .def(py::init<>())
-        .def_readwrite("is_enabled", &RSC_SimulationSentinel::is_enabled);
+        .def_readwrite("is_enabled", &RSC_SimulationSentinel::is_enabled)
+        .def_readwrite("degenerate_min_dt", &RSC_SimulationSentinel::degenerate_min_dt);
 
     rspyRSC<RSC_SimulationControl, RSC_Base>(m, "RSC_SimulationControl")
         .def(py::init<>())

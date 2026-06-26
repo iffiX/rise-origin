@@ -491,11 +491,16 @@ class RSC_SimulationSentinel : public RSC_Base {
     /// from.
     bool is_enabled = true;
 
+    /// Smallest global time step treated as normal; below this the step is reported degenerate and
+    /// the sentinel takes over.
+    RFloat degenerate_min_dt = 1e-7;
+
     bool operator==(const RSC_SimulationSentinel& other) const;
 
     template <typename Serializer>
     void serialize(Serializer& s) {
         s("is_enabled", is_enabled);
+        s("degenerate_min_dt", degenerate_min_dt);
     }
 
    protected:

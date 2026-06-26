@@ -220,11 +220,17 @@ class Sentinel(RSC_SimulationSentinel):
 
     Args:
         is_enabled: Whether the sentinel halts the run on instability.
+        degenerate_min_dt: Smallest global time step treated as normal (s).
     """
 
-    def __init__(self, *, is_enabled: Optional[bool] = None) -> None:
+    def __init__(
+        self,
+        *,
+        is_enabled: Optional[bool] = None,
+        degenerate_min_dt: Optional[float] = None,
+    ) -> None:
         super().__init__()
-        _apply(self, is_enabled=is_enabled)
+        _apply(self, is_enabled=is_enabled, degenerate_min_dt=degenerate_min_dt)
 
 
 class Control(RSC_SimulationControl):

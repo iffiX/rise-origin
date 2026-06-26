@@ -70,10 +70,7 @@ class RSCF_GetIsVoxelNanMetric : public device::RS_ComputeFunction<RSCF_GetIsVox
 
             if (state.is_enabled && !state.is_static) {
                 RVec3rf position = V_G(voxel, position).template toVec3D<RFloat>();
-                RFloat size = V_G(voxel, size);
-                RFloat radius = V_G(voxel, radius);
-                RFloat ratio = radius / size;
-                is_nan = !position.isValid() || ratio > 100 || ratio < 0.01;
+                is_nan = !position.isValid();
             } else {
                 is_nan = false;
             }
@@ -92,7 +89,7 @@ class RSCF_GetLinkFrequencyMetric : public device::RS_ComputeFunction<RSCF_GetLi
             auto state = RS_LinkStateUnion{L_G(state)}.link_state;
 
             // Note: when freezing a structure, its links are not in layout, so
-            // no need to be checked, if both sides rigid/fixed link will not be 
+            // no need to be checked, if both sides rigid/fixed link will not be
             // generated so that also does not need to be checked.
             if (state.is_enabled && !state.is_failed) {
                 RIndex voxel_neg = L_G(voxel_neg);

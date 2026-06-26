@@ -527,6 +527,7 @@ class RSC_SimulationSentinel(RSC_Base):
     def __init__(self) -> None: ...
 
     is_enabled: bool
+    degenerate_min_dt: float
 
 
 class RSC_SimulationControl(RSC_Base):
