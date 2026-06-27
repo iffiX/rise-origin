@@ -390,10 +390,13 @@ class RS_Vector {
             return;
         }
         RSize num_to_erase = end - begin;
-        // Move the tail [end, used_elem_num) down to [begin, ...)
+        // Shift elements in [end, used_elem_num) to the left over [begin, end)
         if (end < used_elem_num) {
-            (data + sizeof(T) * begin)
-                .copyFrom(data + sizeof(T) * end, sizeof(T) * (used_elem_num - end));
+            auto tmp = data.provider()->allocate(sizeof(T) * (used_elem_num - end), true);
+            (data + sizeof(T) * end).copyTo(tmp, sizeof(T) * (used_elem_num - end));
+            // Move them over the erased slots
+            (data + sizeof(T) * begin).copyFrom(tmp, sizeof(T) * (used_elem_num - end));
+            tmp.free();
         }
         used_elem_num -= num_to_erase;
     }

@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <vector>
+
 #include "conf/rs_test_conf.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/device/rs_compute.h"
@@ -338,6 +340,24 @@ TEST_F(RS_VectorTest, InsertMiddle) {
     vec.free();
 }
 
+TEST_F(RS_VectorTest, InsertMiddleLarge) {
+    constexpr int n = 10000;
+    RS_Vector<int> vec(n, &provider);
+    std::vector<int> init_data(n);
+    for (int i = 0; i < n; i++) init_data[i] = i;
+    vec.write(init_data.data());
+
+    vec.insert(-1, n / 2);
+    EXPECT_EQ(vec.size(), n + 1);
+
+    std::vector<int> output(n + 1, 0);
+    vec.read(output.data());
+    for (int i = 0; i < n / 2; i++) EXPECT_EQ(output[i], i);
+    EXPECT_EQ(output[n / 2], -1);
+    for (int i = n / 2; i < n; i++) EXPECT_EQ(output[i + 1], i);
+    vec.free();
+}
+
 TEST_F(RS_VectorTest, Append) {
     RS_Vector<int> vec(2, &provider);
     EXPECT_EQ(vec.size(), 0);
@@ -379,6 +399,23 @@ TEST_F(RS_VectorTest, EraseRange) {
     vec.read(output);
     EXPECT_EQ(output[0], 50);
     EXPECT_EQ(output[1], 60);
+    vec.free();
+}
+
+TEST_F(RS_VectorTest, EraseRangeLarge) {
+    constexpr int n = 10000;
+    RS_Vector<int> vec(n, &provider);
+    std::vector<int> init_data(n);
+    for (int i = 0; i < n; i++) init_data[i] = i;
+    vec.write(init_data.data());
+
+    vec.eraseRange(n / 4, 3 * n / 4);
+    EXPECT_EQ(vec.size(), n / 2);
+
+    std::vector<int> output(n / 2, 0);
+    vec.read(output.data());
+    for (int i = 0; i < n / 4; i++) EXPECT_EQ(output[i], i);
+    for (int i = n / 4; i < n / 2; i++) EXPECT_EQ(output[i], i + n / 2);
     vec.free();
 }
 

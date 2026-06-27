@@ -157,12 +157,21 @@ void RS_KernelStructureVoxelManager::commit() {
 
 void RS_KernelStructureVoxelManager::decommit() {
     if (_is_kernel_data_inited) {
+        RS_Timer timer;
         _kernel_manager->enterKernelDataCriticalZone();
         _freeKernelRecordData();
         _freeKernelData();
         _freeKernelSignalData();
         _kernel_manager->exitKernelDataCriticalZone();
         _is_kernel_data_inited = false;
+
+        RS_LOG(
+            _kernel_manager->getLogger(),
+            debug,
+            "Structure {} free kernel data time: {}",
+            _structure().name,
+            timer.elapsedTimeString()
+        );
     }
 }
 
@@ -2969,6 +2978,9 @@ void RS_KernelStructureVoxelManager::_initKernelSignalData() {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
         auto &ctx = k_ptr->ctx;
 
+        // Sync to make sure all operations in memory provider stream are finished
+        _kernel_manager->getDeviceProvider()->sync();
+
         ctx.host_data->structure_signal_layout.add(1, _structure_gid);
         ctx.host_data->structure_signal_layout.syncDeviceLayout(ctx.structure_signal_layout);
         ctx.structure_signals.resize({ctx.host_data->structure_signal_layout.capacity()});
@@ -2986,6 +2998,9 @@ void RS_KernelStructureVoxelManager::_freeKernelSignalData() {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
         auto &ctx = k_ptr->ctx;
 
+        // Sync to make sure all operations in memory provider stream are finished
+        _kernel_manager->getDeviceProvider()->sync();
+
         RIndex signal_index = ctx.host_data->structure_signal_layout.find(_structure_gid);
         ctx.host_data->structure_signal_layout.remove(signal_index);
         ctx.host_data->structure_signal_layout.syncDeviceLayout(ctx.structure_signal_layout);
@@ -2999,6 +3014,10 @@ void RS_KernelStructureVoxelManager::_freeKernelSignalData() {
 void RS_KernelStructureVoxelManager::_initKernelEmissiveVoxelHandlesData(RSize voxel_offset) {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
         auto &ctx = k_ptr->ctx;
+
+        // Sync to make sure all operations in memory provider stream are finished
+        _kernel_manager->getDeviceProvider()->sync();
+
         auto &map = ctx.host_data->structure_emissive_voxel_handles_map;
 
         std::vector<RHandle> handles_this;
@@ -3040,6 +3059,10 @@ void RS_KernelStructureVoxelManager::_initKernelEmissiveVoxelHandlesData(RSize v
 void RS_KernelStructureVoxelManager::_freeKernelEmissiveVoxelHandlesData() {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
         auto &ctx = k_ptr->ctx;
+
+        // Sync to make sure all operations in memory provider stream are finished
+        _kernel_manager->getDeviceProvider()->sync();
+
         auto &map = ctx.host_data->structure_emissive_voxel_handles_map;
         map.erase(_structure_gid);
 

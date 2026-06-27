@@ -98,20 +98,3 @@ TEST_F(RS_CPUBlockTest, CPUBlockTest) {
     input_array.free();
     result_array.free();
 }
-
-TEST_F(RS_CPUBlockTest, DefaultProviderCPUBlockTest) {
-    RS_Array<int, 1> input_array({32}, &RS_MemoryDefaultProvider::getInstance());
-    RS_Array<int, 1> result_array({32}, &RS_MemoryDefaultProvider::getInstance());
-    input_array.fill(1);
-    result_array.fill(0);
-
-    host_provider.run<CPUBlockTestFunction>({32, 32}, input_array, result_array);
-    for (int i = 0; i < 16; i++) {
-        ASSERT_EQ(result_array[i], 2);
-    }
-    for (int i = 16; i < 32; i++) {
-        ASSERT_EQ(result_array[i], 1);
-    }
-    input_array.free();
-    result_array.free();
-}

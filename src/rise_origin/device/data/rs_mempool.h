@@ -151,10 +151,7 @@ class RS_MemArrayPool {
     [[nodiscard]] RSize getAllocatedNum() const {
         RS_DATA_EXPECT_INIT(provider() != nullptr);
 
-        auto host_chunk_mask = chunk_mask.move(&RS_MemoryDefaultProvider::getInstance());
-        RSize count = host_chunk_mask.count();
-        host_chunk_mask.free();
-        return count;
+        return chunk_mask.getOnNum();
     }
 
     /// @brief Returns the ratio of allocated chunks versus total chunks.
@@ -418,10 +415,7 @@ class RS_MemPool {
     [[nodiscard]] RSize getAllocatedNum() const {
         RS_DATA_EXPECT_INIT(host_memory_regions != nullptr);
 
-        auto host_chunk_mask = chunk_mask.move(&RS_MemoryDefaultProvider::getInstance());
-        RSize count = host_chunk_mask.count();
-        host_chunk_mask.free();
-        return count;
+        return chunk_mask.getOnNum();
     }
 
     /// @brief Returns the ratio of allocated chunks versus total chunks.

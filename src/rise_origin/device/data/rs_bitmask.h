@@ -192,6 +192,29 @@ class RS_BitMask {
         return new_bitmask;
     }
 
+    /// @brief Return the total number of set bits in this mask, counted on the host.
+    RSize getOnNum() const {
+        RS_DATA_EXPECT_INIT(data.provider() != nullptr);
+
+        RSize sum = 0;
+        if (word_num > 0) {
+            RS_MemoryPtr host_data = provider()->allocateHost(sizeof(WordType) * word_num);
+            host_data.copyFrom(data, sizeof(WordType) * word_num);
+            auto word_ptr = host_data.as<WordType>();
+
+            RSize last_bits = elem_num & BitMask;
+            WordType last_word_mask = last_bits == 0 ? FullWordMask
+                                                     : (WordType(1) << last_bits) - 1;
+            for (RSize i = 0; i < word_num - 1; ++i) {
+                sum += countOnBits(word_ptr[i]);
+            }
+            sum += countOnBits(word_ptr[word_num - 1] & last_word_mask);
+
+            host_data.free();
+        }
+        return sum;
+    }
+
     [[nodiscard]] RS_MemoryProvider* provider() const { return data.provider(); }
 
     [[nodiscard]] RS_DeviceLocation device() const { return data.device(); }
