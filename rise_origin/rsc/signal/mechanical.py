@@ -3,7 +3,7 @@
 """Mechanical signals applied to a structure.
 
 A signal is a per-step value an entity reads to drive its behavior. Mechanical
-signals are produced by the controller named in ``source_controller_name`` (set
+signals are produced by the controller named in ``source_controller_reference`` (set
 each callback step) and applied to the targeted structure.
 """
 
@@ -23,7 +23,7 @@ class Force(RSC_Force):
     Args:
         name: Unique signal name.
         structure_name: Name of the structure the force is applied to.
-        source_controller_name: Name of the controller that drives this signal's
+        source_controller_reference: Name of the controller that drives this signal's
             value each callback step.
         voxel_range: Inclusive voxel-index box the force is distributed over.
             ``None`` keeps the engine default (empty range).
@@ -36,14 +36,14 @@ class Force(RSC_Force):
         name: str,
         *,
         structure_name: str,
-        source_controller_name: str = "",
+        source_controller_reference: str = "",
         voxel_range: Bound3ri = None,
         body_sid: int = RS_NULL_INDEX,
         segment_bid: int = RS_NULL_INDEX,
     ) -> None:
         super().__init__()
         self.name = name
-        self.source_controller_name = source_controller_name
+        self.source_controller_reference = source_controller_reference
         self.structure_name = structure_name
         if voxel_range is not None:
             self.voxel_range = voxel_range
@@ -57,7 +57,7 @@ class Torque(RSC_Torque):
     Args:
         name: Unique signal name.
         structure_name: Name of the structure the torque is applied to.
-        source_controller_name: Name of the controller that drives this signal's
+        source_controller_reference: Name of the controller that drives this signal's
             value each callback step.
         body_sid: Target rigid body sub-id, or ``RS_NULL_INDEX`` for none.
         segment_bid: Target rigid body segment id, or ``RS_NULL_INDEX`` for none.
@@ -68,13 +68,13 @@ class Torque(RSC_Torque):
         name: str,
         *,
         structure_name: str,
-        source_controller_name: str = "",
+        source_controller_reference: str = "",
         body_sid: int = RS_NULL_INDEX,
         segment_bid: int = RS_NULL_INDEX,
     ) -> None:
         super().__init__()
         self.name = name
-        self.source_controller_name = source_controller_name
+        self.source_controller_reference = source_controller_reference
         self.structure_name = structure_name
         self.body_sid = body_sid
         self.segment_bid = segment_bid
@@ -91,7 +91,7 @@ class Transform(RSC_Transform):
     Args:
         name: Unique signal name.
         structure_name: Name of the structure the transform is applied to.
-        source_controller_name: Name of the controller that drives this signal's
+        source_controller_reference: Name of the controller that drives this signal's
             value each callback step.
     """
 
@@ -100,9 +100,9 @@ class Transform(RSC_Transform):
         name: str,
         *,
         structure_name: str,
-        source_controller_name: str = "",
+        source_controller_reference: str = "",
     ) -> None:
         super().__init__()
         self.name = name
-        self.source_controller_name = source_controller_name
+        self.source_controller_reference = source_controller_reference
         self.structure_name = structure_name

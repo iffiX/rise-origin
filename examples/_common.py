@@ -103,24 +103,24 @@ class MaterialSpec:
 
 
 def make_world(
-    name: str,
-    *,
-    materials: Sequence[MaterialSpec] = (),
-    structures: Sequence = (),
-    signals: Sequence = (),
-    controllers: Sequence = (),
-    records: Sequence = (),
-    essences: Sequence = (),
-    resources: Sequence = (),
-    gravity: float = -9.81,
-    control_hz: float = 30.0,
-    record_hz: float = 30.0,
-    time: Optional["rsc.simulation.Time"] = None,
-    soft_body: Optional["rsc.simulation.SoftBody"] = None,
-    rigid_body: Optional["rsc.simulation.RigidBody"] = None,
-    contact: Optional["rsc.simulation.Contact"] = None,
-    sky: Optional[object] = None,
-    has_floor: bool = True,
+        name: str,
+        *,
+        materials: Sequence[MaterialSpec] = (),
+        structures: Sequence = (),
+        signals: Sequence = (),
+        controllers: Sequence = (),
+        records: Sequence = (),
+        essences: Sequence = (),
+        resources: Sequence = (),
+        gravity: float = -9.81,
+        control_hz: float = 30.0,
+        record_hz: float = 30.0,
+        time: Optional["rsc.simulation.Time"] = None,
+        soft_body: Optional["rsc.simulation.SoftBody"] = None,
+        rigid_body: Optional["rsc.simulation.RigidBody"] = None,
+        contact: Optional["rsc.simulation.Contact"] = None,
+        sky: Optional[object] = None,
+        has_floor: bool = True,
 ) -> rsc.World:
     """Build a world with a ground plane, sky, materials, and your structures.
 
@@ -216,7 +216,7 @@ def make_world(
             # restir=rsc.simulation.VisionReSTIR(is_enabled=False),
             denoise=rsc.simulation.VisionDenoiseSVGF(),
         ),
-        runtime=rsc.simulation.Runtime(log_level="trace"),
+        runtime=rsc.simulation.Runtime(log_level="info"),
     )
     return rsc.World(
         name,
@@ -239,7 +239,7 @@ def controller_by_name(controllers, name: str):
 
 
 def launch(
-    world: rsc.World, callback: Optional[Callable] = None, **viewer_kwargs
+        world: rsc.World, callback: Optional[Callable] = None, **viewer_kwargs
 ) -> None:
     """Run an example, choosing the mode from environment variables.
 
@@ -248,8 +248,7 @@ def launch(
 
     Args:
         world: The fully characterized world to show.
-        callback: Per-step control callback ``callback(world_name, time,
-            controllers)``.
+        callback: Per-step control callback ``callback(time, controllers)``.
         **viewer_kwargs: Forwarded to
             :class:`rise_origin.runtime.viewer.Viewer` (e.g. ``camera_focus``,
             ``samples_per_pixel``, ``width``, ``height``).
@@ -258,6 +257,8 @@ def launch(
     mode = os.environ.get("RISE_MODE", "interactive")
     duration = float(os.environ.get("RISE_DURATION", "8"))
 
+    if "camera_position" not in viewer_kwargs:
+        viewer_kwargs["camera_position"] = (-0.6, 0.0, 0.4)
     viewer = Viewer(instance=(device, world), callback=callback, **viewer_kwargs)
     if mode == "record":
         viewer.run_record(os.environ.get("RISE_OUT", "out.mp4"), duration=duration)

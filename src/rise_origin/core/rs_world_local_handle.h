@@ -16,6 +16,9 @@ class RS_WorldLocalHandle : public RS_WorldHandle {
     // Identity
     std::string name() override;
 
+    // Info
+    std::string getInfo(const std::string &info_name) override;
+
     // State
     bool isPending() override;
     bool isRunning() override;
@@ -62,6 +65,8 @@ class RS_WorldLocalHandle : public RS_WorldHandle {
     RIndex unfreezeEntity(const std::string &name) override;
     rsc::RSC_EntityVariant findEntity(const std::string &name) override;
     bool isEntityFrozen(const std::string &name) override;
+    RIndex findEntityGID(const std::string &name) override;
+    std::string findEntityName(RIndex gid) override;
 
     // Record
     RIndex addRecord(const rsc::RSC_RecordVariant &record) override;

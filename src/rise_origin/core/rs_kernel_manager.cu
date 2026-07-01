@@ -256,10 +256,11 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.camera_denoiser_color_history.init(0, _device_provider);
         k.ctx.camera_denoiser_moment_history.init(0, _device_provider);
         k.ctx.camera_denoiser_history_length.init(0, _device_provider);
-        k.ctx.camera_denoiser_variance.init(0, _device_provider);
         k.ctx.camera_prev_denoiser_color_history.init(0, _device_provider);
         k.ctx.camera_prev_denoiser_moment_history.init(0, _device_provider);
         k.ctx.camera_prev_denoiser_history_length.init(0, _device_provider);
+        k.ctx.camera_denoiser_variance.init(0, _device_provider);
+        k.ctx.camera_next_denoiser_variance.init(0, _device_provider);
 
         k.ctx.camera_signals.init(0, _device_provider);
 
@@ -267,7 +268,11 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.camera_info_ray_layout.init(_device_provider);
         k.ctx.camera_rgb_ray_layout.init(_device_provider);
         k.ctx.camera_record_layout.init(_device_provider);
-        k.ctx.camera_pixel_record_layout.init(_device_provider);
+        k.ctx.camera_rgb_record_layout.init(_device_provider);
+        k.ctx.camera_depth_record_layout.init(_device_provider);
+        k.ctx.camera_normal_record_layout.init(_device_provider);
+        k.ctx.camera_motion_record_layout.init(_device_provider);
+        k.ctx.camera_entity_info_record_layout.init(_device_provider);
         k.ctx.camera_state_record_layout.init(_device_provider);
 
         k.ctx.camera_signal_layout.init(_device_provider);
@@ -334,6 +339,7 @@ void RS_KernelManager::freeKernel() {
     _kernel_intersect_region_managers.clear();
     _kernel_structure_voxel_managers.clear();
     _kernel_camera_perspective_managers.clear();
+    _kernel_camera_stereo_managers.clear();
     _kernel_floor_manager.reset();
 
     // Cosmic background must release before the texture manager for texture dependencies.
@@ -450,10 +456,11 @@ void RS_KernelManager::freeKernel() {
         k.ctx.camera_denoiser_color_history.free();
         k.ctx.camera_denoiser_moment_history.free();
         k.ctx.camera_denoiser_history_length.free();
-        k.ctx.camera_denoiser_variance.free();
         k.ctx.camera_prev_denoiser_color_history.free();
         k.ctx.camera_prev_denoiser_moment_history.free();
         k.ctx.camera_prev_denoiser_history_length.free();
+        k.ctx.camera_denoiser_variance.free();
+        k.ctx.camera_next_denoiser_variance.free();
 
         k.ctx.camera_signals.free();
 
@@ -461,7 +468,11 @@ void RS_KernelManager::freeKernel() {
         k.ctx.camera_info_ray_layout.free();
         k.ctx.camera_rgb_ray_layout.free();
         k.ctx.camera_record_layout.free();
-        k.ctx.camera_pixel_record_layout.free();
+        k.ctx.camera_rgb_record_layout.free();
+        k.ctx.camera_depth_record_layout.free();
+        k.ctx.camera_normal_record_layout.free();
+        k.ctx.camera_motion_record_layout.free();
+        k.ctx.camera_entity_info_record_layout.free();
         k.ctx.camera_state_record_layout.free();
 
         k.ctx.camera_signal_layout.free();
@@ -504,9 +515,16 @@ void RS_KernelManager::freeKernel() {
     RS_LOG(_logger, debug, "freeKernel takes {}", timer.elapsedTimeString());
 }
 
-void RS_KernelManager::pauseCommandExecution() { _command_execution_mutex.lock(); }
+void RS_KernelManager::pauseCommandExecution() {
+    std::unique_lock lock(_command_execution_mutex);
+    _command_execution_cv.wait(lock, [this]() { return _command_execution_depth == 0; });
+    ++_command_pause_count;
+}
 
-void RS_KernelManager::resumeCommandExecution() { _command_execution_mutex.unlock(); }
+void RS_KernelManager::resumeCommandExecution() {
+    std::unique_lock lock(_command_execution_mutex);
+    if (--_command_pause_count == 0) _command_execution_cv.notify_all();
+}
 
 void RS_KernelManager::acquireCriticalDataAccess() { _kernel_data_mutex.lock(); }
 
@@ -541,6 +559,9 @@ void RS_KernelManager::syncRecorderRecords() {
     for (auto& manager : _kernel_camera_perspective_managers) {
         manager.second->syncRecorderRecords();
     }
+    for (auto& manager : _kernel_camera_stereo_managers) {
+        manager.second->syncRecorderRecords();
+    }
     for (auto& manager : _kernel_intersect_region_managers) {
         manager.second->syncRecorderRecords();
     }
@@ -552,6 +573,9 @@ void RS_KernelManager::waitForRecorderRecordsSync() {
         manager.second->waitForRecorderRecordsSync();
     }
     for (auto& manager : _kernel_camera_perspective_managers) {
+        manager.second->waitForRecorderRecordsSync();
+    }
+    for (auto& manager : _kernel_camera_stereo_managers) {
         manager.second->waitForRecorderRecordsSync();
     }
     for (auto& manager : _kernel_intersect_region_managers) {
@@ -587,6 +611,20 @@ RS_KernelManager::getRecorderCameraPerspectiveRecords() {
     return result;
 }
 
+unordered_map<string, RS_KernelRecorderCameraStereoBundle>
+RS_KernelManager::getRecorderCameraStereoRecords() {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    unordered_map<string, RS_KernelRecorderCameraStereoBundle> result;
+
+    for (auto& [cam_name, cam_manager] : _kernel_camera_stereo_managers) {
+        string recorder_name = cam_manager->getRecordRecorderName();
+        if (recorder_name.empty()) continue;
+        result[recorder_name].camera_records[cam_manager->getEntityName()] =
+            cam_manager->getRecorderRecords();
+    }
+    return result;
+}
+
 unordered_map<string, RS_KernelRecorderIntersectRegionBundle>
 RS_KernelManager::getRecorderIntersectRegionRecords() {
     RS_KernelManagerCommandExecutionGuard guard(this);
@@ -613,6 +651,11 @@ void RS_KernelManager::syncControllerRecords() {
             manager.second->syncControllerRecord();
         }
     }
+    for (auto& manager : _kernel_camera_stereo_managers) {
+        if (manager.second->hasControllerRecord()) {
+            manager.second->syncControllerRecord();
+        }
+    }
     for (auto& manager : _kernel_intersect_region_managers) {
         if (manager.second->hasControllerRecord()) {
             manager.second->syncControllerRecord();
@@ -628,6 +671,11 @@ void RS_KernelManager::syncControllerSignals() {
         }
     }
     for (auto& manager : _kernel_camera_perspective_managers) {
+        if (manager.second->hasControllerSignal()) {
+            manager.second->syncControllerSignal();
+        }
+    }
+    for (auto& manager : _kernel_camera_stereo_managers) {
         if (manager.second->hasControllerSignal()) {
             manager.second->syncControllerSignal();
         }
@@ -682,22 +730,34 @@ unordered_map<string, RS_KernelControllerBundle> RS_KernelManager::getController
         }
     }
 
+    // Camera stereo: free cameras carry a signal; all cameras may emit a record.
+    for (auto& [cam_name, cam_manager] : _kernel_camera_stereo_managers) {
+        if (cam_manager->hasControllerSignal()) {
+            const string& cn = cam_manager->getSignalControllerName();
+            if (!cn.empty()) result[cn].signals.emplace_back(cam_manager->getControllerSignal());
+        }
+        if (cam_manager->hasControllerRecord()) {
+            const string& cn = cam_manager->getRecordControllerName();
+            if (!cn.empty()) result[cn].records.emplace_back(cam_manager->getControllerRecord());
+        }
+    }
+
     // Force / torque: signal -> its source controller.
     for (auto& [_, fm] : _kernel_force_managers) {
         if (fm->hasControllerSignal()) {
-            const string& cn = fm->getRSC().as<RSC_Force>().source_controller_name;
+            const string& cn = fm->getRSC().as<RSC_Force>().source_controller_reference;
             if (!cn.empty()) result[cn].signals.emplace_back(fm->getControllerSignal());
         }
     }
     for (auto& [_, tm] : _kernel_torque_managers) {
         if (tm->hasControllerSignal()) {
-            const string& cn = tm->getRSC().as<RSC_Torque>().source_controller_name;
+            const string& cn = tm->getRSC().as<RSC_Torque>().source_controller_reference;
             if (!cn.empty()) result[cn].signals.emplace_back(tm->getControllerSignal());
         }
     }
     for (auto& [_, xm] : _kernel_transform_managers) {
         if (xm->hasControllerSignal()) {
-            const string& cn = xm->getRSC().as<RSC_Transform>().source_controller_name;
+            const string& cn = xm->getRSC().as<RSC_Transform>().source_controller_reference;
             if (!cn.empty()) result[cn].signals.emplace_back(xm->getControllerSignal());
         }
     }
@@ -790,6 +850,10 @@ std::string RS_KernelManager::purgeStructure(RIndex structure_gid) {
         if (mgr->getStructureGid() == structure_gid)
             dependent_cameras.push_back(mgr->getEntityName());
     }
+    for (auto& [key, mgr] : _kernel_camera_stereo_managers) {
+        if (mgr->getStructureGid() == structure_gid)
+            dependent_cameras.push_back(mgr->getEntityName());
+    }
     for (auto& [key, mgr] : _kernel_intersect_region_managers) {
         if (mgr->getStructureGid() == structure_gid)
             dependent_records.push_back(mgr->getRecordName());
@@ -878,6 +942,24 @@ void RS_KernelManager::clearFloorTriangleModified() {
 /*****************************************************************
  * Handle APIs
  *****************************************************************/
+std::string RS_KernelManager::getInfo(const std::string& info_name) {
+    if (info_name == "device_memory_used")
+        return _device_provider ? _device_provider->getProperty("memory_used") : "";
+    if (info_name == "device_memory_capacity")
+        return _device_provider ? _device_provider->getProperty("memory_capacity") : "";
+    if (info_name == "host_memory_used") return std::to_string(RS_System::getUsedMemory());
+    if (info_name == "host_memory_capacity") return std::to_string(RS_System::getTotalMemory());
+    if (info_name == "device_name") {
+        if (!_device_provider) return "";
+        RS_DeviceLocation location = _device_provider->device;
+        const char* type_name = "unknown";
+        if (location.type == RSE_DEVICE_TYPE_CUDA) type_name = "cuda";
+        else if (location.type == RSE_DEVICE_TYPE_CPU) type_name = "cpu";
+        return std::string(type_name) + ":" + std::to_string(location.id);
+    }
+    return "";
+}
+
 void RS_KernelManager::pauseKernel(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
@@ -1117,6 +1199,9 @@ bool RS_KernelManager::isEntityFrozen(const std::string& name) {
     if (auto it = _kernel_camera_perspective_managers.find(name);
         it != _kernel_camera_perspective_managers.end())
         return it->second->isFrozen();
+    if (auto it = _kernel_camera_stereo_managers.find(name);
+        it != _kernel_camera_stereo_managers.end())
+        return it->second->isFrozen();
     if (_kernel_floor_manager) {
         bool matched = false;
         _kernel_floor_manager->getRSC().visit([&](auto& c) {
@@ -1143,6 +1228,10 @@ RSC_EntityVariant RS_KernelManager::findEntity(const std::string& name) {
         it != _kernel_camera_perspective_managers.end()) {
         return it->second->getRSC().visit([](auto& c) { return RSC_EntityVariant(c); });
     }
+    if (auto it = _kernel_camera_stereo_managers.find(name);
+        it != _kernel_camera_stereo_managers.end()) {
+        return it->second->getRSC().visit([](auto& c) { return RSC_EntityVariant(c); });
+    }
     if (_kernel_floor_manager) {
         RSC_EntityVariant result;
         bool found = false;
@@ -1166,6 +1255,42 @@ RSC_EntityVariant RS_KernelManager::findEntity(const std::string& name) {
         if (found) return result;
     }
     RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
+}
+
+RIndex RS_KernelManager::findEntityGID(const std::string& name) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    if (_kernel_floor_manager) {
+        bool matched = false;
+        _kernel_floor_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) return RS_WORLD_RSC_FLOOR_GID;
+    }
+    if (_kernel_cosmic_background_manager) {
+        bool matched = false;
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) {
+            if (c.name == name) matched = true;
+        });
+        if (matched) return RS_WORLD_RSC_COSMIC_BACKGROUND_GID;
+    }
+    if (auto it = _entity_gids.find(name); it != _entity_gids.end()) return it->second;
+    return RS_NULL_INDEX;
+}
+
+std::string RS_KernelManager::findEntityName(RIndex gid) {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    if (gid == RS_WORLD_RSC_FLOOR_GID && _kernel_floor_manager) {
+        std::string name;
+        _kernel_floor_manager->getRSC().visit([&](auto& c) { name = c.name; });
+        return name;
+    }
+    if (gid == RS_WORLD_RSC_COSMIC_BACKGROUND_GID && _kernel_cosmic_background_manager) {
+        std::string name;
+        _kernel_cosmic_background_manager->getRSC().visit([&](auto& c) { name = c.name; });
+        return name;
+    }
+    if (auto it = _entity_names.find(gid); it != _entity_names.end()) return it->second;
+    return "";
 }
 
 void RS_KernelManager::addRecord(const RSC_RecordVariant& record, RIndex message_id, bool sync) {
@@ -1258,6 +1383,9 @@ RSC_World RS_KernelManager::getWorld() {
         sm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
     }
     for (auto& [_, cm] : _kernel_camera_perspective_managers) {
+        cm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
+    }
+    for (auto& [_, cm] : _kernel_camera_stereo_managers) {
         cm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
     }
     if (_kernel_floor_manager) {
@@ -1353,7 +1481,9 @@ void deregisterByName(
 }  // namespace
 
 RIndex RS_KernelManager::registerEntity(const string& name) {
-    return registerByName(_entity_gids, _entity_counter, name, "entity");
+    RIndex gid = registerByName(_entity_gids, _entity_counter, name, "entity");
+    _entity_names.emplace(gid, name);
+    return gid;
 }
 RIndex RS_KernelManager::registerEssence(const string& name) {
     return registerByName(_essence_gids, _essence_counter, name, "essence");
@@ -1369,6 +1499,7 @@ RIndex RS_KernelManager::registerSignal(const string& name) {
 }
 
 void RS_KernelManager::deregisterEntity(const string& name) {
+    if (auto it = _entity_gids.find(name); it != _entity_gids.end()) _entity_names.erase(it->second);
     deregisterByName(_entity_gids, name, "entity");
 }
 void RS_KernelManager::deregisterEssence(const string& name) {
@@ -1415,6 +1546,11 @@ RS_KernelManager::getKernelStructureVoxelManagers() {
 unordered_map<string, unique_ptr<RS_KernelCameraPerspectiveManager>>&
 RS_KernelManager::getKernelCameraPerspectiveManagers() {
     return _kernel_camera_perspective_managers;
+}
+
+unordered_map<string, unique_ptr<RS_KernelCameraStereoManager>>&
+RS_KernelManager::getKernelCameraStereoManagers() {
+    return _kernel_camera_stereo_managers;
 }
 
 unordered_map<string, unique_ptr<RS_KernelForceManager>>&
@@ -1485,9 +1621,9 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
             function_name
         );
 
-        // Hold command execution (Guard A) for the whole command: build and commit. Finders and the
-        // callback take the same mutex, so none of them runs while a command executes.
-        std::lock_guard execution_lock(_command_execution_mutex);
+        // Raise the execution depth for the whole command: build and commit. Finders and the
+        // callback wait on it, so none of them runs while a command executes.
+        CommandExecutionScope execution_scope(this);
 
         RS_LOG(_logger, debug, "Kernel manager sync thread start execution.");
 
@@ -1555,6 +1691,19 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
     }
 }
 
+void RS_KernelManager::_acquireCommandExecution() {
+    std::unique_lock lock(_command_execution_mutex);
+    if (_command_execution_depth == 0) {
+        _command_execution_cv.wait(lock, [this]() { return _command_pause_count == 0; });
+    }
+    ++_command_execution_depth;
+}
+
+void RS_KernelManager::_releaseCommandExecution() {
+    std::unique_lock lock(_command_execution_mutex);
+    if (--_command_execution_depth == 0) _command_execution_cv.notify_all();
+}
+
 void RS_KernelManager::_pauseKernel() {
     RS_KernelManagerCriticalDataAccessGuard guard(this);
     markKernelModified();
@@ -1584,7 +1733,7 @@ void RS_KernelManager::_terminateKernel() {
 void RS_KernelManager::_beginModificationTransaction() {
     // Hold command execution across the whole transaction so the uncommitted managers built inside
     // it stay invisible to finders and the callback until the flush.
-    _command_execution_mutex.lock();
+    _acquireCommandExecution();
     _is_transaction_open = true;
     RS_LOG(_logger, debug, "Begin modification transaction.");
 }
@@ -1594,11 +1743,11 @@ void RS_KernelManager::_endModificationTransaction() {
         _flushPendingCommits();
     } catch (...) {
         _is_transaction_open = false;
-        _command_execution_mutex.unlock();
+        _releaseCommandExecution();
         throw;
     }
     _is_transaction_open = false;
-    _command_execution_mutex.unlock();
+    _releaseCommandExecution();
     RS_LOG(_logger, debug, "End modification transaction.");
 }
 
@@ -1896,6 +2045,11 @@ void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, RIndex messag
             auto mgr = std::make_unique<RS_KernelCameraPerspectiveManager>(this, c);
             _kernel_camera_perspective_managers[c.name] = std::move(mgr);
             _stageCommit(RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE, c.name);
+        } else if constexpr (std::is_same_v<T, RSC_CameraStereoFree> ||
+                             std::is_same_v<T, RSC_CameraStereoRigidBodyLinked>) {
+            auto mgr = std::make_unique<RS_KernelCameraStereoManager>(this, c);
+            _kernel_camera_stereo_managers[c.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_CAMERA_STEREO, c.name);
         } else if constexpr (std::is_same_v<T, RSC_FloorFlat> ||
                              std::is_same_v<T, RSC_FloorArray>) {
             if (_kernel_floor_manager) {
@@ -1949,6 +2103,21 @@ void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id)
         it->second->decommit();
         _kernel_camera_perspective_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE, name);
+        _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+        return;
+    }
+    if (auto it = _kernel_camera_stereo_managers.find(name);
+        it != _kernel_camera_stereo_managers.end()) {
+        if (it->second->getUseCount() > 0) {
+            RS_THROW(RS_SimulationException(
+                "Cannot remove camera '{}': still in use ({} reference(s))",
+                name,
+                it->second->getUseCount()
+            ));
+        }
+        it->second->decommit();
+        _kernel_camera_stereo_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_CAMERA_STEREO, name);
         _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
         return;
     }
@@ -2008,6 +2177,12 @@ void RS_KernelManager::_freezeEntity(const std::string& name, RIndex message_id)
         _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
         return;
     }
+    if (auto it = _kernel_camera_stereo_managers.find(name);
+        it != _kernel_camera_stereo_managers.end()) {
+        it->second->freeze();
+        _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+        return;
+    }
     if (_kernel_floor_manager) {
         bool matched = false;
         _kernel_floor_manager->getRSC().visit([&](auto& c) {
@@ -2042,6 +2217,12 @@ void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_i
     }
     if (auto it = _kernel_camera_perspective_managers.find(name);
         it != _kernel_camera_perspective_managers.end()) {
+        it->second->unfreeze();
+        _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+        return;
+    }
+    if (auto it = _kernel_camera_stereo_managers.find(name);
+        it != _kernel_camera_stereo_managers.end()) {
         it->second->unfreeze();
         _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
         return;
@@ -2206,6 +2387,11 @@ void RS_KernelManager::_flushOneCommit(RSE_KernelManagerType type, const std::st
         case RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE:
             if (auto it = _kernel_camera_perspective_managers.find(name);
                 it != _kernel_camera_perspective_managers.end())
+                it->second->commit();
+            break;
+        case RSE_KERNEL_MANAGER_CAMERA_STEREO:
+            if (auto it = _kernel_camera_stereo_managers.find(name);
+                it != _kernel_camera_stereo_managers.end())
                 it->second->commit();
             break;
         case RSE_KERNEL_MANAGER_FLOOR:

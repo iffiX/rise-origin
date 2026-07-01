@@ -39,6 +39,11 @@ class RS_SimulationRecorder {
         const std::vector<RS_WorldCameraPerspectiveRecord> &records
     ){};
 
+    virtual void syncCameraStereoRecords(
+        const std::string &name,
+        const std::vector<RS_WorldCameraStereoRecord> &records
+    ){};
+
     virtual void syncIntersectRegionRecords(
         const std::string &name,
         const std::vector<RS_WorldIntersectRegionRecord> &records

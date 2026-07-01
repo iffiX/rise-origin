@@ -42,10 +42,10 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
 
         std::shared_ptr<HighFive::Group> root_group;
         std::shared_ptr<HighFive::Group> time_group;
-        std::shared_ptr<HighFive::Group> voxel_group;
-        std::shared_ptr<HighFive::Group> link_group;
-        std::shared_ptr<HighFive::Group> rigid_body_group;
-        std::shared_ptr<HighFive::Group> joint_group;
+        std::shared_ptr<HighFive::Group> voxels_group;
+        std::shared_ptr<HighFive::Group> links_group;
+        std::shared_ptr<HighFive::Group> rigid_bodies_group;
+        std::shared_ptr<HighFive::Group> joints_group;
     };
 
     struct CameraRecordData {
@@ -55,6 +55,10 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         std::shared_ptr<HighFive::Group> root_group;
         std::shared_ptr<HighFive::Group> time_group;
         std::shared_ptr<HighFive::Group> rgb_group;
+        std::shared_ptr<HighFive::Group> depth_group;
+        std::shared_ptr<HighFive::Group> normal_group;
+        std::shared_ptr<HighFive::Group> motion_group;
+        std::shared_ptr<HighFive::Group> entity_info_group;
         std::shared_ptr<HighFive::Group> camera_state_group;
     };
 
@@ -85,6 +89,10 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         RSize width,
         RSize height,
         bool has_rgb,
+        bool has_depth,
+        bool has_normal,
+        bool has_motion,
+        bool has_entity_info,
         bool has_camera_state
     );
 
@@ -103,6 +111,19 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
     _writeStructureJointFrame(StructureRecordData& d, const RS_WorldStructureRecordBase::Joint& j);
 
     void _writeCameraRgbFrame(CameraRecordData& d, const RS_WorldCameraRecordBase::RGB& rgb);
+
+    void _writeCameraDepthFrame(CameraRecordData& d, const RS_WorldCameraRecordBase::Depth& depth);
+
+    void
+    _writeCameraNormalFrame(CameraRecordData& d, const RS_WorldCameraRecordBase::Normal& normal);
+
+    void
+    _writeCameraMotionFrame(CameraRecordData& d, const RS_WorldCameraRecordBase::Motion& motion);
+
+    void _writeCameraEntityInfoFrame(
+        CameraRecordData& d,
+        const RS_WorldCameraRecordBase::EntityInfo& entity_info
+    );
 
     void _writeCameraStateFrame(
         CameraRecordData& d,

@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Copyright 2026 Muhan Li (iffi/iffiX)
 
-from typing import Any, Callable, Iterable, List, Optional, Union, overload
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, overload
 import numpy as np
 
 RS_NULL_INDEX: int
@@ -389,7 +389,7 @@ class RSC_RecordBase(RSC_Base):
 
 class RSC_SignalBase(RSC_Base):
     name: str
-    source_controller_name: str
+    source_controller_reference: str
 
 
 class RSC_RecorderBase(RSC_Base):
@@ -882,7 +882,12 @@ class RSC_CameraPerspectiveRecord(RSC_RecordBase):
 
     has_rgb: bool
     has_depth: bool
+    has_normal: bool
+    has_motion: bool
     has_entity_info: bool
+    is_depth_hyperbolic: bool
+    hyperbolic_near_depth: float
+    hyperbolic_far_depth: float
 
 
 class RSC_CameraPerspectiveSignal(RSC_SignalBase):
@@ -916,6 +921,55 @@ class RSC_CameraPerspectiveFree(RSC_CameraPerspectiveBase):
 
 
 class RSC_CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveBase):
+    def __init__(self) -> None: ...
+
+    structure_name: str
+    body_sid: int
+    segment_bid: int
+    relative_anchor: RVec3rf
+    relative_orientation: RQuat3rf
+
+
+class RSC_CameraStereoRecord(RSC_RecordBase):
+    def __init__(self) -> None: ...
+
+    has_rgb: bool
+    has_depth: bool
+    has_normal: bool
+    has_motion: bool
+    has_entity_info: bool
+    is_depth_hyperbolic: bool
+    hyperbolic_near_depth: float
+    hyperbolic_far_depth: float
+
+
+class RSC_CameraStereoSignal(RSC_SignalBase):
+    def __init__(self) -> None: ...
+
+
+class RSC_CameraStereoBase(RSC_CameraBase):
+    image_width: int
+    image_height: int
+    samples_per_pixel: int
+    max_depth: int
+    interpupillary_distance: float
+    convergence_distance: float
+    angle_left: float
+    angle_right: float
+    angle_up: float
+    angle_down: float
+    record: RSC_CameraStereoRecord
+    signal: RSC_CameraStereoSignal
+
+
+class RSC_CameraStereoFree(RSC_CameraStereoBase):
+    def __init__(self) -> None: ...
+
+    origin_position: RVec3rf
+    orientation: RQuat3rf
+
+
+class RSC_CameraStereoRigidBodyLinked(RSC_CameraStereoBase):
     def __init__(self) -> None: ...
 
     structure_name: str
@@ -1444,8 +1498,48 @@ class RS_WorldCameraPerspectiveRecord:
 
         def height(self) -> int: ...
 
-        def pixels(self) -> np.ndarray:
+        def pixel(self) -> np.ndarray:
             """[height, width, 3] uint8 RGB array."""
+            ...
+
+    class Depth:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def pixel(self) -> np.ndarray:
+            """[height, width] float32 depth array, empty when disabled."""
+            ...
+
+    class Normal:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def pixel(self) -> np.ndarray:
+            """[height, width, 3] float32 world-space normal array, empty when disabled."""
+            ...
+
+    class Motion:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def pixel(self) -> np.ndarray:
+            """[height, width, 2] float32 screen-space motion array, empty when disabled."""
+            ...
+
+    class EntityInfo:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def entity_type(self) -> np.ndarray:
+            """[height, width] uint32 entity type ids, empty when disabled."""
+            ...
+
+        def entity_gid(self) -> np.ndarray:
+            """[height, width] uint32 entity global ids, empty when disabled."""
             ...
 
     class State:
@@ -1488,6 +1582,131 @@ class RS_WorldCameraPerspectiveRecord:
 
     @property
     def state(self) -> "RS_WorldCameraPerspectiveRecord.State": ...
+
+
+class RS_WorldCameraStereoRecord:
+    """Stereo-camera record snapshot. Each eye is exposed through left_/right_
+    accessors mirroring the C++ nested layout."""
+
+    class RGB:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def pixel(self) -> np.ndarray:
+            """[height, width, 3] uint8 RGB array."""
+            ...
+
+    class Depth:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def pixel(self) -> np.ndarray:
+            """[height, width] float32 depth array, empty when disabled."""
+            ...
+
+    class Normal:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def pixel(self) -> np.ndarray:
+            """[height, width, 3] float32 world-space normal array, empty when disabled."""
+            ...
+
+    class Motion:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def pixel(self) -> np.ndarray:
+            """[height, width, 2] float32 screen-space motion array, empty when disabled."""
+            ...
+
+    class EntityInfo:
+        def width(self) -> int: ...
+
+        def height(self) -> int: ...
+
+        def entity_type(self) -> np.ndarray:
+            """[height, width] uint32 entity type ids, empty when disabled."""
+            ...
+
+        def entity_gid(self) -> np.ndarray:
+            """[height, width] uint32 entity global ids, empty when disabled."""
+            ...
+
+    class State:
+        def size(self) -> int: ...
+
+        def position(self) -> np.ndarray:
+            """[size, 3] camera positions."""
+            ...
+
+        def orientation(self) -> np.ndarray:
+            """[size, 4] camera orientations (x, y, z, w)."""
+            ...
+
+        def focus_distance(self) -> np.ndarray:
+            """[size] focus distances."""
+            ...
+
+        def field_of_view(self) -> np.ndarray:
+            """[size] vertical fields of view."""
+            ...
+
+    def step(self) -> int: ...
+
+    def time(self) -> float: ...
+
+    def camera_gid(self) -> int: ...
+
+    def structure_gid(self) -> int: ...
+
+    def rigid_body_sid(self) -> int: ...
+
+    def width(self) -> int: ...
+
+    def height(self) -> int: ...
+
+    def is_valid(self) -> bool: ...
+
+    @property
+    def left_rgb(self) -> "RS_WorldCameraStereoRecord.RGB": ...
+
+    @property
+    def right_rgb(self) -> "RS_WorldCameraStereoRecord.RGB": ...
+
+    @property
+    def left_depth(self) -> "RS_WorldCameraStereoRecord.Depth": ...
+
+    @property
+    def right_depth(self) -> "RS_WorldCameraStereoRecord.Depth": ...
+
+    @property
+    def left_normal(self) -> "RS_WorldCameraStereoRecord.Normal": ...
+
+    @property
+    def right_normal(self) -> "RS_WorldCameraStereoRecord.Normal": ...
+
+    @property
+    def left_motion(self) -> "RS_WorldCameraStereoRecord.Motion": ...
+
+    @property
+    def right_motion(self) -> "RS_WorldCameraStereoRecord.Motion": ...
+
+    @property
+    def left_entity_info(self) -> "RS_WorldCameraStereoRecord.EntityInfo": ...
+
+    @property
+    def right_entity_info(self) -> "RS_WorldCameraStereoRecord.EntityInfo": ...
+
+    @property
+    def left_camera_state(self) -> "RS_WorldCameraStereoRecord.State": ...
+
+    @property
+    def right_camera_state(self) -> "RS_WorldCameraStereoRecord.State": ...
 
 
 class RS_WorldIntersectRegionRecord:
@@ -1561,6 +1780,35 @@ class RS_WorldCameraPerspectiveSignal:
     def optics_signals(self) -> RS_WorldCameraPerspectiveSignal.Optics: ...
 
 
+class RS_WorldCameraStereoSignal:
+    class Position:
+        def size(self) -> int: ...
+
+        def position(self) -> np.ndarray: ...
+
+    class Orientation:
+        def size(self) -> int: ...
+
+        def orientation(self) -> np.ndarray: ...
+
+    class Optics:
+        def size(self) -> int: ...
+
+        def field_of_view(self) -> np.ndarray: ...
+
+    def left_position_signals(self) -> RS_WorldCameraStereoSignal.Position: ...
+
+    def right_position_signals(self) -> RS_WorldCameraStereoSignal.Position: ...
+
+    def left_orientation_signals(self) -> RS_WorldCameraStereoSignal.Orientation: ...
+
+    def right_orientation_signals(self) -> RS_WorldCameraStereoSignal.Orientation: ...
+
+    def left_optics_signals(self) -> RS_WorldCameraStereoSignal.Optics: ...
+
+    def right_optics_signals(self) -> RS_WorldCameraStereoSignal.Optics: ...
+
+
 class RS_WorldForceSignal:
     class Force:
         def size(self) -> int: ...
@@ -1605,6 +1853,7 @@ class RS_WorldTransformSignal:
 _RS_WorldRecord = Union[
     RS_WorldStructureVoxelRecord,
     RS_WorldCameraPerspectiveRecord,
+    RS_WorldCameraStereoRecord,
     RS_WorldIntersectRegionRecord,
 ]
 
@@ -1612,6 +1861,7 @@ _RS_WorldRecord = Union[
 _RS_WorldSignal = Union[
     RS_WorldStructureVoxelSignal,
     RS_WorldCameraPerspectiveSignal,
+    RS_WorldCameraStereoSignal,
     RS_WorldForceSignal,
     RS_WorldTorqueSignal,
     RS_WorldTransformSignal,
@@ -2093,6 +2343,131 @@ class RS_WorldHandle:
 
 
 ################################################################################
+# World Callback
+################################################################################
+
+class RS_WorldCallback:
+    """The rebindable per-step world callback the engine drives each control step."""
+
+    def get_world_name(self) -> str: ...
+
+    def set_callback(
+        self, callback: Callable[[float, List[RS_WorldController]], None]
+    ) -> None: ...
+
+    def reset_callback(self) -> None: ...
+
+    def get_callback(
+        self,
+    ) -> Optional[Callable[[float, List[RS_WorldController]], None]]: ...
+
+
+################################################################################
+# World Session Components
+################################################################################
+
+class RS_WorldSessionComponent:
+    """Base class for session components."""
+
+
+class RS_WorldSessionComponentGeneric(RS_WorldSessionComponent):
+    """Runs a user callback over the controllers in its scope each step."""
+
+    def __init__(self) -> None: ...
+
+    def get_handle(self) -> RS_WorldHandle:
+        """This component's scoped world handle."""
+        ...
+
+    def set_callback(
+        self, callback: Callable[[float, List[RS_WorldController]], None]
+    ) -> None:
+        """Set the per-step callback, invoked as callback(time, controllers)."""
+        ...
+
+
+class RS_WorldSessionComponentCamera(RS_WorldSessionComponent):
+    """Orbit-camera component: injects one free perspective camera and drives its pose."""
+
+    def __init__(
+        self,
+        name: str,
+        callback: Optional[Callable[[float], None]] = None,
+        position: RVec3rf = (0.0, 0.0, 0.4),
+        focus: RVec3rf = (0.0, 0.0, 0.15),
+        width: int = 1280,
+        height: int = 720,
+        samples_per_pixel: int = 4,
+        max_depth: int = 3,
+        field_of_view: float = 60.0,
+        defocus_angle: float = 0.0,
+        focus_distance: float = 1.0,
+    ) -> None: ...
+
+    def move(
+        self,
+        orbit_pitch: float,
+        orbit_yaw: float,
+        pan_x: float,
+        pan_y: float,
+        zoom: float,
+    ) -> None:
+        """Accumulate a mouse gesture; applied on the next control step."""
+        ...
+
+    def frame(self) -> Optional[np.ndarray]:
+        """The latest RGB frame as a (height, width, 3) uint8 array, or None if empty."""
+        ...
+
+
+class RS_WorldSessionComponentVR(RS_WorldSessionComponent):
+    """Stereo VR component: injects one stereo camera and presents it to an OpenXR headset.
+
+    Only present when the core is built with RISE_ORIGIN_BUILD_CORE_WITH_VR.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        samples_per_pixel: int = 1,
+        max_depth: int = 3,
+        near_depth: float = 0.05,
+        far_depth: float = 100.0,
+        move_speed: float = 2.0,
+        fly_speed: float = 1.5,
+        turn_speed: float = 90.0,
+        stick_dead_zone: float = 0.2,
+        boost: float = 3.0,
+        hud_follow_tau: float = 0.25,
+    ) -> None: ...
+    def setPushForce(self, push_force: float) -> None:
+        """Set the newtons applied along the aim ray at a full trigger pull."""
+        ...
+
+
+################################################################################
+# World Session
+################################################################################
+
+class RS_WorldSession:
+    """Owns a running world's handle and callback and drives its components."""
+
+    def __init__(self, handle: RS_WorldHandle, callback: RS_WorldCallback) -> None: ...
+
+    def has_component(self, name: str) -> bool: ...
+
+    def add_component(self, name: str, component: RS_WorldSessionComponent) -> None: ...
+
+    def remove_component(self, name: str) -> None: ...
+
+    def get_core_component(self) -> RS_WorldSessionComponentGeneric: ...
+
+    def get_handle(self) -> RS_WorldHandle: ...
+
+    def run(self) -> None: ...
+
+
+################################################################################
 ################################################################################
 # init.cpp - module entry point
 ################################################################################
@@ -2133,21 +2508,25 @@ class RiseOrigin:
         """
         ...
 
-    def hello(
-            self,
-            world: RSC_World,
-            callback: Optional[
-                Callable[[str, float, List[RS_WorldController]], None]
-            ] = None,
-    ) -> RS_WorldHandle:
+    def hello(self, world: RSC_World) -> Tuple[RS_WorldHandle, RS_WorldCallback]:
         """Say hello to the world.
 
         Args:
             world: Root world config describing all entities, essences, resources, etc
                 that should exist before time starts.
-            callback: Optional callback for control and modification of the world.
 
         Returns:
-            The world handle.
+            The world handle and the rebindable world callback the engine drives each step.
+        """
+        ...
+
+    def connect(self, url: str) -> Tuple[RS_WorldHandle, RS_WorldCallback]:
+        """Connect to a world running on an already-launched remote instance.
+
+        Args:
+            url: Address of the remote instance hosting the world.
+
+        Returns:
+            The world handle and the rebindable world callback the engine drives each step.
         """
         ...

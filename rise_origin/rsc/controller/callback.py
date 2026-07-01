@@ -13,7 +13,7 @@ class ControllerCallback(RSC_ControllerCallback):
 
     Records naming this controller in their ``target_controller_reference`` are
     bundled and passed to the callback each callback step; signals naming this
-    controller in their ``source_controller_name`` are driven by what the
+    controller in their ``source_controller_reference`` are driven by what the
     callback returns.
 
     Args:

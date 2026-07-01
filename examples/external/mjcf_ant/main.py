@@ -69,7 +69,7 @@ def build():
         essence_outputs=essences,
         resource_outputs=resources,
     )
-    ant.signal.source_controller_name = CONTROLLER
+    ant.signal.source_controller_reference = CONTROLLER
     for constraint in ant.constraints:
         constraint.hinge_max_torque = HINGE_TORQUE
 
@@ -82,7 +82,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Drive an alternating gait: diagonal leg pairs swing out of phase.
 
     Hips are the even signals, knees the odd ones; each knee lifts a quarter

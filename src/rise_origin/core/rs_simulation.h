@@ -39,6 +39,11 @@ class RS_Simulation {
     std::shared_ptr<RS_KernelManager> kernel_manager;
     std::future<void> recorder_sync_future{};
 
+    /// Serializes handle mutations (validate + allocateMessageId + enqueue) and is held across a
+    /// begin/endModificationTransaction span so its commands stay contiguous. Recursive so a mutator
+    /// nests inside an open transaction. Reads and blocking waits skip it, so terminate never blocks.
+    std::recursive_mutex api_mutex;
+
     /// Active recorders, keyed by name.
     std::unordered_map<
         std::string,

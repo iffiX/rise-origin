@@ -92,6 +92,17 @@ class RS_WorldHandle {
     virtual std::string name() = 0;
 
     /*****************************************************************
+     * Info
+     *****************************************************************/
+    /**
+     * @brief Query a named piece of world or system info as a string.
+     * @details One key resolves to one source. device_memory_used / device_memory_capacity and
+     * host_memory_used / host_memory_capacity report bytes; device_name reports the compute device
+     * as type:id such as cuda:0. An unknown key returns an empty string.
+     */
+    virtual std::string getInfo(const std::string& info_name) = 0;
+
+    /*****************************************************************
      * State
      *****************************************************************/
     /**
@@ -281,6 +292,16 @@ class RS_WorldHandle {
      * @brief Whether the named entity is currently frozen.
      */
     virtual bool isEntityFrozen(const std::string& name) = 0;
+
+    /**
+     * @brief Resolve an entity name to its global id, or RS_NULL_INDEX if absent.
+     */
+    virtual RIndex findEntityGID(const std::string& name) = 0;
+
+    /**
+     * @brief Resolve a global id to its entity name, or empty if absent.
+     */
+    virtual std::string findEntityName(RIndex gid) = 0;
 
     /*****************************************************************
      * Record

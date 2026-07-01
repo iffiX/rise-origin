@@ -46,8 +46,7 @@ class RSCF_LaunchWithHandles : public device::RS_ComputeFunction<ComputeFunction
     using device::RS_ComputeFunction<ComputeFunction>::index1D;
 
     template <typename... Args>
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    run(device::RS_Vector<RHandle> handles, Args... args) {
+    HOST_DEVICE_INLINE_QUALIFIER static void run(device::RS_Vector<RHandle> handles, Args... args) {
         ComputeFunction::run(device::RS_ConstantMemory::as<Kernel>(), handles[index1D()], args...);
     }
 };
@@ -201,7 +200,8 @@ class RSCF_LaunchStoreRecordWithRecordHandles
  */
 template <typename StoreRecordFunction, typename Kernel>
 class RSCF_LaunchStoreRecordWithLayout
-    : public device::RS_ComputeFunction<RSCF_LaunchStoreRecordWithLayout<StoreRecordFunction, Kernel>> {
+    : public device::RS_ComputeFunction<
+          RSCF_LaunchStoreRecordWithLayout<StoreRecordFunction, Kernel>> {
    public:
     using device::RS_ComputeFunction<RSCF_LaunchStoreRecordWithLayout>::index1D;
 
@@ -221,17 +221,18 @@ class RSCF_LaunchStoreRecordWithLayout
 };
 
 /**
- * @brief Launch the root-record update once per buffer, supplying each handle layout's segment size.
+ * @brief Launch the root-record update once per buffer, supplying each handle layout's segment
+ * size.
  *
  * @param buffers        per-segment record buffers.
  * @param root_records   per-segment root records.
  * @param handle_layouts the per-element layouts whose segment sizes drive the update.
  */
-template <typename Kernel>
+template <typename UpdateFunction, typename Kernel>
 class RSCF_LaunchUpdateRootRecord
-    : public device::RS_ComputeFunction<RSCF_LaunchUpdateRootRecord<Kernel>> {
+    : public device::RS_ComputeFunction<RSCF_LaunchUpdateRootRecord<UpdateFunction, Kernel>> {
    public:
-    using device::RS_ComputeFunction<RSCF_LaunchUpdateRootRecord>::index1D;
+    using device::RS_ComputeFunction<RSCF_LaunchUpdateRootRecord<UpdateFunction, Kernel>>::index1D;
 
     template <typename Buffer, typename RootRecord, typename... Layout>
     HOST_DEVICE_INLINE_QUALIFIER static void run(
@@ -240,8 +241,7 @@ class RSCF_LaunchUpdateRootRecord
         Layout... handle_layouts
     ) {
         RIndex i = index1D();
-        auto &ctx = device::RS_ConstantMemory::as<Kernel>()->ctx;
-        RSCF_UpdateRootRecord::run(
+        UpdateFunction::run(
             device::RS_ConstantMemory::as<Kernel>(),
             buffers[i],
             root_records[i],

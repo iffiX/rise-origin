@@ -365,7 +365,7 @@ class RSC_SimulationVisionDenoiseNone : public RSC_Base {
 class RSC_SimulationVisionDenoiseAtrous : public RSC_Base {
    public:
     /// Number of a-trous wavelet iterations.
-    RSize atrous_iterations = 3;
+    RSize atrous_iterations = 2;
 
     /// Per-pixel pass-count floor for the a-trous wavelet, applied alongside the roughness^2 cap.
     RSize atrous_min_passes = 1;
@@ -403,7 +403,7 @@ class RSC_SimulationVisionDenoiseAtrous : public RSC_Base {
 class RSC_SimulationVisionDenoiseSVGF : public RSC_Base {
    public:
     /// Number of a-trous wavelet iterations.
-    RSize atrous_iterations = 3;
+    RSize atrous_iterations = 2;
 
     /// Per-pixel pass-count floor for the a-trous wavelet, applied alongside the roughness^2 cap.
     RSize atrous_min_passes = 1;

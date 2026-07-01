@@ -26,7 +26,7 @@ class RS_SimulationExecutor {
     RS_SimulationExecutor(
         RS_MemoryProvider *device_provider,
         RS_MemoryProvider *host_provider,
-        RS_WorldCallback callback
+        RS_WorldCallback *callback
     );
 
     void init(RS_Simulation *simulation);
@@ -37,7 +37,7 @@ class RS_SimulationExecutor {
    private:
     RS_MemoryProvider *_device_provider = nullptr;
     RS_MemoryProvider *_host_provider = nullptr;
-    RS_WorldCallback _callback;
+    RS_WorldCallback *_callback = nullptr;
 
     // Cached static execution settings, snapshotted at init. Later user edits to the simulation
     // characterization do not change how this run executes.
@@ -46,7 +46,6 @@ class RS_SimulationExecutor {
     RSize _contact_bvh_rebuild_sub_interval = RS_MAX_SIZE;
     RSize _contact_bvh_refit_sub_interval = RS_MAX_SIZE;
     bool _sentinel_enabled = true;
-    RFloat _sentinel_degenerate_min_dt = 1e-7;
     RSE_FloatType _simulation_compute_accuracy = RSE_FLOAT_32;
 
     // Dynamic per-subsystem run intervals (base-step counts), recomputed by _runDtUpdate whenever

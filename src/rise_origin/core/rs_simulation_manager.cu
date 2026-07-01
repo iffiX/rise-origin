@@ -7,6 +7,7 @@
 
 #include "rise_origin/core/rs_kernel_manager.h"
 #include "rise_origin/core/rs_simulation_executor.h"
+#include "rise_origin/core/rs_world_local_callback.h"
 #include "rise_origin/utils/rs_exception.h"
 #include "rise_origin/utils/rs_iterators.h"
 #include "rise_origin/utils/string/rs_format.h"
@@ -42,7 +43,8 @@ void RS_SimulationManager::free() {
     }
 }
 
-RS_WorldLocalHandle RS_SimulationManager::run(RSC_World world, RS_WorldCallback callback) {
+std::pair<RS_WorldLocalHandle, std::shared_ptr<RS_WorldCallback>>
+RS_SimulationManager::run(RSC_World world) {
     if (executor_thread)
         RS_THROW(
             RS_HostExecutionException("A simulation is already run by the simulation manager.")
@@ -82,15 +84,17 @@ RS_WorldLocalHandle RS_SimulationManager::run(RSC_World world, RS_WorldCallback 
     );
 
     RS_WorldLocalHandle handle(simulation);
+    callback = make_shared<RS_WorldLocalCallback>(world.name);
 
     executor_thread = make_unique<thread>(
-        [this, world = std::move(world), callback = std::move(callback), max_time]() {
-            auto exec = RS_SimulationExecutor(device_provider.get(), host_provider.get(), callback);
+        [this, world = std::move(world), max_time]() {
+            auto exec =
+                RS_SimulationExecutor(device_provider.get(), host_provider.get(), callback.get());
             _runSim(world, exec, max_time);
         }
     );
 
-    return handle;
+    return {handle, callback};
 }
 
 string RS_SimulationManager::_getLogFormatter(const std::string &world_name) {
@@ -320,6 +324,21 @@ void RS_SimulationManager::_syncSimRecorders(const std::shared_ptr<RS_Simulation
                     if (it == camera_perspective_records.end()) return;
                     for (auto &&[camera_name, records] : it->second.camera_records)
                         recorder->syncCameraPerspectiveRecords(camera_name, records);
+                }
+            )
+            .wait();
+
+        auto camera_stereo_records = sim->kernel_manager->getRecorderCameraStereoRecords();
+        thread_pool
+            .submitLoop(
+                0,
+                recorders.size(),
+                [&](RIndex i) {
+                    const auto &recorder = recorders[i];
+                    auto it = camera_stereo_records.find(recorder->getName());
+                    if (it == camera_stereo_records.end()) return;
+                    for (auto &&[camera_name, records] : it->second.camera_records)
+                        recorder->syncCameraStereoRecords(camera_name, records);
                 }
             )
             .wait();

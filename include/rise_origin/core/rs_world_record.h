@@ -5,6 +5,7 @@
 #define RS_WORLD_RECORD_H
 #include <cassert>
 
+#include "rise_origin/core/rs_world_def.h"
 #include "rise_origin/utils/math/rs_color.h"
 #include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
@@ -12,6 +13,15 @@
 #include "rise_origin/utils/rs_conf.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_exception.h"
+
+/**
+ * @note Naming rule for object level member instances under each root:
+ * A member is plural when each row is an independently addressable object indexed
+ * by its own id, such as voxels, links, rigid_bodies, joints, and memberships. A
+ * member is singular when it is one dense buffer or one value, such as rgb, depth,
+ * normal, motion, entity_info, and camera_state. Subrecord types and inner column
+ * pointers are always singular.
+ */
 
 namespace rise {
 
@@ -665,6 +675,112 @@ class RS_WorldCameraRecordBase : public RS_WorldRootRecord {
         }
     };
 
+    struct Depth : public RS_WorldObjectRecord {
+        /// Perpendicular eye-space depth of each pixel in meters
+        float* pixel = nullptr;
+
+        Depth() = default;
+
+        HOST_DEVICE_INLINE_QUALIFIER
+        explicit Depth(float* pixel) : pixel(pixel) {}
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(float));  // pixel
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(pixel, memory, 0);
+            void* end;
+            setPtr(end, pixel, object_num * sizeof(float));
+            return end;
+        }
+    };
+
+    struct Normal : public RS_WorldObjectRecord {
+        /// World-space unit surface normal of each pixel
+        RVec3f* pixel = nullptr;
+
+        Normal() = default;
+
+        HOST_DEVICE_INLINE_QUALIFIER
+        explicit Normal(RVec3f* pixel) : pixel(pixel) {}
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RVec3f));  // pixel
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(pixel, memory, 0);
+            void* end;
+            setPtr(end, pixel, object_num * sizeof(RVec3f));
+            return end;
+        }
+    };
+
+    struct Motion : public RS_WorldObjectRecord {
+        /// Screen-space motion of each pixel normalized by image size
+        RVec2f* pixel = nullptr;
+
+        Motion() = default;
+
+        HOST_DEVICE_INLINE_QUALIFIER
+        explicit Motion(RVec2f* pixel) : pixel(pixel) {}
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RVec2f));  // pixel
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(pixel, memory, 0);
+            void* end;
+            setPtr(end, pixel, object_num * sizeof(RVec2f));
+            return end;
+        }
+    };
+
+    struct EntityInfo : public RS_WorldObjectRecord {
+        /// Entity type of the hit object at each pixel
+        RSE_WorldEntityType* entity_type = nullptr;
+
+        /// Global id of the hit entity at each pixel
+        RIndex* entity_gid = nullptr;
+
+        EntityInfo() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RSE_WorldEntityType)) +  // entity_type
+                   align(object_num * sizeof(RIndex));                // entity_gid
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(entity_type, memory, 0);
+            setPtr(entity_gid, entity_type, object_num * sizeof(RSE_WorldEntityType));
+            void* end;
+            setPtr(end, entity_gid, object_num * sizeof(RIndex));
+            return end;
+        }
+    };
+
     struct State : public RS_WorldObjectRecord {
         RVec3rf* position = nullptr;
 
@@ -724,24 +840,51 @@ class RS_WorldCameraPerspectiveRecord : public RS_WorldCameraRecordBase {
     /// Pixel records, the size of each frame is camera resolution (width * height)
     RGB rgb;
 
+    /// Depth records, the size of each frame is camera resolution (width * height)
+    Depth depth;
+
+    /// Normal records, the size of each frame is camera resolution (width * height)
+    Normal normal;
+
+    /// Motion records, the size of each frame is camera resolution (width * height)
+    Motion motion;
+
+    /// Entity info records, the size of each frame is camera resolution (width * height)
+    EntityInfo entity_info;
+
     /// Camera state records, the size of each frame is 1
     State camera_state;
 
     RS_WorldCameraPerspectiveRecord() = default;
 
-    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize
-    getRequiredMemorySize(RBigSize pixel_object_num, RBigSize camera_state_object_num = 1) {
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+        RBigSize rgb_object_num,
+        RBigSize depth_object_num,
+        RBigSize normal_object_num,
+        RBigSize motion_object_num,
+        RBigSize entity_info_object_num,
+        RBigSize camera_state_object_num = 1
+    ) {
         RBigSize base_size = RS_WorldRootRecord::getRequiredMemorySize();
-        RBigSize pixel_size = RGB::getRequiredMemorySize(pixel_object_num);
+        RBigSize rgb_size = RGB::getRequiredMemorySize(rgb_object_num);
+        RBigSize depth_size = Depth::getRequiredMemorySize(depth_object_num);
+        RBigSize normal_size = Normal::getRequiredMemorySize(normal_object_num);
+        RBigSize motion_size = Motion::getRequiredMemorySize(motion_object_num);
+        RBigSize entity_info_size = EntityInfo::getRequiredMemorySize(entity_info_object_num);
         RBigSize camera_state_size = State::getRequiredMemorySize(camera_state_object_num);
-        RBigSize total_size = base_size + pixel_size + camera_state_size;
+        RBigSize total_size = base_size + rgb_size + depth_size + normal_size + motion_size +
+                              entity_info_size + camera_state_size;
 
 #ifdef RS_DEBUG_ENABLE_WORLD_RECORD
         printf(
-            "Required memory sizes:\n  Base: %u\n  Pixel: %u\n  Camera State: %u\nTotal "
-            "required size: %u\n",
+            "Required memory sizes:\n  Base: %u\n  RGB: %u\n  Depth: %u\n  Normal: %u\n  "
+            "Motion: %u\n  Entity Info: %u\n  Camera State: %u\nTotal required size: %u\n",
             static_cast<unsigned int>(base_size),
-            static_cast<unsigned int>(pixel_size),
+            static_cast<unsigned int>(rgb_size),
+            static_cast<unsigned int>(depth_size),
+            static_cast<unsigned int>(normal_size),
+            static_cast<unsigned int>(motion_size),
+            static_cast<unsigned int>(entity_info_size),
             static_cast<unsigned int>(camera_state_size),
             static_cast<unsigned int>(total_size)
         );
@@ -750,8 +893,15 @@ class RS_WorldCameraPerspectiveRecord : public RS_WorldCameraRecordBase {
         return total_size;
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER void*
-    initFromMemory(void* memory, RBigSize pixel_object_num, RBigSize camera_state_object_num = 1) {
+    HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
+        void* memory,
+        RBigSize rgb_object_num,
+        RBigSize depth_object_num,
+        RBigSize normal_object_num,
+        RBigSize motion_object_num,
+        RBigSize entity_info_object_num,
+        RBigSize camera_state_object_num = 1
+    ) {
         is_valid = true;
 
 #ifdef RS_DEBUG_ENABLE_WORLD_RECORD
@@ -760,9 +910,26 @@ class RS_WorldCameraPerspectiveRecord : public RS_WorldCameraRecordBase {
         memory = RS_WorldRootRecord::initFromMemory(memory);
         RBigSize base_size = static_cast<char*>(memory) - static_cast<char*>(base_start);
 
-        void* pixel_start = memory;
-        memory = rgb.initFromMemory(memory, pixel_object_num);
-        RBigSize pixel_size = static_cast<char*>(memory) - static_cast<char*>(pixel_start);
+        void* rgb_start = memory;
+        memory = rgb.initFromMemory(memory, rgb_object_num);
+        RBigSize rgb_size = static_cast<char*>(memory) - static_cast<char*>(rgb_start);
+
+        void* depth_start = memory;
+        memory = depth.initFromMemory(memory, depth_object_num);
+        RBigSize depth_size = static_cast<char*>(memory) - static_cast<char*>(depth_start);
+
+        void* normal_start = memory;
+        memory = normal.initFromMemory(memory, normal_object_num);
+        RBigSize normal_size = static_cast<char*>(memory) - static_cast<char*>(normal_start);
+
+        void* motion_start = memory;
+        memory = motion.initFromMemory(memory, motion_object_num);
+        RBigSize motion_size = static_cast<char*>(memory) - static_cast<char*>(motion_start);
+
+        void* entity_info_start = memory;
+        memory = entity_info.initFromMemory(memory, entity_info_object_num);
+        RBigSize entity_info_size =
+            static_cast<char*>(memory) - static_cast<char*>(entity_info_start);
 
         void* camera_state_start = memory;
         memory = camera_state.initFromMemory(memory, camera_state_object_num);
@@ -772,18 +939,130 @@ class RS_WorldCameraPerspectiveRecord : public RS_WorldCameraRecordBase {
         RBigSize total_size = static_cast<char*>(memory) - static_cast<char*>(start_memory);
 
         printf(
-            "Occupied memory sizes:\n  Base: %u\n  Pixel: %u\n  Camera State: %u\nTotal "
-            "occupied size: %u\n",
+            "Occupied memory sizes:\n  Base: %u\n  RGB: %u\n  Depth: %u\n  Normal: %u\n  "
+            "Motion: %u\n  Entity Info: %u\n  Camera State: %u\nTotal occupied size: %u\n",
             static_cast<unsigned int>(base_size),
-            static_cast<unsigned int>(pixel_size),
+            static_cast<unsigned int>(rgb_size),
+            static_cast<unsigned int>(depth_size),
+            static_cast<unsigned int>(normal_size),
+            static_cast<unsigned int>(motion_size),
+            static_cast<unsigned int>(entity_info_size),
             static_cast<unsigned int>(camera_state_size),
             static_cast<unsigned int>(total_size)
         );
 #else
         memory = RS_WorldRootRecord::initFromMemory(memory);
-        memory = rgb.initFromMemory(memory, pixel_object_num);
+        memory = rgb.initFromMemory(memory, rgb_object_num);
+        memory = depth.initFromMemory(memory, depth_object_num);
+        memory = normal.initFromMemory(memory, normal_object_num);
+        memory = motion.initFromMemory(memory, motion_object_num);
+        memory = entity_info.initFromMemory(memory, entity_info_object_num);
         memory = camera_state.initFromMemory(memory, camera_state_object_num);
 #endif
+
+        return memory;
+    }
+};
+
+class RS_WorldCameraStereoRecord : public RS_WorldCameraRecordBase {
+   public:
+    /// Camera global id
+    RIndex camera_gid = RS_NULL_INDEX;
+
+    /// Linked structure gid
+    RIndex structure_gid = RS_NULL_INDEX;
+
+    /// Linked rigid body sid
+    RIndex rigid_body_sid = RS_NULL_INDEX;
+
+    /// Per-eye image width
+    RSize width = 0;
+
+    /// Per-eye image height
+    RSize height = 0;
+
+    /// Left eye pixel records, the size of each frame is camera resolution (width * height)
+    RGB left_rgb;
+
+    /// Right eye pixel records, the size of each frame is camera resolution (width * height)
+    RGB right_rgb;
+
+    /// Left eye depth records, the size of each frame is camera resolution (width * height)
+    Depth left_depth;
+
+    /// Right eye depth records, the size of each frame is camera resolution (width * height)
+    Depth right_depth;
+
+    /// Left eye normal records, the size of each frame is camera resolution (width * height)
+    Normal left_normal;
+
+    /// Right eye normal records, the size of each frame is camera resolution (width * height)
+    Normal right_normal;
+
+    /// Left eye motion records, the size of each frame is camera resolution (width * height)
+    Motion left_motion;
+
+    /// Right eye motion records, the size of each frame is camera resolution (width * height)
+    Motion right_motion;
+
+    /// Left eye entity info records, the size of each frame is camera resolution (width * height)
+    EntityInfo left_entity_info;
+
+    /// Right eye entity info records, the size of each frame is camera resolution (width * height)
+    EntityInfo right_entity_info;
+
+    /// Left eye camera state records, the size of each frame is 1
+    State left_camera_state;
+
+    /// Right eye camera state records, the size of each frame is 1
+    State right_camera_state;
+
+    RS_WorldCameraStereoRecord() = default;
+
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+        RBigSize rgb_object_num,
+        RBigSize depth_object_num,
+        RBigSize normal_object_num,
+        RBigSize motion_object_num,
+        RBigSize entity_info_object_num,
+        RBigSize camera_state_object_num = 1
+    ) {
+        RBigSize base_size = RS_WorldRootRecord::getRequiredMemorySize();
+        RBigSize rgb_size = RGB::getRequiredMemorySize(rgb_object_num);
+        RBigSize depth_size = Depth::getRequiredMemorySize(depth_object_num);
+        RBigSize normal_size = Normal::getRequiredMemorySize(normal_object_num);
+        RBigSize motion_size = Motion::getRequiredMemorySize(motion_object_num);
+        RBigSize entity_info_size = EntityInfo::getRequiredMemorySize(entity_info_object_num);
+        RBigSize camera_state_size = State::getRequiredMemorySize(camera_state_object_num);
+        // Two eyes: every subrecord, including camera state, is stored once per eye.
+        return base_size + 2 * (rgb_size + depth_size + normal_size + motion_size +
+                                entity_info_size + camera_state_size);
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
+        void* memory,
+        RBigSize rgb_object_num,
+        RBigSize depth_object_num,
+        RBigSize normal_object_num,
+        RBigSize motion_object_num,
+        RBigSize entity_info_object_num,
+        RBigSize camera_state_object_num = 1
+    ) {
+        is_valid = true;
+
+        memory = RS_WorldRootRecord::initFromMemory(memory);
+        memory = left_rgb.initFromMemory(memory, rgb_object_num);
+        memory = right_rgb.initFromMemory(memory, rgb_object_num);
+        memory = left_depth.initFromMemory(memory, depth_object_num);
+        memory = right_depth.initFromMemory(memory, depth_object_num);
+        memory = left_normal.initFromMemory(memory, normal_object_num);
+        memory = right_normal.initFromMemory(memory, normal_object_num);
+        memory = left_motion.initFromMemory(memory, motion_object_num);
+        memory = right_motion.initFromMemory(memory, motion_object_num);
+        memory = left_entity_info.initFromMemory(memory, entity_info_object_num);
+        memory = right_entity_info.initFromMemory(memory, entity_info_object_num);
+        memory = left_camera_state.initFromMemory(memory, camera_state_object_num);
+        memory = right_camera_state.initFromMemory(memory, camera_state_object_num);
 
         return memory;
     }

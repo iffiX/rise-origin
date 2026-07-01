@@ -9,6 +9,7 @@
 #endif
 
 #include <memory>
+#include <utility>
 
 #include "rise_origin/core/rs_world_callback.h"
 #include "rise_origin/core/rs_world_handle.h"
@@ -43,13 +44,21 @@ class RiseOrigin {
     /**
      * @brief Say hello to the world.
      *
-     * @param world Root world config describing all entities, essences, resources,
+     * @param world World characterization describing all entities, essences, resources,
      *              etc that should exist before time starts.
-     * @param callback Optional callback for control & modification of the world.
-     * @return Shared pointer to the world handle.
+     * @return The world handle and the rebindable world callback the engine drives each step.
      */
-    std::shared_ptr<RS_WorldHandle>
-    hello(const rsc::RSC_World &world, RS_WorldCallback callback = {});
+    std::pair<std::shared_ptr<RS_WorldHandle>, std::shared_ptr<RS_WorldCallback>>
+    hello(const rsc::RSC_World &world);
+
+    /**
+     * @brief Connect to a world running on an already-launched remote instance.
+     *
+     * @param url Address of the remote instance hosting the world.
+     * @return The world handle and the rebindable world callback the engine drives each step.
+     */
+    std::pair<std::shared_ptr<RS_WorldHandle>, std::shared_ptr<RS_WorldCallback>>
+    connect(const std::string &url);
 
    private:
     std::shared_ptr<RiseOriginImpl> _rise_impl = nullptr;

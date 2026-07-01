@@ -74,63 +74,24 @@ class RSPY_RiseOrigin {
         }
     }
 
-    RSPY_WorldHandle hello(const rsc::RSC_World &world, py::object py_callback = py::none()) {
+    std::pair<RSPY_WorldHandle, RSPY_WorldCallback> hello(const rsc::RSC_World &world) {
         std::lock_guard lock(_simulation_mutex);
 
         size_t current_job_idx = _job_counter++;
 
-        if (!py_callback.is_none()) {
-            _callbacks[current_job_idx] = py_callback;
-        }
-
-        RS_WorldCallback cxx_cb;
-        if (!py_callback.is_none()) {
-            cxx_cb = [this, current_job_idx](
-                         const std::string &name,
-                         RBigFloat time,
-                         std::vector<RS_WorldController> controllers
-                     ) {
-                py::gil_scoped_acquire gil;
-
-                py::object callback_obj;
-                {
-                    std::lock_guard lock(this->_simulation_mutex);
-                    auto it = this->_callbacks.find(current_job_idx);
-                    if (it != this->_callbacks.end()) {
-                        callback_obj = it->second;
-                    } else {
-                        print("Error: the handles are cleaned up, skipping callback\n");
-                        return;
-                    }
-                }
-
-                py::list controllers_list;
-                for (auto &controller : controllers) {
-                    controllers_list.append(RSPY_WorldController(controller));
-                }
-
-                try {
-                    py::cast<py::function>(callback_obj)(name, time, controllers_list);
-                } catch (const py::error_already_set &e) {
-                    print("Exception in world callback: {}", e.what());
-                }
-            };
-        }
-
-        auto handle = _rise_origin.hello(world, cxx_cb);
+        auto [handle, callback] = _rise_origin.hello(world);
 
         _job_handles[current_job_idx] = handle;
 
         _cleanup_queue.push(current_job_idx);
         _cleanup_cv.notify_one();
 
-        return RSPY_WorldHandle(handle);
+        return {RSPY_WorldHandle(handle), RSPY_WorldCallback(callback)};
     }
 
    private:
     RiseOrigin _rise_origin;
     std::mutex _simulation_mutex;
-    std::unordered_map<size_t, py::object> _callbacks;
     std::map<size_t, std::shared_ptr<RS_WorldHandle>> _job_handles;
     std::atomic<size_t> _job_counter{0};
     std::unique_ptr<std::thread> _cleanup_thread;
@@ -174,7 +135,6 @@ class RSPY_RiseOrigin {
             {
                 std::lock_guard sim_lock(_simulation_mutex);
                 py::gil_scoped_acquire gil;
-                _callbacks.erase(job_idx);
                 _job_handles.erase(job_idx);
             }
         }
@@ -194,9 +154,9 @@ PYBIND11_MODULE(_core, m) {
 
         Usage::
 
-            world = RSC_World(["config.xml"])
+            world = RSC_World()
             r = RiseOrigin()
-            handle = r.hello(world)
+            handle, callback = r.hello(world)
             # World is yours
     )doc"
     )
@@ -225,17 +185,15 @@ PYBIND11_MODULE(_core, m) {
             "hello",
             &RSPY_RiseOrigin::hello,
             py::arg("world"),
-            py::arg("callback") = py::none(),
             R"doc(
             Say hello to the world.
 
             Args:
-                world: Root world config describing all entities, essences, resources,
+                world: World characterization describing all entities, essences, resources,
                        etc that should exist before time starts.
-                callback: Optional callback for control and modification of the world.
 
             Returns:
-                The world handle.
+                A tuple of the world handle and the rebindable world callback.
         )doc"
         );
 }

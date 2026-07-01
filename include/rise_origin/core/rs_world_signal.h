@@ -10,6 +10,15 @@
 #include "rise_origin/utils/rs_conf.h"
 #include "rise_origin/utils/rs_def.h"
 
+/**
+ * @note Naming rule for object level member instances under each root:
+ * A member is plural when each row is an independently addressable signal slot
+ * selected by its own sid, so every signal member carries the plural
+ * <aspect>_signals suffix such as position_signals and force_signals. A member is
+ * singular when it is one dense buffer or one value. Subsignal types and inner
+ * column pointers are always singular.
+ */
+
 namespace rise {
 
 namespace world_signal_helper {
@@ -330,23 +339,26 @@ class RS_WorldCameraSignalBase : public RS_WorldRootSignal {
         Optics() = default;
 
         [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
-            RBigSize object_num = 1
+            RBigSize focus_distance_num = 1,
+            RBigSize field_of_view_num = 1
         ) {
             using namespace world_signal_helper;
-            return align(object_num * sizeof(RFloat)) +  // focus_distance
-                   align(object_num * sizeof(RFloat));   // field_of_view
+            return align(focus_distance_num * sizeof(RFloat)) +  // focus_distance
+                   align(field_of_view_num * sizeof(RFloat));    // field_of_view
         }
 
-        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num = 1) {
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
+            void* memory, RBigSize focus_distance_num = 1, RBigSize field_of_view_num = 1
+        ) {
             using namespace world_signal_helper;
 
-            RS_WorldObjectSignal::initFromMemory(memory, object_num);
+            RS_WorldObjectSignal::initFromMemory(memory, field_of_view_num);
 
             setPtr(focus_distance, memory, 0);
-            setPtr(field_of_view, focus_distance, object_num * sizeof(RFloat));
+            setPtr(field_of_view, focus_distance, focus_distance_num * sizeof(RFloat));
 
             void* end;
-            setPtr(end, field_of_view, object_num * sizeof(RFloat));
+            setPtr(end, field_of_view, field_of_view_num * sizeof(RFloat));
             return end;
         }
     };
@@ -376,7 +388,7 @@ class RS_WorldCameraPerspectiveSignal : public RS_WorldCameraSignalBase {
         RBigSize base_size = RS_WorldRootSignal::getRequiredMemorySize();
         RBigSize position_size = Position::getRequiredMemorySize(position_num);
         RBigSize orientation_size = Orientation::getRequiredMemorySize(orientation_num);
-        RBigSize optics_size = Optics::getRequiredMemorySize(optics_num);
+        RBigSize optics_size = Optics::getRequiredMemorySize(optics_num, optics_num);
 
         RBigSize total_size = base_size + position_size + orientation_size + optics_size;
 #ifdef RS_DEBUG_ENABLE_WORLD_SIGNAL
@@ -418,7 +430,7 @@ class RS_WorldCameraPerspectiveSignal : public RS_WorldCameraSignalBase {
             static_cast<char*>(memory) - static_cast<char*>(orientation_start);
 
         void* optics_start = memory;
-        memory = optics_signals.initFromMemory(memory, optics_num);
+        memory = optics_signals.initFromMemory(memory, optics_num, optics_num);
         RBigSize optics_size = static_cast<char*>(memory) - static_cast<char*>(optics_start);
 
         RBigSize total_size = static_cast<char*>(memory) - static_cast<char*>(start_memory);
@@ -436,8 +448,67 @@ class RS_WorldCameraPerspectiveSignal : public RS_WorldCameraSignalBase {
         memory = RS_WorldRootSignal::initFromMemory(memory);
         memory = position_signals.initFromMemory(memory, position_num);
         memory = orientation_signals.initFromMemory(memory, orientation_num);
-        memory = optics_signals.initFromMemory(memory, optics_num);
+        memory = optics_signals.initFromMemory(memory, optics_num, optics_num);
 #endif
+
+        return memory;
+    }
+};
+
+class RS_WorldCameraStereoSignal : public RS_WorldCameraSignalBase {
+   public:
+    /// Camera global id
+    RIndex camera_gid = RS_NULL_INDEX;
+
+    /// Left eye position signals
+    Position left_position_signals;
+
+    /// Right eye position signals
+    Position right_position_signals;
+
+    /// Left eye orientation signals
+    Orientation left_orientation_signals;
+
+    /// Right eye orientation signals
+    Orientation right_orientation_signals;
+
+    /// Left eye frustum signals; the four field of view entries are ordered left, right, up, down
+    Optics left_optics_signals;
+
+    /// Right eye frustum signals; the four field of view entries are ordered left, right, up, down
+    Optics right_optics_signals;
+
+    RS_WorldCameraStereoSignal() = default;
+
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+        RBigSize position_num = 1,
+        RBigSize orientation_num = 1,
+        RBigSize field_of_view_num = 4
+    ) {
+        RBigSize base_size = RS_WorldRootSignal::getRequiredMemorySize();
+        RBigSize position_size = Position::getRequiredMemorySize(position_num);
+        RBigSize orientation_size = Orientation::getRequiredMemorySize(orientation_num);
+        // A stereo eye stores no focus distance, only the four frustum angles.
+        RBigSize optics_size = Optics::getRequiredMemorySize(0, field_of_view_num);
+        // Two eyes: every arm is stored once per eye.
+        return base_size + 2 * (position_size + orientation_size + optics_size);
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
+        void* memory,
+        RBigSize position_num = 1,
+        RBigSize orientation_num = 1,
+        RBigSize field_of_view_num = 4
+    ) {
+        is_valid = true;
+
+        memory = RS_WorldRootSignal::initFromMemory(memory);
+        memory = left_position_signals.initFromMemory(memory, position_num);
+        memory = right_position_signals.initFromMemory(memory, position_num);
+        memory = left_orientation_signals.initFromMemory(memory, orientation_num);
+        memory = right_orientation_signals.initFromMemory(memory, orientation_num);
+        memory = left_optics_signals.initFromMemory(memory, 0, field_of_view_num);
+        memory = right_optics_signals.initFromMemory(memory, 0, field_of_view_num);
 
         return memory;
     }

@@ -380,7 +380,7 @@ inline void initRSPYRSC(py::module &m) {
 
     rspyRSC<RSC_SignalBase, RSC_Base>(m, "RSC_SignalBase")
         .def_readwrite("name", &RSC_SignalBase::name)
-        .def_readwrite("source_controller_name", &RSC_SignalBase::source_controller_name);
+        .def_readwrite("source_controller_reference", &RSC_SignalBase::source_controller_reference);
 
     rspyRSC<RSC_RecorderBase, RSC_Base>(m, "RSC_RecorderBase")
         .def_readwrite("name", &RSC_RecorderBase::name);
@@ -973,7 +973,16 @@ inline void initRSPYRSC(py::module &m) {
         .def(py::init<>())
         .def_readwrite("has_rgb", &RSC_CameraPerspectiveRecord::has_rgb)
         .def_readwrite("has_depth", &RSC_CameraPerspectiveRecord::has_depth)
-        .def_readwrite("has_entity_info", &RSC_CameraPerspectiveRecord::has_entity_info);
+        .def_readwrite("has_normal", &RSC_CameraPerspectiveRecord::has_normal)
+        .def_readwrite("has_motion", &RSC_CameraPerspectiveRecord::has_motion)
+        .def_readwrite("has_entity_info", &RSC_CameraPerspectiveRecord::has_entity_info)
+        .def_readwrite("is_depth_hyperbolic", &RSC_CameraPerspectiveRecord::is_depth_hyperbolic)
+        .def_readwrite(
+            "hyperbolic_near_depth", &RSC_CameraPerspectiveRecord::hyperbolic_near_depth
+        )
+        .def_readwrite(
+            "hyperbolic_far_depth", &RSC_CameraPerspectiveRecord::hyperbolic_far_depth
+        );
 
     rspyRSC<RSC_CameraPerspectiveSignal, RSC_SignalBase>(m, "RSC_CameraPerspectiveSignal")
         .def(py::init<>())
@@ -1011,6 +1020,52 @@ inline void initRSPYRSC(py::module &m) {
         .def_readwrite("relative_anchor", &RSC_CameraPerspectiveRigidBodyLinked::relative_anchor)
         .def_readwrite(
             "relative_orientation", &RSC_CameraPerspectiveRigidBodyLinked::relative_orientation
+        );
+
+    rspyRSC<RSC_CameraStereoRecord, RSC_RecordBase>(m, "RSC_CameraStereoRecord")
+        .def(py::init<>())
+        .def_readwrite("has_rgb", &RSC_CameraStereoRecord::has_rgb)
+        .def_readwrite("has_depth", &RSC_CameraStereoRecord::has_depth)
+        .def_readwrite("has_normal", &RSC_CameraStereoRecord::has_normal)
+        .def_readwrite("has_motion", &RSC_CameraStereoRecord::has_motion)
+        .def_readwrite("has_entity_info", &RSC_CameraStereoRecord::has_entity_info)
+        .def_readwrite("is_depth_hyperbolic", &RSC_CameraStereoRecord::is_depth_hyperbolic)
+        .def_readwrite("hyperbolic_near_depth", &RSC_CameraStereoRecord::hyperbolic_near_depth)
+        .def_readwrite("hyperbolic_far_depth", &RSC_CameraStereoRecord::hyperbolic_far_depth);
+
+    rspyRSC<RSC_CameraStereoSignal, RSC_SignalBase>(m, "RSC_CameraStereoSignal").def(py::init<>());
+
+    rspyRSC<RSC_CameraStereoBase, RSC_CameraBase>(m, "RSC_CameraStereoBase")
+        .def_readwrite("image_width", &RSC_CameraStereoBase::image_width)
+        .def_readwrite("image_height", &RSC_CameraStereoBase::image_height)
+        .def_readwrite("samples_per_pixel", &RSC_CameraStereoBase::samples_per_pixel)
+        .def_readwrite("max_depth", &RSC_CameraStereoBase::max_depth)
+        .def_readwrite(
+            "interpupillary_distance", &RSC_CameraStereoBase::interpupillary_distance
+        )
+        .def_readwrite("convergence_distance", &RSC_CameraStereoBase::convergence_distance)
+        .def_readwrite("angle_left", &RSC_CameraStereoBase::angle_left)
+        .def_readwrite("angle_right", &RSC_CameraStereoBase::angle_right)
+        .def_readwrite("angle_up", &RSC_CameraStereoBase::angle_up)
+        .def_readwrite("angle_down", &RSC_CameraStereoBase::angle_down)
+        .def_readwrite("record", &RSC_CameraStereoBase::record)
+        .def_readwrite("signal", &RSC_CameraStereoBase::signal);
+
+    rspyRSC<RSC_CameraStereoFree, RSC_CameraStereoBase>(m, "RSC_CameraStereoFree")
+        .def(py::init<>())
+        .def_readwrite("origin_position", &RSC_CameraStereoFree::origin_position)
+        .def_readwrite("orientation", &RSC_CameraStereoFree::orientation);
+
+    rspyRSC<RSC_CameraStereoRigidBodyLinked, RSC_CameraStereoBase>(
+        m, "RSC_CameraStereoRigidBodyLinked"
+    )
+        .def(py::init<>())
+        .def_readwrite("structure_name", &RSC_CameraStereoRigidBodyLinked::structure_name)
+        .def_readwrite("body_sid", &RSC_CameraStereoRigidBodyLinked::body_sid)
+        .def_readwrite("segment_bid", &RSC_CameraStereoRigidBodyLinked::segment_bid)
+        .def_readwrite("relative_anchor", &RSC_CameraStereoRigidBodyLinked::relative_anchor)
+        .def_readwrite(
+            "relative_orientation", &RSC_CameraStereoRigidBodyLinked::relative_orientation
         );
 
     /***************************************************************

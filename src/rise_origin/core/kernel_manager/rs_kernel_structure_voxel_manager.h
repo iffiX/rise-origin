@@ -261,7 +261,7 @@ class RS_KernelStructureVoxelManager {
 
     /**
      * @brief Name of the controller that drives this structure's signal
-     *        (signal.source_controller_name).
+     *        (signal.source_controller_reference).
      */
     std::string getSignalControllerName() const;
 

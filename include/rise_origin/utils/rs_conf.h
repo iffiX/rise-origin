@@ -101,6 +101,17 @@
 #define RS_WORLD_VISION_TRACE_MAX_DEPTH 64
 #endif
 
+// Reserved GIDs.
+#ifndef RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
+#define RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM 1000
+#endif
+#ifndef RS_WORLD_RSC_COSMIC_BACKGROUND_GID
+#define RS_WORLD_RSC_COSMIC_BACKGROUND_GID 0
+#endif
+#ifndef RS_WORLD_RSC_FLOOR_GID
+#define RS_WORLD_RSC_FLOOR_GID 1
+#endif
+
 // Per-structure-voxel limits.
 /// Hard limit on total bodies, set by the 20-bit body_sid contact filter field.
 #ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM

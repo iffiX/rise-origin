@@ -23,14 +23,14 @@ class RSC_SignalBase : public RSC_Base {
     std::string name;
 
     /// Name of the controller that produces this signal's values.
-    std::string source_controller_name;
+    std::string source_controller_reference;
 
     bool operator==(const RSC_SignalBase& other) const;
 
     template <typename Serializer>
     void serialize(Serializer& s) {
         s("name", name);
-        s("source_controller_name", source_controller_name);
+        s("source_controller_reference", source_controller_reference);
     }
 
    protected:

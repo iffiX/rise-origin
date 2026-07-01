@@ -4,6 +4,7 @@
 #ifndef RS_SIMULATION_MANAGER
 #define RS_SIMULATION_MANAGER
 
+#include <utility>
 #include <vector>
 
 #include "rise_origin/core/rs_simulation.h"
@@ -30,6 +31,7 @@ class RS_SimulationManager {
     std::shared_ptr<RS_Simulation> simulation;
     std::shared_ptr<RS_MemoryProvider> host_provider;
     std::shared_ptr<RS_MemoryProvider> device_provider;
+    std::shared_ptr<RS_WorldCallback> callback;
 
     /*****************************************************************
      * Methods
@@ -52,12 +54,12 @@ class RS_SimulationManager {
     /**
      * @brief Run a world.
      * @param world The world characterization defining the simulation.
-     * @param callback World callback for control & modification of the running world.
+     * @return The world handle and the rebindable world callback the engine drives each step.
      * @note Execution settings (time stepping, record buffer size, max time, save flag,
      *       compute/memory accuracy) are read from world.simulation.
      * @note world must be validated before used by RS_SimulationManager.
      */
-    RS_WorldLocalHandle run(rsc::RSC_World world, RS_WorldCallback callback = {});
+    std::pair<RS_WorldLocalHandle, std::shared_ptr<RS_WorldCallback>> run(rsc::RSC_World world);
 
    private:
     // Initialized in init()

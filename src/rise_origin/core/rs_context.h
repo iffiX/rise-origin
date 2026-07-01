@@ -17,7 +17,9 @@
 #include "rise_origin/device/data/rs_sparse.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/logic/mesh/rs_mesh_triangle_m.h"
+#include "rise_origin/logic/record/rs_camera_record_m.h"
 #include "rise_origin/logic/record/rs_intersect_region_m.h"
+#include "rise_origin/logic/signal/rs_camera_signal_m.h"
 #include "rise_origin/logic/rigid/rs_constraint_m.h"
 #include "rise_origin/logic/rigid/rs_contact_m.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_m.h"
@@ -100,7 +102,11 @@ struct RS_ContextHostData {
     RS_CompactLayout camera_info_ray_layout;
     RS_CompactLayout camera_rgb_ray_layout;
     RS_CompactLayout camera_record_layout;
-    RS_CompactLayout camera_pixel_record_layout;
+    RS_CompactLayout camera_rgb_record_layout;
+    RS_CompactLayout camera_depth_record_layout;
+    RS_CompactLayout camera_normal_record_layout;
+    RS_CompactLayout camera_motion_record_layout;
+    RS_CompactLayout camera_entity_info_record_layout;
     RS_CompactLayout camera_state_record_layout;
 
     // Camera signal layout
@@ -238,7 +244,7 @@ struct RS_Context {
 
     // Camera data.
     device::RS_Vector<CameraMemType> cameras;
-    device::RS_Vector<RS_WorldCameraPerspectiveRecord> camera_records;
+    device::RS_Vector<logic::RS_CameraRecordMem> camera_records;
     device::RS_Vector<device::RS_DoubleBuffer> camera_recorder_buffers;
     device::RS_Vector<device::RS_DirectBuffer> camera_controller_buffers;
     device::RS_Vector<logic::RS_CameraRGBCanvas> camera_current_rgb_canvas;
@@ -276,18 +282,24 @@ struct RS_Context {
     device::RS_Vector<logic::RS_CameraDenoiserColorHistory> camera_denoiser_color_history;
     device::RS_Vector<logic::RS_CameraDenoiserMomentHistory> camera_denoiser_moment_history;
     device::RS_Vector<logic::RS_CameraDenoiserHistoryLength> camera_denoiser_history_length;
-    device::RS_Vector<logic::RS_CameraDenoiserVariance> camera_denoiser_variance;
     device::RS_Vector<logic::RS_CameraDenoiserColorHistory> camera_prev_denoiser_color_history;
     device::RS_Vector<logic::RS_CameraDenoiserMomentHistory> camera_prev_denoiser_moment_history;
     device::RS_Vector<logic::RS_CameraDenoiserHistoryLength> camera_prev_denoiser_history_length;
+    /// SVGF variance propagation (ping-pong scratch across a-trous passes).
+    device::RS_Vector<logic::RS_CameraDenoiserVariance> camera_denoiser_variance;
+    device::RS_Vector<logic::RS_CameraDenoiserVariance> camera_next_denoiser_variance;
 
-    device::RS_Array<RS_WorldCameraPerspectiveSignal, 1> camera_signals;
+    device::RS_Array<logic::RS_CameraSignalMem, 1> camera_signals;
 
     device::RS_DeviceLayout camera_layout;
     device::RS_DeviceLayout camera_info_ray_layout;
     device::RS_DeviceLayout camera_rgb_ray_layout;
     device::RS_DeviceLayout camera_record_layout;
-    device::RS_DeviceLayout camera_pixel_record_layout;
+    device::RS_DeviceLayout camera_rgb_record_layout;
+    device::RS_DeviceLayout camera_depth_record_layout;
+    device::RS_DeviceLayout camera_normal_record_layout;
+    device::RS_DeviceLayout camera_motion_record_layout;
+    device::RS_DeviceLayout camera_entity_info_record_layout;
     device::RS_DeviceLayout camera_state_record_layout;
     device::RS_DeviceLayout camera_signal_layout;
 

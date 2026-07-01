@@ -256,7 +256,7 @@ def build():
         bodies=bodies,
         constraints=constraints,
         signal=rsc.entity.StructureVoxelSignal(
-            "quadruped#signal", source_controller_name=CONTROLLER, hinge_signal_num=8
+            "quadruped#signal", source_controller_reference=CONTROLLER, hinge_signal_num=8
         ),
     )
 
@@ -289,7 +289,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Drive a diagonal trot and capture the on-board camera frame.
 
     Front-left and back-right share a phase; the other diagonal is offset by pi.
@@ -314,7 +314,7 @@ def control(world_name, time, controllers):
     for record in controller.records():
         if isinstance(record, RS_WorldCameraPerspectiveRecord):
             if record.is_valid() and record.width() > 0:
-                _robot_frame = np.array(record.rgb.pixels(), copy=True)
+                _robot_frame = np.array(record.rgb.pixel(), copy=True)
 
 
 def hud(painter, viewer):

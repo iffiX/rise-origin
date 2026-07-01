@@ -58,6 +58,19 @@ target_compile_options(rise_origin_core PUBLIC ${RISE_DEVICE_OPTIONS}
         $<$<AND:$<COMPILE_LANGUAGE:CXX>,$<NOT:$<CXX_COMPILER_ID:MSVC>>>:-O3 -ffast-math ${RISE_CPU_ARCH_FLAG}>)
 
 ################################################################
+# VR session component: OpenXR + Vulkan
+################################################################
+# The VR component (rs_world_session_component_vr.cu) compiles to nothing unless
+# this macro is set, mirroring the device-backend gating, so the default build
+# carries no OpenXR or Vulkan dependency.
+if (RISE_ORIGIN_BUILD_CORE_WITH_VR)
+    target_compile_definitions(rise_origin_core PUBLIC RISE_ORIGIN_BUILD_CORE_WITH_VR)
+    target_compile_definitions(rise_origin_core PRIVATE
+        RS_VR_HUD_FONT_PATH="${CMAKE_SOURCE_DIR}/lib/imgui/font/rajdhani/Rajdhani-Medium.ttf")
+    target_link_libraries(rise_origin_core PUBLIC openxr_loader Vulkan::Vulkan imgui)
+endif ()
+
+################################################################
 # MSVC + nvcc conformance flags
 ################################################################
 # MSVC needs explicit math constants, no Windows.h min/max macros, no Windows.h

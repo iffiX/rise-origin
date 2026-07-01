@@ -380,7 +380,7 @@ def _make_table():
         constraints=constraints,
         signal=rsc.entity.StructureVoxelSignal(
             "table#signal",
-            source_controller_name=CONTROLLER,
+            source_controller_reference=CONTROLLER,
             hinge_signal_num=2,
             prismatic_signal_num=1,
         ),
@@ -497,7 +497,7 @@ def _respawn(viewer):
 # ---------------------------------------------------------------------------
 # Runtime callbacks
 # ---------------------------------------------------------------------------
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Drive the piston and flippers, and watch the drain region for a lost ball."""
     controller = _common.controller_by_name(controllers, CONTROLLER)
     if controller is None:

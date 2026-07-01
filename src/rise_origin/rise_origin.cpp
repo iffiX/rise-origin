@@ -56,8 +56,8 @@ class RiseOriginImpl {
         }
     }
 
-    [[nodiscard]] std::shared_ptr<RS_WorldHandle>
-    hello(RSC_World &&world, RS_WorldCallback &&callback) {
+    [[nodiscard]] std::pair<std::shared_ptr<RS_WorldHandle>, std::shared_ptr<RS_WorldCallback>>
+    hello(RSC_World &&world) {
         sim_manager_mutex.lock();
 
         auto log_level = parseLogLevel(world.simulation->runtime.log_level);
@@ -67,11 +67,12 @@ class RiseOriginImpl {
             logger->sinks().emplace_back(make_shared<logging::sinks::stdout_color_sink_mt>());
         }
         logging::get("root")->set_level(log_level);
+        _logGreeting(logging::get("root"), world, local_device);
         sim_manager = new RS_SimulationManager(local_device);
 
         sim_manager->init();
 
-        auto local_handle = sim_manager->run(std::move(world), std::move(callback));
+        auto [local_handle, callback] = sim_manager->run(std::move(world));
 
         auto handle = std::make_shared<RS_WorldLocalHandle>(local_handle);
         world_handle = handle;
@@ -84,7 +85,48 @@ class RiseOriginImpl {
             sim_manager_mutex.unlock();
         }));
 
-        return handle;
+        return {handle, callback};
+    }
+
+    // Draw a login-style greeting once when a world is welcomed locally. It goes through the
+    // logger so it inherits the same sink and color handling, with a raw message pattern and a
+    // forced visible level so the cube and the hello signature always show.
+    static void _logGreeting(
+        const std::shared_ptr<logging::logger> &logger,
+        const RSC_World &world,
+        const RS_DeviceLocation &device
+    ) {
+        if (!logger) return;
+
+        const std::string blue = "\033[38;5;75m";
+        const std::string bold = "\033[1;97m";
+        const std::string dim = "\033[38;5;244m";
+        const std::string sign = "\033[1;96m";
+        const std::string reset = "\033[0m";
+
+        const std::string device_name =
+            std::string(device.type == RSE_DEVICE_TYPE_CUDA ? "cuda" : "cpu") + ":" +
+            std::to_string(static_cast<long long>(device.id));
+        const std::string world_name = world.name.empty() ? std::string("world") : world.name;
+
+        const std::vector<std::string> banner = {
+            "",
+            blue + "      ____" + reset,
+            blue + "     /   /|" + reset + "    " + dim + "welcome to " + reset + bold +
+                "rise-origin" + reset + dim + "  v" RS_ENGINE_VERSION + reset,
+            blue + "    /___/ |" + reset + "    " + dim + "device" + reset + " : " + device_name,
+            blue + "    |   | /" + reset + "    " + dim + "world " + reset + " : " + world_name,
+            blue + "    |___|/ " + reset + "    " + sign + ">>> hello(\"" + world_name + "\")" +
+                reset,
+            "",
+        };
+
+        const auto previous_level = logger->level();
+        logger->set_pattern("%v");
+        logger->set_level(logging::level::info);
+        for (const auto &line : banner) logger->info(line);
+        logger->set_level(previous_level);
+        logger->set_pattern("%+");
     }
 
     static logging::level::level_enum parseLogLevel(const string &log_level_str) {
@@ -104,8 +146,17 @@ class RiseOriginImpl {
 RiseOrigin::RiseOrigin(const RS_DeviceLocation &device)
     : _rise_impl(make_shared<RiseOriginImpl>(device)) {}
 
-std::shared_ptr<RS_WorldHandle>
-RiseOrigin::hello(const RSC_World &world, RS_WorldCallback callback) {
+std::pair<std::shared_ptr<RS_WorldHandle>, std::shared_ptr<RS_WorldCallback>> RiseOrigin::hello(
+    const RSC_World &world
+) {
     RSC_World local = world;
-    return _rise_impl->hello(std::move(local), std::move(callback));
+    return _rise_impl->hello(std::move(local));
+}
+
+std::pair<std::shared_ptr<RS_WorldHandle>, std::shared_ptr<RS_WorldCallback>>
+RiseOrigin::connect(const std::string & /*url*/) {
+    RS_THROW(
+        RS_NotImplementedException("RiseOrigin::connect (remote transport) is not yet implemented")
+    );
+    return {};
 }

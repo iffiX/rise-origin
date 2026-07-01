@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Muhan Li (iffi/iffiX)
 
+#include "rise_origin/core/kernel_manager/rs_kernel_camera_utils.h"
 #include "rise_origin/core/rs_kernel_manager.h"
+#include "rise_origin/logic/signal/rs_camera_signal_m.h"
 #include "rise_origin/logic/utils/rs_launch_c.h"
 #include "rise_origin/logic/vision/rs_camera_c.h"
 #include "rs_kernel_camera_perspective_manager.h"
@@ -127,10 +129,11 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     _camera_denoiser_color_history.init({_height, _width}, memory_provider);
     _camera_denoiser_moment_history.init({_height, _width}, memory_provider);
     _camera_denoiser_history_length.init({_height, _width}, memory_provider);
-    _camera_denoiser_variance.init({_height, _width}, memory_provider);
     _camera_prev_denoiser_color_history.init({_height, _width}, memory_provider);
     _camera_prev_denoiser_moment_history.init({_height, _width}, memory_provider);
     _camera_prev_denoiser_history_length.init({_height, _width}, memory_provider);
+    _camera_denoiser_variance.init({_height, _width}, memory_provider);
+    _camera_next_denoiser_variance.init({_height, _width}, memory_provider);
 
     _camera_aux_normal.fill(RVec3f::zero(), false);
     _camera_aux_depth_z.fill(RFloat(0), false);
@@ -161,13 +164,23 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     _camera_denoiser_color_history.fill(RVec3f::zero(), false);
     _camera_denoiser_moment_history.fill(RVec2f::zero(), false);
     _camera_denoiser_history_length.fill(RFloat(0), false);
-    _camera_denoiser_variance.fill(RFloat(0), false);
     _camera_prev_denoiser_color_history.fill(RVec3f::zero(), false);
     _camera_prev_denoiser_moment_history.fill(RVec2f::zero(), false);
     _camera_prev_denoiser_history_length.fill(RFloat(0), false);
+    _camera_denoiser_variance.fill(RFloat(0), false);
+    _camera_next_denoiser_variance.fill(RFloat(0), false);
 
     // create record buffer
-    RBigSize frame_size = RS_WorldCameraPerspectiveRecord::getRequiredMemorySize(pixel_num);
+    const auto& record_rsc = _record();
+    RBigSize px = RBigSize(pixel_num);
+    RBigSize frame_size = RS_WorldCameraPerspectiveRecord::getRequiredMemorySize(
+        px,
+        record_rsc.has_depth ? px : 0,
+        record_rsc.has_normal ? px : 0,
+        record_rsc.has_motion ? px : 0,
+        record_rsc.has_entity_info ? px : 0,
+        1
+    );
     _recorder_buffer.init(buffer_frame_num, buffer_frame_num * frame_size, memory_provider);
 
     // Note: for rigid body linked perspective camera, it is special, it needs to have a controller
@@ -244,9 +257,19 @@ void RS_KernelCameraPerspectiveManager::waitForRecorderRecordsSync() {
 std::vector<RS_WorldCameraPerspectiveRecord>
 RS_KernelCameraPerspectiveManager::getRecorderRecords() {
     vector<RS_WorldCameraPerspectiveRecord> records;
+    const auto& record_rsc = _record();
+    RBigSize px = RBigSize(_width) * _height;
     for (RIndex i = 0, total = _recorder_buffer.getHostNum(); i < total; ++i) {
         RS_WorldCameraPerspectiveRecord record;
-        record.initFromMemory(_recorder_buffer.getHostChunk(i).ptr(), _width * _height);
+        record.initFromMemory(
+            _recorder_buffer.getHostChunk(i).ptr(),
+            px,
+            record_rsc.has_depth ? px : 0,
+            record_rsc.has_normal ? px : 0,
+            record_rsc.has_motion ? px : 0,
+            record_rsc.has_entity_info ? px : 0,
+            1
+        );
         record.camera_gid = _entity_registration.gid();
         record.structure_gid = _structure_reference.gid();
         record.rigid_body_sid = _rigid_body_sid;
@@ -291,7 +314,17 @@ void RS_KernelCameraPerspectiveManager::syncControllerRecord() {
 
 RS_WorldCameraPerspectiveRecord RS_KernelCameraPerspectiveManager::getControllerRecord() {
     RS_WorldCameraPerspectiveRecord record;
-    record.initFromMemory(_controller_buffer.getHostChunk(0).ptr(), _width * _height);
+    const auto& record_rsc = _record();
+    RBigSize px = RBigSize(_width) * _height;
+    record.initFromMemory(
+        _controller_buffer.getHostChunk(0).ptr(),
+        px,
+        record_rsc.has_depth ? px : 0,
+        record_rsc.has_normal ? px : 0,
+        record_rsc.has_motion ? px : 0,
+        record_rsc.has_entity_info ? px : 0,
+        1
+    );
     record.camera_gid = _entity_registration.gid();
     record.structure_gid = _structure_reference.gid();
     record.rigid_body_sid = _rigid_body_sid;
@@ -322,7 +355,7 @@ std::string RS_KernelCameraPerspectiveManager::getRecordRecorderName() const {
 }
 
 std::string RS_KernelCameraPerspectiveManager::getSignalControllerName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.signal.source_controller_name; });
+    return _rsc.visit([](auto& c) -> std::string { return c.signal.source_controller_reference; });
 }
 
 RIndex RS_KernelCameraPerspectiveManager::getEntityGid() const {
@@ -381,6 +414,7 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
             camera.orientation = _camera_orientation;
             perspective_base = &perspective;
         }
+        const auto& record_rsc = perspective_base->record;
 
         camera.aspect_ratio = static_cast<RFloat>(perspective_base->image_height) /
                               static_cast<RFloat>(perspective_base->image_width);
@@ -396,6 +430,9 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
         camera.defocus_radius =
             perspective_base->focus_distance *
             tanf(static_cast<float>(perspective_base->defocus_angle * RS_PI) / 180.0f / 2.0f);
+        camera.hyperbolic_near_depth = record_rsc.hyperbolic_near_depth;
+        camera.hyperbolic_far_depth = record_rsc.hyperbolic_far_depth;
+
         float theta = static_cast<float>(perspective_base->field_of_view * RS_PI) / 180.0f;
         float h = tanf(theta / 2.0f);
 
@@ -405,29 +442,56 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
         camera.pixel_height = viewport_height / static_cast<float>(camera.image_height);
         camera.pixel_width = viewport_width / static_cast<float>(camera.image_width);
 
+        state.camera_state.has_rgb = record_rsc.has_rgb;
+        state.camera_state.has_depth = record_rsc.has_depth;
+        state.camera_state.has_normal = record_rsc.has_normal;
+        state.camera_state.has_motion = record_rsc.has_motion;
+        state.camera_state.has_entity_info = record_rsc.has_entity_info;
+        state.camera_state.is_depth_hyperbolic = record_rsc.is_depth_hyperbolic;
+
         camera.state = state.camera_state_packed;
 
+        RSize pixel_count = camera.image_width * camera.image_height;
+
+        // The mono camera occupies sub-camera index 0 of its entity's segment gid block.
+        RIndex segment_gid = makeCameraSegmentGid(_entity_registration.gid(), 0);
+
         // Update host layout
-        ctx.host_data->camera_layout.add(1, _entity_registration.gid());
-        ctx.host_data->camera_info_ray_layout.add(
-            camera.image_width * camera.image_height, _entity_registration.gid()
-        );
+        ctx.host_data->camera_layout.add(1, segment_gid);
+        ctx.host_data->camera_info_ray_layout.add(pixel_count, segment_gid);
         ctx.host_data->camera_rgb_ray_layout.add(
-            camera.image_width * camera.image_height * camera.samples_per_pixel,
-            _entity_registration.gid()
+            pixel_count * camera.samples_per_pixel, segment_gid
         );
-        ctx.host_data->camera_record_layout.add(1, _entity_registration.gid());
-        ctx.host_data->camera_pixel_record_layout.add(
-            camera.image_width * camera.image_height, _entity_registration.gid()
+        ctx.host_data->camera_record_layout.add(1, segment_gid);
+        ctx.host_data->camera_rgb_record_layout.add(pixel_count, segment_gid);
+        ctx.host_data->camera_depth_record_layout.add(
+            record_rsc.has_depth ? pixel_count : 0, segment_gid
         );
-        ctx.host_data->camera_state_record_layout.add(1, _entity_registration.gid());
+        ctx.host_data->camera_normal_record_layout.add(
+            record_rsc.has_normal ? pixel_count : 0, segment_gid
+        );
+        ctx.host_data->camera_motion_record_layout.add(
+            record_rsc.has_motion ? pixel_count : 0, segment_gid
+        );
+        ctx.host_data->camera_entity_info_record_layout.add(
+            record_rsc.has_entity_info ? pixel_count : 0, segment_gid
+        );
+        ctx.host_data->camera_state_record_layout.add(1, segment_gid);
 
         // Update device layout
         ctx.host_data->camera_layout.syncDeviceLayout(ctx.camera_layout);
         ctx.host_data->camera_info_ray_layout.syncDeviceLayout(ctx.camera_info_ray_layout);
         ctx.host_data->camera_rgb_ray_layout.syncDeviceLayout(ctx.camera_rgb_ray_layout);
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
-        ctx.host_data->camera_pixel_record_layout.syncDeviceLayout(ctx.camera_pixel_record_layout);
+        ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
+        ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        );
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        );
+        ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
+            ctx.camera_entity_info_record_layout
+        );
         ctx.host_data->camera_state_record_layout.syncDeviceLayout(ctx.camera_state_record_layout);
 
         // Write data to device
@@ -469,10 +533,11 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
         ctx.camera_denoiser_color_history.append(_camera_denoiser_color_history);
         ctx.camera_denoiser_moment_history.append(_camera_denoiser_moment_history);
         ctx.camera_denoiser_history_length.append(_camera_denoiser_history_length);
-        ctx.camera_denoiser_variance.append(_camera_denoiser_variance);
         ctx.camera_prev_denoiser_color_history.append(_camera_prev_denoiser_color_history);
         ctx.camera_prev_denoiser_moment_history.append(_camera_prev_denoiser_moment_history);
         ctx.camera_prev_denoiser_history_length.append(_camera_prev_denoiser_history_length);
+        ctx.camera_denoiser_variance.append(_camera_denoiser_variance);
+        ctx.camera_next_denoiser_variance.append(_camera_next_denoiser_variance);
 
         // Context data is modified, needs to update kernel
         _kernel_manager->markKernelModified();
@@ -517,7 +582,8 @@ void RS_KernelCameraPerspectiveManager::_freeKernelData() {
         _kernel_manager->getDeviceProvider()->sync();
 
         // Remove data from device
-        RIndex camera_index = ctx.host_data->camera_layout.find(_entity_registration.gid());
+        RIndex segment_gid = makeCameraSegmentGid(_entity_registration.gid(), 0);
+        RIndex camera_index = ctx.host_data->camera_layout.find(segment_gid);
         ctx.cameras.erase(camera_index);
         ctx.camera_records.erase(camera_index);
         ctx.camera_recorder_buffers.erase(camera_index);
@@ -553,29 +619,40 @@ void RS_KernelCameraPerspectiveManager::_freeKernelData() {
         ctx.camera_denoiser_color_history.erase(camera_index);
         ctx.camera_denoiser_moment_history.erase(camera_index);
         ctx.camera_denoiser_history_length.erase(camera_index);
-        ctx.camera_denoiser_variance.erase(camera_index);
         ctx.camera_prev_denoiser_color_history.erase(camera_index);
         ctx.camera_prev_denoiser_moment_history.erase(camera_index);
         ctx.camera_prev_denoiser_history_length.erase(camera_index);
+        ctx.camera_denoiser_variance.erase(camera_index);
+        ctx.camera_next_denoiser_variance.erase(camera_index);
 
         // Update host layout
-        ctx.host_data->camera_layout.remove(
-            ctx.host_data->camera_layout.find(_entity_registration.gid())
-        );
+        ctx.host_data->camera_layout.remove(ctx.host_data->camera_layout.find(segment_gid));
         ctx.host_data->camera_info_ray_layout.remove(
-            ctx.host_data->camera_info_ray_layout.find(_entity_registration.gid())
+            ctx.host_data->camera_info_ray_layout.find(segment_gid)
         );
         ctx.host_data->camera_rgb_ray_layout.remove(
-            ctx.host_data->camera_rgb_ray_layout.find(_entity_registration.gid())
+            ctx.host_data->camera_rgb_ray_layout.find(segment_gid)
         );
         ctx.host_data->camera_record_layout.remove(
-            ctx.host_data->camera_record_layout.find(_entity_registration.gid())
+            ctx.host_data->camera_record_layout.find(segment_gid)
         );
-        ctx.host_data->camera_pixel_record_layout.remove(
-            ctx.host_data->camera_pixel_record_layout.find(_entity_registration.gid())
+        ctx.host_data->camera_rgb_record_layout.remove(
+            ctx.host_data->camera_rgb_record_layout.find(segment_gid)
+        );
+        ctx.host_data->camera_depth_record_layout.remove(
+            ctx.host_data->camera_depth_record_layout.find(segment_gid)
+        );
+        ctx.host_data->camera_normal_record_layout.remove(
+            ctx.host_data->camera_normal_record_layout.find(segment_gid)
+        );
+        ctx.host_data->camera_motion_record_layout.remove(
+            ctx.host_data->camera_motion_record_layout.find(segment_gid)
+        );
+        ctx.host_data->camera_entity_info_record_layout.remove(
+            ctx.host_data->camera_entity_info_record_layout.find(segment_gid)
         );
         ctx.host_data->camera_state_record_layout.remove(
-            ctx.host_data->camera_state_record_layout.find(_entity_registration.gid())
+            ctx.host_data->camera_state_record_layout.find(segment_gid)
         );
 
         // Update device layout
@@ -583,7 +660,15 @@ void RS_KernelCameraPerspectiveManager::_freeKernelData() {
         ctx.host_data->camera_info_ray_layout.syncDeviceLayout(ctx.camera_info_ray_layout);
         ctx.host_data->camera_rgb_ray_layout.syncDeviceLayout(ctx.camera_rgb_ray_layout);
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
-        ctx.host_data->camera_pixel_record_layout.syncDeviceLayout(ctx.camera_pixel_record_layout);
+        ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
+        ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        );
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        );
+        ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
+            ctx.camera_entity_info_record_layout
+        );
         ctx.host_data->camera_state_record_layout.syncDeviceLayout(ctx.camera_state_record_layout);
 
         // Context data is modified, needs to update kernel
@@ -617,7 +702,10 @@ void RS_KernelCameraPerspectiveManager::_initKernelSignalData() {
         _camera_signal = ctx.host_data->camera_signal_layout.segmentOffset(
             ctx.host_data->camera_signal_layout.find(_entity_registration.gid())
         );
-        ctx.camera_signals.writeSlice(&_device_signal, 1, _camera_signal);
+        RS_CameraSignalMem signal_mem;
+        signal_mem.type = RSE_CAMERA_SIGNAL_PERSPECTIVE;
+        signal_mem.perspective = _device_signal;
+        ctx.camera_signals.writeSlice(&signal_mem, 1, _camera_signal);
 
         // Context data is modified, needs to update kernel
         _kernel_manager->markKernelModified();
@@ -648,29 +736,50 @@ void RS_KernelCameraPerspectiveManager::_freezeKernelData(bool is_freeze) {
         // Toggle every camera layout so render launches skip the camera while frozen; the
         // current canvas is never cleared or retraced, so it holds the last frame.
         bool is_active = !is_freeze;
-        RIndex camera_index = ctx.host_data->camera_layout.find(_entity_registration.gid());
+        RIndex segment_gid = makeCameraSegmentGid(_entity_registration.gid(), 0);
+        RIndex camera_index = ctx.host_data->camera_layout.find(segment_gid);
         ctx.host_data->camera_layout.setSegmentIsActive(camera_index, is_active);
         ctx.host_data->camera_info_ray_layout.setSegmentIsActive(
-            ctx.host_data->camera_info_ray_layout.find(_entity_registration.gid()), is_active
+            ctx.host_data->camera_info_ray_layout.find(segment_gid), is_active
         );
         ctx.host_data->camera_rgb_ray_layout.setSegmentIsActive(
-            ctx.host_data->camera_rgb_ray_layout.find(_entity_registration.gid()), is_active
+            ctx.host_data->camera_rgb_ray_layout.find(segment_gid), is_active
         );
         ctx.host_data->camera_record_layout.setSegmentIsActive(
-            ctx.host_data->camera_record_layout.find(_entity_registration.gid()), is_active
+            ctx.host_data->camera_record_layout.find(segment_gid), is_active
         );
-        ctx.host_data->camera_pixel_record_layout.setSegmentIsActive(
-            ctx.host_data->camera_pixel_record_layout.find(_entity_registration.gid()), is_active
+        ctx.host_data->camera_rgb_record_layout.setSegmentIsActive(
+            ctx.host_data->camera_rgb_record_layout.find(segment_gid), is_active
+        );
+        ctx.host_data->camera_depth_record_layout.setSegmentIsActive(
+            ctx.host_data->camera_depth_record_layout.find(segment_gid), is_active
+        );
+        ctx.host_data->camera_normal_record_layout.setSegmentIsActive(
+            ctx.host_data->camera_normal_record_layout.find(segment_gid), is_active
+        );
+        ctx.host_data->camera_motion_record_layout.setSegmentIsActive(
+            ctx.host_data->camera_motion_record_layout.find(segment_gid), is_active
+        );
+        ctx.host_data->camera_entity_info_record_layout.setSegmentIsActive(
+            ctx.host_data->camera_entity_info_record_layout.find(segment_gid), is_active
         );
         ctx.host_data->camera_state_record_layout.setSegmentIsActive(
-            ctx.host_data->camera_state_record_layout.find(_entity_registration.gid()), is_active
+            ctx.host_data->camera_state_record_layout.find(segment_gid), is_active
         );
 
         ctx.host_data->camera_layout.syncDeviceLayout(ctx.camera_layout);
         ctx.host_data->camera_info_ray_layout.syncDeviceLayout(ctx.camera_info_ray_layout);
         ctx.host_data->camera_rgb_ray_layout.syncDeviceLayout(ctx.camera_rgb_ray_layout);
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
-        ctx.host_data->camera_pixel_record_layout.syncDeviceLayout(ctx.camera_pixel_record_layout);
+        ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
+        ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        );
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        );
+        ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
+            ctx.camera_entity_info_record_layout
+        );
         ctx.host_data->camera_state_record_layout.syncDeviceLayout(ctx.camera_state_record_layout);
 
         if (hasControllerSignal()) {

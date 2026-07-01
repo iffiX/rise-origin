@@ -181,7 +181,7 @@ def build():
         bodies=bodies,
         constraints=constraints,
         signal=rsc.entity.StructureVoxelSignal(
-            "ant#signal", source_controller_name=CONTROLLER, hinge_signal_num=8
+            "ant#signal", source_controller_reference=CONTROLLER, hinge_signal_num=8
         ),
     )
 
@@ -193,7 +193,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Drive an alternating gait: X-legs and Y-legs swing out of phase.
 
     Hips (signals 0-3) steer, knees (signals 4-7) lift a quarter-cycle later.

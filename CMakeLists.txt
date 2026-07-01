@@ -61,21 +61,21 @@ endif ()
 ################################################################
 # Dependencies
 ################################################################
-if (BUILD_RISE_ORIGIN OR BUILD_RISE_ORIGIN_TEST)
+if (RISE_ORIGIN_BUILD_CORE OR RISE_ORIGIN_BUILD_TEST)
     include(cmake/RiseDependencies.cmake)
 endif ()
 
 ################################################################
 # Main builds
 ################################################################
-if (BUILD_RISE_ORIGIN)
+if (RISE_ORIGIN_BUILD_CORE)
     message(STATUS "rise origin is configured to be built")
     add_subdirectory(src/rise_origin)
 else ()
     message(STATUS "rise origin is not configured to be built")
 endif ()
 
-if (BUILD_RISE_ORIGIN_TEST)
+if (RISE_ORIGIN_BUILD_TEST)
     message(STATUS "rise origin tests are configured to be built (backend: ${RISE_ORIGIN_TEST_DEVICE_BACKEND})")
     add_subdirectory(test)
 else ()
@@ -91,6 +91,6 @@ target_include_directories(rise_origin_header INTERFACE include)
 ################################################################
 # Installation
 ################################################################
-if (BUILD_RISE_ORIGIN)
+if (RISE_ORIGIN_BUILD_CORE)
     include(cmake/RiseInstall.cmake)
 endif ()

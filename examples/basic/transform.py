@@ -94,7 +94,7 @@ def build():
             rsc.signal.Transform(
                 _signal_name(i),
                 structure_name=cube["name"],
-                source_controller_name=_controller_name(i),
+                source_controller_reference=_controller_name(i),
             )
         )
 
@@ -107,7 +107,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Kick each cube once on its key's rising edge, idle otherwise."""
     for i, cube in enumerate(CUBES):
         is_kick = _held[i] and not _was_held[i]

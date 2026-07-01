@@ -102,7 +102,7 @@ def test_world_runs_to_completion_on_its_own():
         ),
     )
     origin = rs.RiseOrigin("cpu")
-    handle = origin.hello(world)
+    handle, _ = origin.hello(world)
     handle.wait_for_end()
     assert handle.is_end() is True
     assert handle.is_running() is False
@@ -131,7 +131,7 @@ def test_terminate_ends_a_running_world():
         ),
     )
     origin = rs.RiseOrigin("cpu")
-    handle = origin.hello(world)
+    handle, _ = origin.hello(world)
     assert handle.wait_for_running() is True
     handle.terminate()
     handle.wait_for_end()
@@ -166,7 +166,7 @@ def test_adding_an_invalid_characterization_raises():
         ),
     )
     origin = rs.RiseOrigin("cpu")
-    handle = origin.hello(world)
+    handle, _ = origin.hello(world)
     assert handle.wait_for_running() is True
     try:
         # The handle validates a characterization before forwarding it, so an
@@ -207,7 +207,7 @@ def test_mutators_return_null_after_the_world_ends():
         ),
     )
     origin = rs.RiseOrigin("cpu")
-    handle = origin.hello(world)
+    handle, _ = origin.hello(world)
     handle.wait_for_end()
     assert handle.is_end() is True
 
@@ -266,7 +266,7 @@ def test_finders_return_an_empty_variant_after_the_world_ends():
         ),
     )
     origin = rs.RiseOrigin("cpu")
-    handle = origin.hello(world)
+    handle, _ = origin.hello(world)
     handle.wait_for_end()
     assert handle.is_end() is True
 
@@ -303,7 +303,7 @@ def test_lifecycle_controls_are_noops_after_the_world_ends():
         ),
     )
     origin = rs.RiseOrigin("cpu")
-    handle = origin.hello(world)
+    handle, _ = origin.hello(world)
     handle.wait_for_end()
     assert handle.is_end() is True
 

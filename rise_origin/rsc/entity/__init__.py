@@ -12,6 +12,7 @@ carry embedded records and signals; bodies expose geometric named constructors
 from rise_origin import (
     RSC_CameraBase,
     RSC_CameraPerspectiveBase,
+    RSC_CameraStereoBase,
     RSC_CosmicBackgroundBase,
     RSC_EntityBase,
     RSC_FloorBase,
@@ -23,6 +24,10 @@ from rise_origin.rsc.entity.camera import (
     CameraPerspectiveRecord,
     CameraPerspectiveRigidBodyLinked,
     CameraPerspectiveSignal,
+    CameraStereoFree,
+    CameraStereoRecord,
+    CameraStereoRigidBodyLinked,
+    CameraStereoSignal,
 )
 from rise_origin.rsc.entity.cosmic_background import (
     CosmicBackgroundGradient,
@@ -51,6 +56,9 @@ CameraBase = RSC_CameraBase
 #: Abstract base of the perspective cameras.
 CameraPerspectiveBase = RSC_CameraPerspectiveBase
 
+#: Abstract base of the stereo cameras.
+CameraStereoBase = RSC_CameraStereoBase
+
 #: Abstract base of the floor entities.
 FloorBase = RSC_FloorBase
 
@@ -63,6 +71,7 @@ __all__ = [
     "StructureBase",
     "CameraBase",
     "CameraPerspectiveBase",
+    "CameraStereoBase",
     "FloorBase",
     "CosmicBackgroundBase",
     "StructureVoxel",
@@ -74,6 +83,10 @@ __all__ = [
     "CameraPerspectiveRigidBodyLinked",
     "CameraPerspectiveRecord",
     "CameraPerspectiveSignal",
+    "CameraStereoFree",
+    "CameraStereoRigidBodyLinked",
+    "CameraStereoRecord",
+    "CameraStereoSignal",
     "FloorFlat",
     "FloorArray",
     "CosmicBackgroundUniform",

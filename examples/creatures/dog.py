@@ -301,7 +301,7 @@ def build():
         bodies=bodies,
         constraints=constraints,
         signal=rsc.entity.StructureVoxelSignal(
-            "dog#signal", source_controller_name=CONTROLLER, hinge_signal_num=6
+            "dog#signal", source_controller_reference=CONTROLLER, hinge_signal_num=6
         ),
     )
 
@@ -315,7 +315,7 @@ def build():
     push = rsc.signal.Force(
         "ball_push",
         structure_name="ball",
-        source_controller_name=CONTROLLER,
+        source_controller_reference=CONTROLLER,
         body_sid=0,
         segment_bid=0,
     )
@@ -351,7 +351,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Replay the leg gait, push the ball, and capture the eye-camera frames."""
     controller = _common.controller_by_name(controllers, CONTROLLER)
     if controller is None:
@@ -379,7 +379,7 @@ def control(world_name, time, controllers):
     for record in controller.records():
         if isinstance(record, RS_WorldCameraPerspectiveRecord):
             if eye < 2 and record.is_valid() and record.width() > 0:
-                _eye_frames[eye] = np.array(record.rgb.pixels(), copy=True)
+                _eye_frames[eye] = np.array(record.rgb.pixel(), copy=True)
             eye += 1
 
 

@@ -94,10 +94,11 @@ class RS_VisionDenoiseCompute {
             Vec3C center_normal = Vec3C(ctx.camera_aux_normal[camera][{i, j}]);
             FloatC center_depth = FloatC(ctx.camera_aux_depth_z[camera][{i, j}]);
             RS_CameraPixelObjectKey center_object_key = ctx.camera_aux_object_key[camera][{i, j}];
-            // Material-based edge stop: compare kind tag + material_gid only.
+            // Material-based edge stop: compare object category + material_gid only.
             // Same material across different structures still smooths together.
-            RIndex center_kind =
-                center_object_key.structure_and_kind >> RS_CAMERA_PIXEL_OBJECT_KIND_SHIFT;
+            RIndex center_kind = center_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
+                                     ? RIndex(0)
+                                     : center_object_key.entity_gid;
             RIndex center_material_gid = center_object_key.material_gid;
             FloatC sigma_color = FloatC(k->vision_denoise_sigma_color);
             FloatC sigma_normal = FloatC(k->vision_denoise_sigma_normal);
@@ -126,24 +127,21 @@ class RS_VisionDenoiseCompute {
                     RS_CameraPixelObjectKey n_object_key =
                         ctx.camera_aux_object_key[camera][{ni, nj}];
 
-                    // Hard binary edge stop on kind tag + material_gid.
-                    RIndex n_kind = n_object_key.structure_and_kind >>
-                                    RS_CAMERA_PIXEL_OBJECT_KIND_SHIFT;
-                    if (n_kind != center_kind ||
-                        n_object_key.material_gid != center_material_gid)
+                    // Hard binary edge stop on object category + material_gid.
+                    RIndex n_kind = n_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
+                                        ? RIndex(0)
+                                        : n_object_key.entity_gid;
+                    if (n_kind != center_kind || n_object_key.material_gid != center_material_gid)
                         continue;
 
                     FloatC w_k = kernel_w[di + 2] * kernel_w[dj + 2];
-                    FloatC w_n = RS_FI::rs_pow(
-                        RS_MAX(FloatC(0), center_normal.dot(n)), sigma_normal
-                    );
+                    FloatC w_n =
+                        RS_FI::rs_pow(RS_MAX(FloatC(0), center_normal.dot(n)), sigma_normal);
                     FloatC depth_diff = dep - center_depth;
                     FloatC w_d = RS_FI::rs_exp_fast(
-                        -(depth_diff * depth_diff) /
-                        (sigma_depth * sigma_depth + FloatC(RS_EPS))
+                        -(depth_diff * depth_diff) / (sigma_depth * sigma_depth + FloatC(RS_EPS))
                     );
-                    FloatC lum_n =
-                        c.x * FloatC(0.2126) + c.y * FloatC(0.7152) + c.z * FloatC(0.0722);
+                    FloatC lum_n = RColor3f(c).luminance();
                     FloatC w_l = RS_FI::rs_exp_fast(-RS_ABS(lum_c - lum_n) * inv_sigma_l);
                     FloatC weight = w_k * w_n * w_d * w_l;
                     accum = accum + c * weight;
@@ -153,7 +151,6 @@ class RS_VisionDenoiseCompute {
             Vec3C out = accum_w > FloatC(RS_EPS) ? accum / accum_w : center_color;
             write_canvas[camera][{i, j}] = RVec3f(float(out.x), float(out.y), float(out.z));
         }
-
     };
 
     /**
@@ -189,36 +186,63 @@ class RS_VisionDenoiseCompute {
             RS_CameraPixelObjectKey object_key = ctx.camera_aux_object_key[camera][{i, j}];
             RVec2f screen_motion = ctx.camera_aux_screen_motion[camera][{i, j}];
 
-            // Reproject via screen-space motion vector; round to nearest pixel.
+            // Reproject via screen-space motion vector with bilinear 2x2 taps so
+            // sub-pixel head motion does not snap to a single stale pixel.
             using RS_FI = RS_FloatIntrinsics<FloatC>;
-            int ri = int(i) - int(RS_FI::rs_round(FloatC(screen_motion.y) * FloatC(h)));
-            int rj = int(j) - int(RS_FI::rs_round(FloatC(screen_motion.x) * FloatC(w)));
-            bool in_bounds = (ri >= 0 && ri < int(h) && rj >= 0 && rj < int(w));
+            FloatC fri = FloatC(i) - FloatC(screen_motion.y) * FloatC(h);
+            FloatC frj = FloatC(j) - FloatC(screen_motion.x) * FloatC(w);
+            int ri0 = int(RS_FI::rs_floor(fri));
+            int rj0 = int(RS_FI::rs_floor(frj));
+            FloatC ty = fri - FloatC(ri0);
+            FloatC tx = frj - FloatC(rj0);
+            FloatC tap_weight[4] = {
+                (FloatC(1) - tx) * (FloatC(1) - ty),
+                tx * (FloatC(1) - ty),
+                (FloatC(1) - tx) * ty,
+                tx * ty
+            };
+            int tap_di[4] = {0, 0, 1, 1};
+            int tap_dj[4] = {0, 1, 0, 1};
 
+            // Accumulate only the bilinear taps that pass the disocclusion gate,
+            // then renormalize over the accepted weight.
             bool accept = false;
             Vec3C prev_color = Vec3C::zero();
             RVec2f prev_moments(0.0f, 0.0f);
             FloatC prev_len = FloatC(0);
-            if (in_bounds) {
-                RSize hri = RSize(ri);
-                RSize hrj = RSize(rj);
+            FloatC prev_m1 = FloatC(0);
+            FloatC prev_m2 = FloatC(0);
+            FloatC sum_w = FloatC(0);
+            for (int t = 0; t < 4; ++t) {
+                int pri = ri0 + tap_di[t];
+                int prj = rj0 + tap_dj[t];
+                if (pri < 0 || pri >= int(h) || prj < 0 || prj >= int(w)) continue;
+                RSize hri = RSize(pri);
+                RSize hrj = RSize(prj);
                 RS_CameraPixelObjectKey prev_key =
                     ctx.camera_prev_aux_object_key[camera][{hri, hrj}];
                 Vec3C n_prev = Vec3C(ctx.camera_prev_aux_normal[camera][{hri, hrj}]);
                 FloatC d_prev = FloatC(ctx.camera_prev_aux_depth_z[camera][{hri, hrj}]);
                 bool id_ok = (prev_key == object_key);
                 bool n_ok = n_prev.dot(normal) > FloatC(0.9);
-                bool d_ok =
-                    RS_ABS(d_prev - depth) < FloatC(0.1) * RS_MAX(d_prev, FloatC(1e-3));
-                if (id_ok && n_ok && d_ok) {
-                    accept = true;
-                    prev_color =
-                        Vec3C(ctx.camera_prev_denoiser_color_history[camera][{hri, hrj}]);
-                    prev_moments =
-                        ctx.camera_prev_denoiser_moment_history[camera][{hri, hrj}];
-                    prev_len =
-                        FloatC(ctx.camera_prev_denoiser_history_length[camera][{hri, hrj}]);
-                }
+                bool d_ok = RS_ABS(d_prev - depth) < FloatC(0.1) * RS_MAX(d_prev, FloatC(1e-3));
+                if (!(id_ok && n_ok && d_ok)) continue;
+                FloatC tw = tap_weight[t];
+                prev_color = prev_color +
+                             Vec3C(ctx.camera_prev_denoiser_color_history[camera][{hri, hrj}]) * tw;
+                RVec2f pm = ctx.camera_prev_denoiser_moment_history[camera][{hri, hrj}];
+                prev_m1 = prev_m1 + tw * FloatC(pm.x);
+                prev_m2 = prev_m2 + tw * FloatC(pm.y);
+                prev_len = prev_len +
+                           tw * FloatC(ctx.camera_prev_denoiser_history_length[camera][{hri, hrj}]);
+                sum_w = sum_w + tw;
+            }
+            if (sum_w > FloatC(RS_EPS)) {
+                accept = true;
+                FloatC inv_sum_w = FloatC(1) / sum_w;
+                prev_color = prev_color * inv_sum_w;
+                prev_len = prev_len * inv_sum_w;
+                prev_moments = RVec2f(float(prev_m1 * inv_sum_w), float(prev_m2 * inv_sum_w));
             }
 
             FloatC alpha = FloatC(k->vision_denoise_temporal_alpha);
@@ -231,28 +255,25 @@ class RS_VisionDenoiseCompute {
             // smear stale color forward in time.
             FloatC roughness_p = FloatC(ctx.camera_aux_roughness[camera][{i, j}]);
             FloatC m_rough = roughness_p * roughness_p;
-            FloatC capped_len = RS_MAX(
-                FloatC(k->vision_denoise_temporal_min_history), m_rough * new_len
-            );
+            FloatC capped_len =
+                RS_MAX(FloatC(k->vision_denoise_temporal_min_history), m_rough * new_len);
 
             FloatC eff_alpha = RS_MAX(alpha, FloatC(1) / capped_len);
             FloatC eff_alpha_m = RS_MAX(alpha_m, FloatC(1) / capped_len);
 
-            Vec3C blended =
-                accept ? prev_color * (FloatC(1) - eff_alpha) + current * eff_alpha : current;
-            FloatC lum = current.x * FloatC(0.2126) + current.y * FloatC(0.7152) +
-                         current.z * FloatC(0.0722);
-            FloatC m1 = accept ? FloatC(prev_moments.x) * (FloatC(1) - eff_alpha_m) +
-                                     lum * eff_alpha_m
-                               : lum;
+            Vec3C blended = accept ? prev_color * (FloatC(1) - eff_alpha) + current * eff_alpha
+                                   : current;
+            FloatC lum = RColor3f(current).luminance();
+            FloatC m1 = accept
+                            ? FloatC(prev_moments.x) * (FloatC(1) - eff_alpha_m) + lum * eff_alpha_m
+                            : lum;
             FloatC m2 = accept ? FloatC(prev_moments.y) * (FloatC(1) - eff_alpha_m) +
                                      lum * lum * eff_alpha_m
                                : lum * lum;
 
             ctx.camera_denoiser_color_history[camera][{i, j}] =
                 RVec3f(float(blended.x), float(blended.y), float(blended.z));
-            ctx.camera_denoiser_moment_history[camera][{i, j}] =
-                RVec2f(float(m1), float(m2));
+            ctx.camera_denoiser_moment_history[camera][{i, j}] = RVec2f(float(m1), float(m2));
             ctx.camera_denoiser_history_length[camera][{i, j}] = RFloat(new_len);
             ctx.camera_current_rgb_canvas[camera][{i, j}] =
                 RVec3f(float(blended.x), float(blended.y), float(blended.z));
@@ -267,8 +288,7 @@ class RS_VisionDenoiseCompute {
      *
      * @details Schied et al. 2017 §4.1 (spatial fallback at short history).
      */
-    class RSCF_SVGFVarianceEstimate
-        : public device::RS_ComputeFunction<RSCF_SVGFVarianceEstimate> {
+    class RSCF_SVGFVarianceEstimate : public device::RS_ComputeFunction<RSCF_SVGFVarianceEstimate> {
        public:
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel* k, RHandle camera, RHandle pixel) {
@@ -295,9 +315,8 @@ class RS_VisionDenoiseCompute {
                     for (int dj = -radius; dj <= radius; ++dj) {
                         RSize ni = _clampIdx(int(i) + di, int(h));
                         RSize nj = _clampIdx(int(j) + dj, int(w));
-                        Vec3C c = Vec3C(ctx.camera_current_rgb_canvas[camera][{ni, nj}]);
-                        FloatC lum = c.x * FloatC(0.2126) + c.y * FloatC(0.7152) +
-                                     c.z * FloatC(0.0722);
+                        auto c = RColor3f(ctx.camera_current_rgb_canvas[camera][{ni, nj}]);
+                        FloatC lum = c.luminance();
                         sum = sum + lum;
                         sum_sq = sum_sq + lum * lum;
                         n = n + FloatC(1);
@@ -305,6 +324,11 @@ class RS_VisionDenoiseCompute {
                 }
                 FloatC mean = sum / n;
                 variance = RS_MAX(FloatC(0), sum_sq / n - mean * mean);
+                // Scale the spatial estimate up by 4 / h: h=1 gives x4 for the
+                // newest, noisiest pixel, h=2 gives x2, and h=4 gives x1 where it
+                // meets the temporal path. The less history a pixel has, the more
+                // it is distrusted and the harder it is filtered.
+                variance = variance * (FloatC(4) / RS_MAX(hist_len, FloatC(1)));
             }
             ctx.camera_denoiser_variance[camera][{i, j}] = RFloat(variance);
         }
@@ -312,14 +336,19 @@ class RS_VisionDenoiseCompute {
 
     /**
      * @brief Variance-guided a-trous wavelet pass. Same shape as
-     *        RSCF_AtrousFilter (5x5 B-spline, doubling step, roughness^2
-     *        pass-count cap, hard material-gid edge stop) but the
-     *        luminance-similarity sigma is scaled by sqrt(variance) so
-     *        confident pixels stay sharp while noisy ones smooth more.
-     *        Reads from read_canvas, writes to write_canvas; the executor
-     *        ping-pongs canvases between passes.
+     *        RSCF_AtrousFilter but the luminance sigma is scaled by
+     *        sqrt(variance) so confident pixels stay sharp. The luminance
+     *        weight reads a 3x3 Gaussian prefiltered variance so a slowly
+     *        varying penumbra is not over-sharpened into mist, and the variance
+     *        is filtered with the squared edge-stop weight into write_variance
+     *        so each pass narrows the next pass's sigma. The executor ping-pongs
+     *        both canvas and variance between passes.
      *
-     * @details Schied et al. 2017 §4.2.
+     * @details Schied et al. 2017 §4.2. Prefilter and squared-weight variance
+     *          propagation follow the Falcor SVGFAtrous reference.
+     *
+     * @param read_variance   per-camera input variance vector.
+     * @param write_variance  per-camera output variance vector.
      */
     class RSCF_SVGFAtrousFilter : public device::RS_ComputeFunction<RSCF_SVGFAtrousFilter> {
        public:
@@ -330,6 +359,8 @@ class RS_VisionDenoiseCompute {
             RHandle pixel,
             device::RS_Vector<RS_CameraRGBCanvas> read_canvas,
             device::RS_Vector<RS_CameraRGBCanvas> write_canvas,
+            device::RS_Vector<RS_CameraDenoiserVariance> read_variance,
+            device::RS_Vector<RS_CameraDenoiserVariance> write_variance,
             RSize pass_index
         ) {
             if (k == nullptr || camera == RS_NULL_HANDLE) return;
@@ -351,6 +382,7 @@ class RS_VisionDenoiseCompute {
             );
             if (pass_index >= max_pass_p) {
                 write_canvas[camera][{i, j}] = read_canvas[camera][{i, j}];
+                write_variance[camera][{i, j}] = read_variance[camera][{i, j}];
                 return;
             }
 
@@ -360,18 +392,18 @@ class RS_VisionDenoiseCompute {
             Vec3C center_normal = Vec3C(ctx.camera_aux_normal[camera][{i, j}]);
             FloatC center_depth = FloatC(ctx.camera_aux_depth_z[camera][{i, j}]);
             RS_CameraPixelObjectKey center_object_key = ctx.camera_aux_object_key[camera][{i, j}];
-            RIndex center_kind =
-                center_object_key.structure_and_kind >> RS_CAMERA_PIXEL_OBJECT_KIND_SHIFT;
+            RIndex center_kind = center_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
+                                     ? RIndex(0)
+                                     : center_object_key.entity_gid;
             RIndex center_material_gid = center_object_key.material_gid;
-            FloatC variance = FloatC(ctx.camera_denoiser_variance[camera][{i, j}]);
             FloatC sigma_color = FloatC(k->vision_denoise_sigma_color);
             FloatC sigma_normal = FloatC(k->vision_denoise_sigma_normal);
             FloatC sigma_depth = FloatC(k->vision_denoise_sigma_depth);
-            FloatC lum_c = center_color.x * FloatC(0.2126) + center_color.y * FloatC(0.7152) +
-                           center_color.z * FloatC(0.0722);
+            FloatC lum_c = RColor3f(center_color).luminance();
+            FloatC var_prefiltered = _prefilterVariance3x3(read_variance, camera, i, j, w, h);
             FloatC inv_sigma_l =
-                FloatC(1) /
-                (sigma_color * RS_FI::rs_sqrt(RS_MAX(variance, FloatC(RS_EPS))) + FloatC(RS_EPS));
+                FloatC(1) / (sigma_color * RS_FI::rs_sqrt(RS_MAX(var_prefiltered, FloatC(RS_EPS))) +
+                             FloatC(RS_EPS));
 
             // 5x5 a-trous kernel (B-spline).
             FloatC kernel_w[5] = {
@@ -383,6 +415,7 @@ class RS_VisionDenoiseCompute {
             };
             Vec3C accum = Vec3C::zero();
             FloatC accum_w = FloatC(0);
+            FloatC accum_var = FloatC(0);
             for (int di = -2; di <= 2; ++di) {
                 for (int dj = -2; dj <= 2; ++dj) {
                     RSize ni = _clampIdx(int(i) + di * step, int(h));
@@ -393,53 +426,68 @@ class RS_VisionDenoiseCompute {
                     RS_CameraPixelObjectKey n_object_key =
                         ctx.camera_aux_object_key[camera][{ni, nj}];
 
-                    RIndex n_kind = n_object_key.structure_and_kind >>
-                                    RS_CAMERA_PIXEL_OBJECT_KIND_SHIFT;
-                    if (n_kind != center_kind ||
-                        n_object_key.material_gid != center_material_gid)
+                    RIndex n_kind = n_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
+                                        ? RIndex(0)
+                                        : n_object_key.entity_gid;
+                    if (n_kind != center_kind || n_object_key.material_gid != center_material_gid)
                         continue;
 
                     FloatC w_k = kernel_w[di + 2] * kernel_w[dj + 2];
-                    FloatC w_n = RS_FI::rs_pow(
-                        RS_MAX(FloatC(0), center_normal.dot(n)), sigma_normal
-                    );
+                    FloatC w_n =
+                        RS_FI::rs_pow(RS_MAX(FloatC(0), center_normal.dot(n)), sigma_normal);
                     FloatC depth_diff = dep - center_depth;
                     FloatC w_d = RS_FI::rs_exp_fast(
-                        -(depth_diff * depth_diff) /
-                        (sigma_depth * sigma_depth + FloatC(RS_EPS))
+                        -(depth_diff * depth_diff) / (sigma_depth * sigma_depth + FloatC(RS_EPS))
                     );
-                    FloatC lum_n =
-                        c.x * FloatC(0.2126) + c.y * FloatC(0.7152) + c.z * FloatC(0.0722);
+                    FloatC lum_n = RColor3f(c).luminance();
                     FloatC w_l = RS_FI::rs_exp_fast(-RS_ABS(lum_c - lum_n) * inv_sigma_l);
                     FloatC weight = w_k * w_n * w_d * w_l;
                     accum = accum + c * weight;
                     accum_w = accum_w + weight;
+                    // Variance filters with the squared weight so its scale tracks
+                    // the color estimator's variance reduction across passes.
+                    accum_var =
+                        accum_var + weight * weight * FloatC(read_variance[camera][{ni, nj}]);
                 }
             }
             Vec3C out = accum_w > FloatC(RS_EPS) ? accum / accum_w : center_color;
+            FloatC out_var = accum_w > FloatC(RS_EPS) ? accum_var / (accum_w * accum_w)
+                                                      : FloatC(read_variance[camera][{i, j}]);
             write_canvas[camera][{i, j}] = RVec3f(float(out.x), float(out.y), float(out.z));
+            write_variance[camera][{i, j}] = RFloat(out_var);
         }
-    };
 
-    /**
-     * @brief End-of-frame snapshot of (normal, depth_z, object_key) into the
-     *        prev-aux slots so next frame's RSCF_SVGFTemporalAccumulate can
-     *        run its disocclusion gate.
-     */
-    class RSCF_SVGFCopyAux : public device::RS_ComputeFunction<RSCF_SVGFCopyAux> {
-       public:
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel* k, RHandle camera, RHandle pixel) {
-            if (k == nullptr || camera == RS_NULL_HANDLE) return;
-            auto& ctx = k->ctx;
-            if (k->vision_denoise_type != RSE_VISION_DENOISE_SVGF) return;
-            RSize w = CA_G(image_width);
-            RSize i = RSize(pixel) / w;
-            RSize j = RSize(pixel) - i * w;
-            ctx.camera_prev_aux_normal[camera][{i, j}] = ctx.camera_aux_normal[camera][{i, j}];
-            ctx.camera_prev_aux_depth_z[camera][{i, j}] = ctx.camera_aux_depth_z[camera][{i, j}];
-            ctx.camera_prev_aux_object_key[camera][{i, j}] =
-                ctx.camera_aux_object_key[camera][{i, j}];
+       private:
+        /**
+         * @brief 3x3 Gaussian over the variance buffer with the Falcor weights
+         *        (center 1/4, edge 1/8, corner 1/16). Driving the luminance
+         *        weight off a smoothed variance keeps a slowly varying penumbra
+         *        from reading a near-zero sigma and being over-sharpened into
+         *        mist.
+         */
+        HOST_DEVICE_INLINE_QUALIFIER static FloatC _prefilterVariance3x3(
+            device::RS_Vector<RS_CameraDenoiserVariance> read_variance,
+            RHandle camera,
+            RSize i,
+            RSize j,
+            RSize w,
+            RSize h
+        ) {
+            FloatC kernel[2][2] = {
+                {FloatC(1.0 / 4.0), FloatC(1.0 / 8.0)}, {FloatC(1.0 / 8.0), FloatC(1.0 / 16.0)}
+            };
+            FloatC sum = FloatC(0);
+            FloatC sum_w = FloatC(0);
+            for (int di = -1; di <= 1; ++di) {
+                for (int dj = -1; dj <= 1; ++dj) {
+                    RSize ni = _clampIdx(int(i) + di, int(h));
+                    RSize nj = _clampIdx(int(j) + dj, int(w));
+                    FloatC kw = kernel[RS_ABS(di)][RS_ABS(dj)];
+                    sum = sum + kw * FloatC(read_variance[camera][{ni, nj}]);
+                    sum_w = sum_w + kw;
+                }
+            }
+            return sum / sum_w;
         }
     };
 

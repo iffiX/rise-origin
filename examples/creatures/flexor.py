@@ -173,7 +173,7 @@ def build():
         bodies=[body],
         constraints=constraints,
         signal=rsc.entity.StructureVoxelSignal(
-            "flexor#signal", source_controller_name=CONTROLLER, expansion_signal_num=4
+            "flexor#signal", source_controller_reference=CONTROLLER, expansion_signal_num=4
         ),
     )
 
@@ -189,7 +189,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Contract every leg's flexor in unison (curl, then relax back)."""
     controller = _common.controller_by_name(controllers, CONTROLLER)
     if controller is None:

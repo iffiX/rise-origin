@@ -162,7 +162,7 @@ class RS_KernelCameraPerspectiveManager {
 
     /**
      * @brief Name of the controller that drives this camera's signal
-     *        (signal.source_controller_name).
+     *        (signal.source_controller_reference).
      */
     std::string getSignalControllerName() const;
 
@@ -257,10 +257,11 @@ class RS_KernelCameraPerspectiveManager {
     logic::RS_CameraDenoiserColorHistory _camera_denoiser_color_history;
     logic::RS_CameraDenoiserMomentHistory _camera_denoiser_moment_history;
     logic::RS_CameraDenoiserHistoryLength _camera_denoiser_history_length;
-    logic::RS_CameraDenoiserVariance _camera_denoiser_variance;
     logic::RS_CameraDenoiserColorHistory _camera_prev_denoiser_color_history;
     logic::RS_CameraDenoiserMomentHistory _camera_prev_denoiser_moment_history;
     logic::RS_CameraDenoiserHistoryLength _camera_prev_denoiser_history_length;
+    logic::RS_CameraDenoiserVariance _camera_denoiser_variance;
+    logic::RS_CameraDenoiserVariance _camera_next_denoiser_variance;
 
     /// Signal data. The unified perspective camera signal (pose + optics) is
     /// backed by per-manager host and device buffers and published into the
@@ -292,18 +293,32 @@ class RS_KernelCameraPerspectiveManager {
     /// Live use_count from external consumers. No consumer today, but the API stays uniform.
     RSize _use_count = 0;
 
+    /**
+     * @brief Concrete view of this camera's record characterization.
+     */
+    const rsc::RSC_CameraPerspectiveRecord &_record() const {
+        if (_rsc.is<rsc::RSC_CameraPerspectiveRigidBodyLinked>()) {
+            return _rsc.as<rsc::RSC_CameraPerspectiveRigidBodyLinked>().record;
+        }
+        return _rsc.as<rsc::RSC_CameraPerspectiveFree>().record;
+    }
+
+    /** @brief Allocate and register this camera's controller signal buffers. */
     void _addSignals();
 
+    /** @brief Build and upload this camera's kernel mem, records, and layouts. */
     void _initKernelData();
 
+    /** @brief Release this camera's kernel mem, records, and layouts. */
     void _freeKernelData();
 
+    /** @brief Build and upload this camera's controller signal kernel data. */
     void _initKernelSignalData();
 
+    /** @brief Release this camera's controller signal kernel data. */
     void _freeKernelSignalData();
 
-    /// Shared body of freeze()/unfreeze(): toggle every camera layout so render launches skip a
-    /// frozen camera while its canvas holds the last frame.
+    /** @brief Toggle every camera layout so render launches skip a frozen camera. */
     void _freezeKernelData(bool is_freeze);
 };
 

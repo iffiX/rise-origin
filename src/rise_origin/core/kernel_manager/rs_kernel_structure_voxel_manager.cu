@@ -313,7 +313,7 @@ std::string RS_KernelStructureVoxelManager::getRecordRecorderName() const {
 }
 
 std::string RS_KernelStructureVoxelManager::getSignalControllerName() const {
-    return _structure().signal->source_controller_name;
+    return _structure().signal->source_controller_reference;
 }
 
 RIndex RS_KernelStructureVoxelManager::getEntityGid() const { return _structure_gid; }

@@ -259,7 +259,7 @@ def _generate(seed):
     push = rsc.signal.Force(
         "push",
         structure_name="ball",
-        source_controller_name=CONTROLLER,
+        source_controller_reference=CONTROLLER,
         body_sid=0,
         segment_bid=0,
     )
@@ -364,7 +364,7 @@ def _reset_maze(viewer):
 # ---------------------------------------------------------------------------
 # Runtime callbacks
 # ---------------------------------------------------------------------------
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Apply the arrow-key push to the ball and watch the goal region.
 
     Idle force is zero, so the ball stays put until an arrow key is held. The

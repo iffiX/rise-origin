@@ -91,7 +91,7 @@ def build():
         is_prefer_visual_mesh=True,
         visual_signature_num=VISUAL_SIGNATURES,
     )
-    panda.signal.source_controller_name = CONTROLLER
+    panda.signal.source_controller_reference = CONTROLLER
     for constraint in panda.constraints:
         constraint.hinge_max_torque = HINGE_TORQUE
         constraint.prismatic_max_force = PRISMATIC_FORCE
@@ -116,7 +116,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Ease every arm hinge between rest and reach, and cycle the gripper."""
     controller = _common.controller_by_name(controllers, CONTROLLER)
     if controller is None:

@@ -30,7 +30,7 @@ class RS_Timer {
     /**
      * @brief Calculates the elapsed time since the timer was started.
      *
-     * @return The elapsed time in milliseconds.
+     * @return The elapsed time in seconds.
      */
     [[nodiscard]] double elapsed() const {
         auto end_time_point = std::chrono::high_resolution_clock::now();
@@ -41,7 +41,7 @@ class RS_Timer {
                        .time_since_epoch()
                        .count();
 
-        return static_cast<double>(end - start) * 0.001;  // Convert to milliseconds
+        return static_cast<double>(end - start) * 1e-6;  // Convert to seconds
     }
 
     /**
@@ -51,21 +51,20 @@ class RS_Timer {
      * @return A formatted string representing the elapsed time.
      */
     [[nodiscard]] std::string elapsedTimeString(int decimal_digits = 3) const {
-        double elapsed_time = elapsed();
-        std::string unit;
-        if (elapsed_time < 1.0) {
-            elapsed_time *= 1000.0;
-            unit = "us";
-        } else if (elapsed_time < 1000.0) {
-            unit = "ms";
-        } else {
-            elapsed_time /= 1000.0;
-            unit = "s";
+        auto end_time_point = std::chrono::high_resolution_clock::now();
+        auto elapsed_us =
+            std::chrono::duration_cast<std::chrono::microseconds>(end_time_point - start_time_point)
+                .count();
+        if (elapsed_us < 1) {
+            return "< 1 us";
         }
-        if (elapsed_time > 0.001) {
-            return format("{:.{}f} {}", elapsed_time, decimal_digits, unit);
+        if (elapsed_us < 1000) {
+            return format("{:.{}f} us", static_cast<double>(elapsed_us), decimal_digits);
         }
-        return "< 1 us";
+        if (elapsed_us < 1000000) {
+            return format("{:.{}f} ms", static_cast<double>(elapsed_us) / 1000.0, decimal_digits);
+        }
+        return format("{:.{}f} s", static_cast<double>(elapsed_us) / 1000000.0, decimal_digits);
     }
 
    private:

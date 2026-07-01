@@ -55,18 +55,33 @@ void RS_SimulationHDF5Recorder::syncCameraPerspectiveRecords(
 ) {
     if (records.empty()) return;
 
+    // A disabled subrecord carries object_num 0, so its presence is read from the first frame.
+    bool has_rgb = records[0].rgb.object_num > 0;
+    bool has_depth = records[0].depth.object_num > 0;
+    bool has_normal = records[0].normal.object_num > 0;
+    bool has_motion = records[0].motion.object_num > 0;
+    bool has_entity_info = records[0].entity_info.object_num > 0;
+
     CameraRecordData &d = _createOrGetCameraRecordData(
         name,
         records[0].width,
         records[0].height,
-        /*has_rgb=*/true,
+        has_rgb,
+        has_depth,
+        has_normal,
+        has_motion,
+        has_entity_info,
         /*has_camera_state=*/true
     );
 
     for (auto &record : records) {
         _appendToGroupNd(d.time_group, "step", record.step, 1, 1);
         _appendToGroupNd(d.time_group, "time_point", record.time, 1, 1);
-        _writeCameraRgbFrame(d, record.rgb);
+        if (has_rgb) _writeCameraRgbFrame(d, record.rgb);
+        if (has_depth) _writeCameraDepthFrame(d, record.depth);
+        if (has_normal) _writeCameraNormalFrame(d, record.normal);
+        if (has_motion) _writeCameraMotionFrame(d, record.motion);
+        if (has_entity_info) _writeCameraEntityInfoFrame(d, record.entity_info);
         _writeCameraStateFrame(d, record.camera_state);
     }
 }
@@ -93,16 +108,17 @@ RS_SimulationHDF5Recorder::_createOrGetStructureRecordData(
     auto &root_group = d.root_group;
     d.time_group = make_shared<HF::Group>(root_group->createGroup("frames/time"));
     if (has_voxel) {
-        d.voxel_group = make_shared<HF::Group>(root_group->createGroup("frames/voxel"));
+        d.voxels_group = make_shared<HF::Group>(root_group->createGroup("frames/voxels"));
     }
     if (has_link) {
-        d.link_group = make_shared<HF::Group>(root_group->createGroup("frames/link"));
+        d.links_group = make_shared<HF::Group>(root_group->createGroup("frames/links"));
     }
     if (has_rigid_body) {
-        d.rigid_body_group = make_shared<HF::Group>(root_group->createGroup("frames/rigid_body"));
+        d.rigid_bodies_group =
+            make_shared<HF::Group>(root_group->createGroup("frames/rigid_bodies"));
     }
     if (has_joint) {
-        d.joint_group = make_shared<HF::Group>(root_group->createGroup("frames/joint"));
+        d.joints_group = make_shared<HF::Group>(root_group->createGroup("frames/joints"));
     }
 
     HF::DataSpace space_1d({0}, {HF::DataSpace::UNLIMITED});
@@ -117,69 +133,69 @@ RS_SimulationHDF5Recorder::_createOrGetStructureRecordData(
     d.time_group->createDataSet<RBigFloat>("time_point", space_1d, create_props_1d);
 
     if (has_voxel) {
-        d.voxel_group->createDataSet<RBigSize>("voxel_num", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RBigSize>("voxel_offset", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RIndex>("body_sid", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RIndex>("voxel_sid", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RIndex>("segment_bid", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RSignedIndex>("index_xyz", space_3d, create_props_3d);
-        d.voxel_group->createDataSet<uint8_t>("connectivity", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<bool>("is_surface", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<bool>("is_rigid", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RIndex>("material", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RFloat>("expansion", space_1d, create_props_1d);
-        d.voxel_group->createDataSet<RFloat>("orientation", space_4d, create_props_4d);
-        d.voxel_group->createDataSet<RFloat>("position", space_3d, create_props_3d);
-        d.voxel_group->createDataSet<RFloat>("ppp_offset", space_3d, create_props_3d);
-        d.voxel_group->createDataSet<RFloat>("nnn_offset", space_3d, create_props_3d);
-        d.voxel_group->createDataSet<RFloat>("linear_velocity", space_3d, create_props_3d);
-        d.voxel_group->createDataSet<RFloat>("angular_velocity", space_3d, create_props_3d);
-        d.voxel_group->createDataSet<RFloat>("poissons_strain", space_3d, create_props_3d);
+        d.voxels_group->createDataSet<RBigSize>("voxel_num", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RBigSize>("voxel_offset", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RIndex>("body_sid", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RIndex>("voxel_sid", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RIndex>("segment_bid", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RSignedIndex>("index_xyz", space_3d, create_props_3d);
+        d.voxels_group->createDataSet<uint8_t>("connectivity", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<bool>("is_surface", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<bool>("is_rigid", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RIndex>("material", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RFloat>("expansion", space_1d, create_props_1d);
+        d.voxels_group->createDataSet<RFloat>("orientation", space_4d, create_props_4d);
+        d.voxels_group->createDataSet<RFloat>("position", space_3d, create_props_3d);
+        d.voxels_group->createDataSet<RFloat>("ppp_offset", space_3d, create_props_3d);
+        d.voxels_group->createDataSet<RFloat>("nnn_offset", space_3d, create_props_3d);
+        d.voxels_group->createDataSet<RFloat>("linear_velocity", space_3d, create_props_3d);
+        d.voxels_group->createDataSet<RFloat>("angular_velocity", space_3d, create_props_3d);
+        d.voxels_group->createDataSet<RFloat>("poissons_strain", space_3d, create_props_3d);
     }
 
     if (has_link) {
-        d.link_group->createDataSet<RBigSize>("link_num", space_1d, create_props_1d);
-        d.link_group->createDataSet<RBigSize>("link_offset", space_1d, create_props_1d);
-        d.link_group->createDataSet<RIndex>("voxel_neg_sid", space_1d, create_props_1d);
-        d.link_group->createDataSet<RIndex>("voxel_pos_sid", space_1d, create_props_1d);
-        d.link_group->createDataSet<bool>("is_failed", space_1d, create_props_1d);
-        d.link_group->createDataSet<RFloat>("strain", space_1d, create_props_1d);
-        d.link_group->createDataSet<RFloat>("stress", space_1d, create_props_1d);
+        d.links_group->createDataSet<RBigSize>("link_num", space_1d, create_props_1d);
+        d.links_group->createDataSet<RBigSize>("link_offset", space_1d, create_props_1d);
+        d.links_group->createDataSet<RIndex>("voxel_neg_sid", space_1d, create_props_1d);
+        d.links_group->createDataSet<RIndex>("voxel_pos_sid", space_1d, create_props_1d);
+        d.links_group->createDataSet<bool>("is_failed", space_1d, create_props_1d);
+        d.links_group->createDataSet<RFloat>("strain", space_1d, create_props_1d);
+        d.links_group->createDataSet<RFloat>("stress", space_1d, create_props_1d);
     }
 
     if (has_rigid_body) {
-        d.rigid_body_group->createDataSet<RBigSize>("rigid_body_num", space_1d, create_props_1d);
-        d.rigid_body_group->createDataSet<RBigSize>("rigid_body_offset", space_1d, create_props_1d);
-        d.rigid_body_group->createDataSet<RIndex>("rigid_body_sid", space_1d, create_props_1d);
-        d.rigid_body_group->createDataSet<RIndex>("body_sid", space_1d, create_props_1d);
-        d.rigid_body_group->createDataSet<RIndex>("segment_bid", space_1d, create_props_1d);
-        d.rigid_body_group->createDataSet<RFloat>("mass", space_1d, create_props_1d);
-        d.rigid_body_group->createDataSet<RFloat>("orientation", space_4d, create_props_4d);
-        d.rigid_body_group->createDataSet<RFloat>("com", space_3d, create_props_3d);
-        d.rigid_body_group->createDataSet<RFloat>("linear_velocity", space_3d, create_props_3d);
-        d.rigid_body_group->createDataSet<RFloat>("angular_velocity", space_3d, create_props_3d);
+        d.rigid_bodies_group->createDataSet<RBigSize>("rigid_body_num", space_1d, create_props_1d);
+        d.rigid_bodies_group->createDataSet<RBigSize>("rigid_body_offset", space_1d, create_props_1d);
+        d.rigid_bodies_group->createDataSet<RIndex>("rigid_body_sid", space_1d, create_props_1d);
+        d.rigid_bodies_group->createDataSet<RIndex>("body_sid", space_1d, create_props_1d);
+        d.rigid_bodies_group->createDataSet<RIndex>("segment_bid", space_1d, create_props_1d);
+        d.rigid_bodies_group->createDataSet<RFloat>("mass", space_1d, create_props_1d);
+        d.rigid_bodies_group->createDataSet<RFloat>("orientation", space_4d, create_props_4d);
+        d.rigid_bodies_group->createDataSet<RFloat>("com", space_3d, create_props_3d);
+        d.rigid_bodies_group->createDataSet<RFloat>("linear_velocity", space_3d, create_props_3d);
+        d.rigid_bodies_group->createDataSet<RFloat>("angular_velocity", space_3d, create_props_3d);
     }
 
     if (has_joint) {
-        d.joint_group->createDataSet<RBigSize>("joint_num", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RBigSize>("joint_offset", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RIndex>("rigid_body_a_sid", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RIndex>("rigid_body_b_sid", space_1d, create_props_1d);
-        d.joint_group->createDataSet<int>("type", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("position", space_3d, create_props_3d);
-        d.joint_group->createDataSet<RFloat>("axis", space_3d, create_props_3d);
+        d.joints_group->createDataSet<RBigSize>("joint_num", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RBigSize>("joint_offset", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RIndex>("rigid_body_a_sid", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RIndex>("rigid_body_b_sid", space_1d, create_props_1d);
+        d.joints_group->createDataSet<int>("type", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("position", space_3d, create_props_3d);
+        d.joints_group->createDataSet<RFloat>("axis", space_3d, create_props_3d);
         // Hinge fields
-        d.joint_group->createDataSet<RIndex>("hinge_signal_sid", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("hinge_min", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("hinge_max", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("hinge_angle", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("hinge_torque", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RIndex>("hinge_signal_sid", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("hinge_min", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("hinge_max", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("hinge_angle", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("hinge_torque", space_1d, create_props_1d);
         // Prismatic fields
-        d.joint_group->createDataSet<RIndex>("prismatic_signal_sid", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("prismatic_min", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("prismatic_max", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("prismatic_distance", space_1d, create_props_1d);
-        d.joint_group->createDataSet<RFloat>("prismatic_force", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RIndex>("prismatic_signal_sid", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("prismatic_min", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("prismatic_max", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("prismatic_distance", space_1d, create_props_1d);
+        d.joints_group->createDataSet<RFloat>("prismatic_force", space_1d, create_props_1d);
     }
 
     _structure_record_data[structure_name] = d;
@@ -192,6 +208,10 @@ RS_SimulationHDF5Recorder::_createOrGetCameraRecordData(
     RSize width,
     RSize height,
     bool has_rgb,
+    bool has_depth,
+    bool has_normal,
+    bool has_motion,
+    bool has_entity_info,
     bool has_camera_state
 ) {
     if (_camera_record_data.find(camera_name) != _camera_record_data.end()) {
@@ -207,6 +227,19 @@ RS_SimulationHDF5Recorder::_createOrGetCameraRecordData(
     if (has_rgb) {
         d.rgb_group = make_shared<HF::Group>(root_group->createGroup("frames/rgb"));
     }
+    if (has_depth) {
+        d.depth_group = make_shared<HF::Group>(root_group->createGroup("frames/depth"));
+    }
+    if (has_normal) {
+        d.normal_group = make_shared<HF::Group>(root_group->createGroup("frames/normal"));
+    }
+    if (has_motion) {
+        d.motion_group = make_shared<HF::Group>(root_group->createGroup("frames/motion"));
+    }
+    if (has_entity_info) {
+        d.entity_info_group =
+            make_shared<HF::Group>(root_group->createGroup("frames/entity_info"));
+    }
     if (has_camera_state) {
         d.camera_state_group =
             make_shared<HF::Group>(root_group->createGroup("frames/camera_state"));
@@ -215,19 +248,44 @@ RS_SimulationHDF5Recorder::_createOrGetCameraRecordData(
     HF::DataSpace space_1d({0}, {HF::DataSpace::UNLIMITED});
     HF::DataSpace space_3d({0, 3}, {HF::DataSpace::UNLIMITED, 3});
     HF::DataSpace space_4d({0, 4}, {HF::DataSpace::UNLIMITED, 4});
-    HF::DataSpace space_cam({0, height, width, 3}, {HF::DataSpace::UNLIMITED, height, width, 3});
+    HF::DataSpace space_rgb({0, height, width, 3}, {HF::DataSpace::UNLIMITED, height, width, 3});
+    HF::DataSpace space_depth({0, height, width}, {HF::DataSpace::UNLIMITED, height, width});
+    HF::DataSpace space_normal({0, height, width, 3}, {HF::DataSpace::UNLIMITED, height, width, 3});
+    HF::DataSpace space_motion({0, height, width, 2}, {HF::DataSpace::UNLIMITED, height, width, 2});
 
-    HF::DataSetCreateProps create_props_1d, create_props_3d, create_props_4d, create_props_cam;
+    HF::DataSetCreateProps create_props_1d, create_props_3d, create_props_4d;
+    HF::DataSetCreateProps create_props_rgb, create_props_depth, create_props_normal,
+        create_props_motion;
     create_props_1d.add(HF::Chunking(chunk_size));
     create_props_3d.add(HF::Chunking(chunk_size, 3));
     create_props_4d.add(HF::Chunking(chunk_size, 4));
-    create_props_cam.add(HF::Chunking(1, height, width, 3));
+    create_props_rgb.add(HF::Chunking(1, height, width, 3));
+    create_props_depth.add(HF::Chunking(1, height, width));
+    create_props_normal.add(HF::Chunking(1, height, width, 3));
+    create_props_motion.add(HF::Chunking(1, height, width, 2));
 
     d.time_group->createDataSet<RBigIndex>("step", space_1d, create_props_1d);
     d.time_group->createDataSet<RBigFloat>("time_point", space_1d, create_props_1d);
 
     if (has_rgb) {
-        d.rgb_group->createDataSet<uint8_t>("pixel", space_cam, create_props_cam);
+        d.rgb_group->createDataSet<uint8_t>("pixel", space_rgb, create_props_rgb);
+    }
+
+    if (has_depth) {
+        d.depth_group->createDataSet<float>("pixel", space_depth, create_props_depth);
+    }
+
+    if (has_normal) {
+        d.normal_group->createDataSet<float>("pixel", space_normal, create_props_normal);
+    }
+
+    if (has_motion) {
+        d.motion_group->createDataSet<float>("pixel", space_motion, create_props_motion);
+    }
+
+    if (has_entity_info) {
+        d.entity_info_group->createDataSet<RIndex>("entity_type", space_depth, create_props_depth);
+        d.entity_info_group->createDataSet<RIndex>("entity_gid", space_depth, create_props_depth);
     }
 
     if (has_camera_state) {
@@ -321,24 +379,24 @@ void RS_SimulationHDF5Recorder::_writeStructureVoxelFrame(
         )
         .wait();
 
-    _appendToGroupNd(d.voxel_group, "voxel_num", &v_num, 1, 1);
-    _appendToGroupNd(d.voxel_group, "voxel_offset", &d.voxel_offset, 1, 1);
-    _appendToGroupNd(d.voxel_group, "body_sid", v_body_sid_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "voxel_sid", v_voxel_sid_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "segment_bid", v_segment_bid_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "index_xyz", v_index_xyz_buf.get(), v_num, 3);
-    _appendToGroupNd(d.voxel_group, "connectivity", v_connectivity_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "is_surface", v_is_surface_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "is_rigid", v_is_rigid_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "material", v_material_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "expansion", v_expansion_buf.get(), v_num, 1);
-    _appendToGroupNd(d.voxel_group, "orientation", v_orientation_buf.get(), v_num, 4);
-    _appendToGroupNd(d.voxel_group, "position", v_position_buf.get(), v_num, 3);
-    _appendToGroupNd(d.voxel_group, "ppp_offset", v_ppp_offset_buf.get(), v_num, 3);
-    _appendToGroupNd(d.voxel_group, "nnn_offset", v_nnn_offset_buf.get(), v_num, 3);
-    _appendToGroupNd(d.voxel_group, "linear_velocity", v_linear_velocity_buf.get(), v_num, 3);
-    _appendToGroupNd(d.voxel_group, "angular_velocity", v_angular_velocity_buf.get(), v_num, 3);
-    _appendToGroupNd(d.voxel_group, "poissons_strain", v_poissons_strain_buf.get(), v_num, 3);
+    _appendToGroupNd(d.voxels_group, "voxel_num", &v_num, 1, 1);
+    _appendToGroupNd(d.voxels_group, "voxel_offset", &d.voxel_offset, 1, 1);
+    _appendToGroupNd(d.voxels_group, "body_sid", v_body_sid_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "voxel_sid", v_voxel_sid_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "segment_bid", v_segment_bid_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "index_xyz", v_index_xyz_buf.get(), v_num, 3);
+    _appendToGroupNd(d.voxels_group, "connectivity", v_connectivity_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "is_surface", v_is_surface_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "is_rigid", v_is_rigid_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "material", v_material_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "expansion", v_expansion_buf.get(), v_num, 1);
+    _appendToGroupNd(d.voxels_group, "orientation", v_orientation_buf.get(), v_num, 4);
+    _appendToGroupNd(d.voxels_group, "position", v_position_buf.get(), v_num, 3);
+    _appendToGroupNd(d.voxels_group, "ppp_offset", v_ppp_offset_buf.get(), v_num, 3);
+    _appendToGroupNd(d.voxels_group, "nnn_offset", v_nnn_offset_buf.get(), v_num, 3);
+    _appendToGroupNd(d.voxels_group, "linear_velocity", v_linear_velocity_buf.get(), v_num, 3);
+    _appendToGroupNd(d.voxels_group, "angular_velocity", v_angular_velocity_buf.get(), v_num, 3);
+    _appendToGroupNd(d.voxels_group, "poissons_strain", v_poissons_strain_buf.get(), v_num, 3);
     d.voxel_offset += v_num;
 }
 
@@ -372,13 +430,13 @@ void RS_SimulationHDF5Recorder::_writeStructureLinkFrame(
         )
         .wait();
 
-    _appendToGroupNd(d.link_group, "link_num", &l_num, 1, 1);
-    _appendToGroupNd(d.link_group, "link_offset", &d.link_offset, 1, 1);
-    _appendToGroupNd(d.link_group, "voxel_neg_sid", l_voxel_neg_sid_buf.get(), l_num, 1);
-    _appendToGroupNd(d.link_group, "voxel_pos_sid", l_voxel_pos_sid_buf.get(), l_num, 1);
-    _appendToGroupNd(d.link_group, "is_failed", l_is_failed_buf.get(), l_num, 1);
-    _appendToGroupNd(d.link_group, "strain", l_strain_buf.get(), l_num, 1);
-    _appendToGroupNd(d.link_group, "stress", l_stress_buf.get(), l_num, 1);
+    _appendToGroupNd(d.links_group, "link_num", &l_num, 1, 1);
+    _appendToGroupNd(d.links_group, "link_offset", &d.link_offset, 1, 1);
+    _appendToGroupNd(d.links_group, "voxel_neg_sid", l_voxel_neg_sid_buf.get(), l_num, 1);
+    _appendToGroupNd(d.links_group, "voxel_pos_sid", l_voxel_pos_sid_buf.get(), l_num, 1);
+    _appendToGroupNd(d.links_group, "is_failed", l_is_failed_buf.get(), l_num, 1);
+    _appendToGroupNd(d.links_group, "strain", l_strain_buf.get(), l_num, 1);
+    _appendToGroupNd(d.links_group, "stress", l_stress_buf.get(), l_num, 1);
     d.link_offset += l_num;
 }
 
@@ -430,19 +488,19 @@ void RS_SimulationHDF5Recorder::_writeStructureRigidBodyFrame(
         )
         .wait();
 
-    _appendToGroupNd(d.rigid_body_group, "rigid_body_num", &rb_num, 1, 1);
-    _appendToGroupNd(d.rigid_body_group, "rigid_body_offset", &d.rigid_body_offset, 1, 1);
-    _appendToGroupNd(d.rigid_body_group, "rigid_body_sid", rb_rigid_body_sid_buf.get(), rb_num, 1);
-    _appendToGroupNd(d.rigid_body_group, "body_sid", rb_body_sid_buf.get(), rb_num, 1);
-    _appendToGroupNd(d.rigid_body_group, "segment_bid", rb_segment_bid_buf.get(), rb_num, 1);
-    _appendToGroupNd(d.rigid_body_group, "mass", rb_mass_buf.get(), rb_num, 1);
-    _appendToGroupNd(d.rigid_body_group, "orientation", rb_orientation_buf.get(), rb_num, 4);
-    _appendToGroupNd(d.rigid_body_group, "com", rb_com_buf.get(), rb_num, 3);
+    _appendToGroupNd(d.rigid_bodies_group, "rigid_body_num", &rb_num, 1, 1);
+    _appendToGroupNd(d.rigid_bodies_group, "rigid_body_offset", &d.rigid_body_offset, 1, 1);
+    _appendToGroupNd(d.rigid_bodies_group, "rigid_body_sid", rb_rigid_body_sid_buf.get(), rb_num, 1);
+    _appendToGroupNd(d.rigid_bodies_group, "body_sid", rb_body_sid_buf.get(), rb_num, 1);
+    _appendToGroupNd(d.rigid_bodies_group, "segment_bid", rb_segment_bid_buf.get(), rb_num, 1);
+    _appendToGroupNd(d.rigid_bodies_group, "mass", rb_mass_buf.get(), rb_num, 1);
+    _appendToGroupNd(d.rigid_bodies_group, "orientation", rb_orientation_buf.get(), rb_num, 4);
+    _appendToGroupNd(d.rigid_bodies_group, "com", rb_com_buf.get(), rb_num, 3);
     _appendToGroupNd(
-        d.rigid_body_group, "linear_velocity", rb_linear_velocity_buf.get(), rb_num, 3
+        d.rigid_bodies_group, "linear_velocity", rb_linear_velocity_buf.get(), rb_num, 3
     );
     _appendToGroupNd(
-        d.rigid_body_group, "angular_velocity", rb_angular_velocity_buf.get(), rb_num, 3
+        d.rigid_bodies_group, "angular_velocity", rb_angular_velocity_buf.get(), rb_num, 3
     );
     d.rigid_body_offset += rb_num;
 }
@@ -515,27 +573,27 @@ void RS_SimulationHDF5Recorder::_writeStructureJointFrame(
         )
         .wait();
 
-    _appendToGroupNd(d.joint_group, "joint_num", &j_num, 1, 1);
-    _appendToGroupNd(d.joint_group, "joint_offset", &d.joint_offset, 1, 1);
-    _appendToGroupNd(d.joint_group, "rigid_body_a_sid", j_rigid_body_a_sid_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "rigid_body_b_sid", j_rigid_body_b_sid_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "type", j_type_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "position", j_position_buf.get(), j_num, 3);
-    _appendToGroupNd(d.joint_group, "axis", j_axis_buf.get(), j_num, 3);
+    _appendToGroupNd(d.joints_group, "joint_num", &j_num, 1, 1);
+    _appendToGroupNd(d.joints_group, "joint_offset", &d.joint_offset, 1, 1);
+    _appendToGroupNd(d.joints_group, "rigid_body_a_sid", j_rigid_body_a_sid_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "rigid_body_b_sid", j_rigid_body_b_sid_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "type", j_type_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "position", j_position_buf.get(), j_num, 3);
+    _appendToGroupNd(d.joints_group, "axis", j_axis_buf.get(), j_num, 3);
     // Hinge
-    _appendToGroupNd(d.joint_group, "hinge_signal_sid", j_hinge_signal_sid_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "hinge_min", j_hinge_min_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "hinge_max", j_hinge_max_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "hinge_angle", j_hinge_angle_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "hinge_torque", j_hinge_torque_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "hinge_signal_sid", j_hinge_signal_sid_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "hinge_min", j_hinge_min_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "hinge_max", j_hinge_max_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "hinge_angle", j_hinge_angle_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "hinge_torque", j_hinge_torque_buf.get(), j_num, 1);
     // Prismatic
     _appendToGroupNd(
-        d.joint_group, "prismatic_signal_sid", j_prismatic_signal_sid_buf.get(), j_num, 1
+        d.joints_group, "prismatic_signal_sid", j_prismatic_signal_sid_buf.get(), j_num, 1
     );
-    _appendToGroupNd(d.joint_group, "prismatic_min", j_prismatic_min_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "prismatic_max", j_prismatic_max_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "prismatic_distance", j_prismatic_distance_buf.get(), j_num, 1);
-    _appendToGroupNd(d.joint_group, "prismatic_force", j_prismatic_force_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "prismatic_min", j_prismatic_min_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "prismatic_max", j_prismatic_max_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "prismatic_distance", j_prismatic_distance_buf.get(), j_num, 1);
+    _appendToGroupNd(d.joints_group, "prismatic_force", j_prismatic_force_buf.get(), j_num, 1);
     d.joint_offset += j_num;
 }
 
@@ -551,6 +609,70 @@ void RS_SimulationHDF5Recorder::_writeCameraRgbFrame(
     dataset.resize(dimensions);
     dataset.select({offset, 0, 0, 0}, {1, d.height, d.width, 3})
         .write_raw(reinterpret_cast<uint8_t *>(rgb.pixel));
+}
+
+void RS_SimulationHDF5Recorder::_writeCameraDepthFrame(
+    CameraRecordData &d,
+    const RS_WorldCameraRecordBase::Depth &depth
+) {
+    HF::DataSetAccessProps access_props;
+    auto dataset = d.depth_group->getDataSet("pixel", access_props);
+    auto dimensions = dataset.getDimensions();
+    size_t offset = dimensions[0];
+    dimensions[0] += 1;
+    dataset.resize(dimensions);
+    dataset.select({offset, 0, 0}, {1, d.height, d.width})
+        .write_raw(reinterpret_cast<float *>(depth.pixel));
+}
+
+void RS_SimulationHDF5Recorder::_writeCameraNormalFrame(
+    CameraRecordData &d,
+    const RS_WorldCameraRecordBase::Normal &normal
+) {
+    HF::DataSetAccessProps access_props;
+    auto dataset = d.normal_group->getDataSet("pixel", access_props);
+    auto dimensions = dataset.getDimensions();
+    size_t offset = dimensions[0];
+    dimensions[0] += 1;
+    dataset.resize(dimensions);
+    dataset.select({offset, 0, 0, 0}, {1, d.height, d.width, 3})
+        .write_raw(reinterpret_cast<float *>(normal.pixel));
+}
+
+void RS_SimulationHDF5Recorder::_writeCameraMotionFrame(
+    CameraRecordData &d,
+    const RS_WorldCameraRecordBase::Motion &motion
+) {
+    HF::DataSetAccessProps access_props;
+    auto dataset = d.motion_group->getDataSet("pixel", access_props);
+    auto dimensions = dataset.getDimensions();
+    size_t offset = dimensions[0];
+    dimensions[0] += 1;
+    dataset.resize(dimensions);
+    dataset.select({offset, 0, 0, 0}, {1, d.height, d.width, 2})
+        .write_raw(reinterpret_cast<float *>(motion.pixel));
+}
+
+void RS_SimulationHDF5Recorder::_writeCameraEntityInfoFrame(
+    CameraRecordData &d,
+    const RS_WorldCameraRecordBase::EntityInfo &entity_info
+) {
+    HF::DataSetAccessProps access_props;
+
+    auto entity_type_dataset = d.entity_info_group->getDataSet("entity_type", access_props);
+    auto entity_type_dimensions = entity_type_dataset.getDimensions();
+    size_t offset = entity_type_dimensions[0];
+    entity_type_dimensions[0] += 1;
+    entity_type_dataset.resize(entity_type_dimensions);
+    entity_type_dataset.select({offset, 0, 0}, {1, d.height, d.width})
+        .write_raw(reinterpret_cast<RIndex *>(entity_info.entity_type));
+
+    auto entity_gid_dataset = d.entity_info_group->getDataSet("entity_gid", access_props);
+    auto entity_gid_dimensions = entity_gid_dataset.getDimensions();
+    entity_gid_dimensions[0] += 1;
+    entity_gid_dataset.resize(entity_gid_dimensions);
+    entity_gid_dataset.select({offset, 0, 0}, {1, d.height, d.width})
+        .write_raw(entity_info.entity_gid);
 }
 
 void RS_SimulationHDF5Recorder::_writeCameraStateFrame(

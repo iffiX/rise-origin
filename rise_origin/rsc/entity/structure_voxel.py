@@ -722,7 +722,7 @@ class StructureVoxelSignal(RSC_StructureVoxelSignal):
 
     Args:
         name: Signal name (unique within the structure).
-        source_controller_name: Controller that drives these signals each
+        source_controller_reference: Controller that drives these signals each
             callback step.
         expansion_signal_num: Number of voxel-expansion signals.
         hinge_signal_num: Number of hinge-joint signals.
@@ -733,14 +733,14 @@ class StructureVoxelSignal(RSC_StructureVoxelSignal):
         self,
         name: str = "default",
         *,
-        source_controller_name: str = "",
+        source_controller_reference: str = "",
         expansion_signal_num: int = 0,
         hinge_signal_num: int = 0,
         prismatic_signal_num: int = 0,
     ) -> None:
         super().__init__()
         self.name = name
-        self.source_controller_name = source_controller_name
+        self.source_controller_reference = source_controller_reference
         self.expansion_signal_num = expansion_signal_num
         self.hinge_signal_num = hinge_signal_num
         self.prismatic_signal_num = prismatic_signal_num

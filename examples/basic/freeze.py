@@ -87,7 +87,7 @@ def build():
     return _common.make_world("freeze", materials=materials, structures=structures)
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Sweep the frozen arc around the ring, toggling each box as it crosses."""
     if _viewer is None or _viewer.handle is None:
         return

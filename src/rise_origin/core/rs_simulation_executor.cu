@@ -12,7 +12,9 @@
 #include "rise_origin/logic/mesh/rs_mesh_triangle_c.h"
 #include "rise_origin/logic/metric/rs_basic_metric_c.h"
 #include "rise_origin/logic/record/rs_basic_record_c.h"
+#include "rise_origin/logic/record/rs_camera_record_c.h"
 #include "rise_origin/logic/record/rs_intersect_region_c.h"
+#include "rise_origin/logic/record/rs_structure_record_c.h"
 #include "rise_origin/logic/rigid/rs_constraint_c.h"
 #include "rise_origin/logic/rigid/rs_contact_c.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_c.h"
@@ -77,11 +79,9 @@ static auto ensure_vector_size = [](auto &vector, RSize size) {
 RS_SimulationExecutor::RS_SimulationExecutor(
     RS_MemoryProvider *device_provider,
     RS_MemoryProvider *host_provider,
-    RS_WorldCallback callback
+    RS_WorldCallback *callback
 )
-    : _device_provider(device_provider),
-      _host_provider(host_provider),
-      _callback(std::move(callback)) {
+    : _device_provider(device_provider), _host_provider(host_provider), _callback(callback) {
     if (spdlog::get("root")) {
         // Only init logger if root logger is created
         _logger = spdlog::get("root")->clone("simulation executor");
@@ -110,7 +110,6 @@ void RS_SimulationExecutor::init(RS_Simulation *simulation) {
     _contact_bvh_rebuild_sub_interval = sim_rsc.contact.bvh_rebuild_sub_interval;
     _contact_bvh_refit_sub_interval = sim_rsc.contact.bvh_refit_sub_interval;
     _sentinel_enabled = sim_rsc.sentinel.is_enabled;
-    _sentinel_degenerate_min_dt = sim_rsc.sentinel.degenerate_min_dt;
     _simulation_compute_accuracy = sim_rsc.runtime.compute_accuracy;
 }
 
@@ -315,7 +314,7 @@ RFloat RS_SimulationExecutor::_runDtUpdate(bool &is_dt_normal) {
         }
 
         // Degenerate dt: report not-normal and let step() drive the sentinel.
-        if (!(dt >= _sentinel_degenerate_min_dt)) {
+        if (!(dt >= RFloat(1e-7))) {
             is_dt_normal = false;
             dt = 0;
             return;
@@ -1125,7 +1124,16 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
 void RS_SimulationExecutor::_performCallback() {
     if (!_callback) return;
     _runWithCommandExecutionGuard([&](auto *k_ptr, auto *, auto, bool) {
+        // Complete in-flight operations so the timer measures the copy.
+        _device_provider->sync();
+
+        RS_Timer timer;
         _kernel_manager->syncControllerRecords();
+
+        RS_LOG(
+            _logger, debug, "Callback sync controller record takes: {}.", timer.elapsedTimeString()
+        );
+        timer.reset();
 
         auto names = _simulation->getControllerNames();
         auto by_name = _kernel_manager->getControllerSignalsAndRecords(names);
@@ -1140,9 +1148,17 @@ void RS_SimulationExecutor::_performCallback() {
             controllers.emplace_back(std::move(controller));
         }
 
-        _callback(_simulation->name, k_ptr->getHostTime(), controllers);
+        if (_callback) (*_callback)(k_ptr->getHostTime(), controllers);
+
+        RS_LOG(_logger, debug, "Callback call takes: {}.", timer.elapsedTimeString());
+        timer.reset();
 
         _kernel_manager->syncControllerSignals();
+
+        RS_LOG(
+            _logger, debug, "Callback sync controller signal takes: {}.", timer.elapsedTimeString()
+        );
+        timer.reset();
     });
 }
 
@@ -1156,6 +1172,17 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             auto &ctx = k_ptr->ctx;
             using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
+            // SVGF needs last frame's aux for the disocclusion gate: ping-pong it
+            // here so the info trace refills camera_aux_* while camera_prev_aux_*
+            // holds the previous snapshot. Swapped before the sync below so the
+            // pointers reach the device this frame.
+            if (k_ptr->vision_denoise_type == RSE_VISION_DENOISE_SVGF &&
+                ctx.camera_info_ray_layout.size() > 0) {
+                exchange(ctx.camera_aux_normal, ctx.camera_prev_aux_normal);
+                exchange(ctx.camera_aux_depth_z, ctx.camera_prev_aux_depth_z);
+                exchange(ctx.camera_aux_object_key, ctx.camera_prev_aux_object_key);
+            }
+
             p_ptr->template run<
                 RSCF_LaunchWithLayout<RS_CameraCompute<>::RSCF_UpdateCamera, KernelType>>(
                 {ctx.camera_layout.size(), RS_AUTO_BLOCK_SIZE, false}, ctx.camera_layout
@@ -1164,8 +1191,8 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             p_ptr->template run<RSCF_LaunchWithLayoutPerSegment<
                 RS_CameraCompute<>::RSCF_ClearCameraCanvas,
                 KernelType>>(
-                {ctx.camera_pixel_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
-                ctx.camera_pixel_record_layout
+                {ctx.camera_rgb_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                ctx.camera_rgb_record_layout
             );
 
             // Light list is shared by ReSTIR resample and basic-mode NEE.
@@ -1173,7 +1200,7 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             ensure_vector_size(ctx.light_weight, emissive_num + 1);
             ensure_vector_size(ctx.light_cdf, emissive_num + 1);
 
-            // Light buffers may have reallocated, needs to update kernel.
+            // Sycnrhonize kernel context with updated aux buffers and light data.
             _kernel_manager->markKernelModified();
 
             float sun_weight = float(ctx.cosmic_background_vision_mem.sun_color.luminance()) *
@@ -1301,8 +1328,11 @@ void RS_SimulationExecutor::_updateLightAndVision() {
                             ctx.camera_info_ray_layout,
                             ctx.camera_current_rgb_canvas,
                             ctx.camera_next_rgb_canvas,
+                            ctx.camera_denoiser_variance,
+                            ctx.camera_next_denoiser_variance,
                             pass
                         );
+                        exchange(ctx.camera_denoiser_variance, ctx.camera_next_denoiser_variance);
                     } else {
                         p_ptr->template run<RSCF_LaunchWithLayoutPerSegment<
                             RS_VisionDenoiseCompute<>::RSCF_AtrousFilter,
@@ -1315,14 +1345,6 @@ void RS_SimulationExecutor::_updateLightAndVision() {
                         );
                     }
                     exchange(ctx.camera_current_rgb_canvas, ctx.camera_next_rgb_canvas);
-                }
-                if (denoise_type == RSE_VISION_DENOISE_SVGF) {
-                    p_ptr->template run<RSCF_LaunchWithLayoutPerSegment<
-                        RS_VisionDenoiseCompute<>::RSCF_SVGFCopyAux,
-                        KernelType>>(
-                        {ctx.camera_info_ray_layout.size(), RS_AUTO_BLOCK_SIZE, false},
-                        ctx.camera_info_ray_layout
-                    );
                 }
             }
 
@@ -1473,7 +1495,8 @@ void RS_SimulationExecutor::_storeRecorderRecords() {
              * Structure records
              ****************************************************************/
             if (ctx.host_data->structure_record_layout.size() != 0) {
-                p_ptr->template run<RSCF_LaunchUpdateRootRecord<KernelType>>(
+                p_ptr->template run<
+                    RSCF_LaunchUpdateRootRecord<RSCF_UpdateStructureRootRecord, KernelType>>(
                     {ctx.structure_records.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.structure_recorder_buffers,
                     ctx.structure_records,
@@ -1534,19 +1557,52 @@ void RS_SimulationExecutor::_storeRecorderRecords() {
              * Camera records
              ****************************************************************/
             if (ctx.host_data->camera_record_layout.size() != 0) {
-                p_ptr->template run<RSCF_LaunchUpdateRootRecord<KernelType>>(
+                p_ptr->template run<
+                    RSCF_LaunchUpdateRootRecord<RSCF_UpdateCameraRootRecord, KernelType>>(
                     {ctx.camera_records.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.camera_recorder_buffers,
                     ctx.camera_records,
-                    ctx.camera_pixel_record_layout,
+                    ctx.camera_rgb_record_layout,
+                    ctx.camera_depth_record_layout,
+                    ctx.camera_normal_record_layout,
+                    ctx.camera_motion_record_layout,
+                    ctx.camera_entity_info_record_layout,
                     ctx.camera_state_record_layout
                 );
 
                 p_ptr->template run<
-                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraPixelRecord, KernelType>>(
-                    {ctx.camera_pixel_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraRGBRecord, KernelType>>(
+                    {ctx.camera_rgb_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.camera_records,
-                    ctx.camera_pixel_record_layout
+                    ctx.camera_rgb_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraDepthRecord, KernelType>>(
+                    {ctx.camera_depth_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_depth_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraNormalRecord, KernelType>>(
+                    {ctx.camera_normal_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_normal_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraMotionRecord, KernelType>>(
+                    {ctx.camera_motion_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_motion_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraEntityInfoRecord, KernelType>>(
+                    {ctx.camera_entity_info_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_entity_info_record_layout
                 );
 
                 p_ptr->template run<
@@ -1570,7 +1626,8 @@ void RS_SimulationExecutor::_storeControllerRecords() {
              * Structure records
              ****************************************************************/
             if (ctx.host_data->structure_record_layout.size() != 0) {
-                p_ptr->template run<RSCF_LaunchUpdateRootRecord<KernelType>>(
+                p_ptr->template run<
+                    RSCF_LaunchUpdateRootRecord<RSCF_UpdateStructureRootRecord, KernelType>>(
                     {ctx.structure_records.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.structure_controller_buffers,
                     ctx.structure_records,
@@ -1631,19 +1688,52 @@ void RS_SimulationExecutor::_storeControllerRecords() {
              * Camera records
              ****************************************************************/
             if (ctx.host_data->camera_record_layout.size() != 0) {
-                p_ptr->template run<RSCF_LaunchUpdateRootRecord<KernelType>>(
+                p_ptr->template run<
+                    RSCF_LaunchUpdateRootRecord<RSCF_UpdateCameraRootRecord, KernelType>>(
                     {ctx.camera_records.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.camera_controller_buffers,
                     ctx.camera_records,
-                    ctx.camera_pixel_record_layout,
+                    ctx.camera_rgb_record_layout,
+                    ctx.camera_depth_record_layout,
+                    ctx.camera_normal_record_layout,
+                    ctx.camera_motion_record_layout,
+                    ctx.camera_entity_info_record_layout,
                     ctx.camera_state_record_layout
                 );
 
                 p_ptr->template run<
-                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraPixelRecord, KernelType>>(
-                    {ctx.camera_pixel_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraRGBRecord, KernelType>>(
+                    {ctx.camera_rgb_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.camera_records,
-                    ctx.camera_pixel_record_layout
+                    ctx.camera_rgb_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraDepthRecord, KernelType>>(
+                    {ctx.camera_depth_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_depth_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraNormalRecord, KernelType>>(
+                    {ctx.camera_normal_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_normal_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraMotionRecord, KernelType>>(
+                    {ctx.camera_motion_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_motion_record_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreCameraEntityInfoRecord, KernelType>>(
+                    {ctx.camera_entity_info_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.camera_records,
+                    ctx.camera_entity_info_record_layout
                 );
 
                 p_ptr->template run<

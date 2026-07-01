@@ -40,6 +40,19 @@ find_package(Boost REQUIRED COMPONENTS filesystem program_options fiber context)
 find_package(TBB REQUIRED)
 find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
 
-if (BUILD_RISE_ORIGIN)
+if (RISE_ORIGIN_BUILD_CORE)
     rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/pybind11 BINARY_DIR ${CMAKE_BINARY_DIR}/lib/pybind11)
+endif ()
+
+################################################################
+# VR: OpenXR loader (vendored) + Vulkan graphics binding
+################################################################
+# The VR session component talks to an OpenXR runtime (Monado/WiVRn on Linux,
+# Meta Quest Link on Windows) through the vendored loader, and binds Vulkan as
+# its graphics API so one client source serves both runtimes.
+if (RISE_ORIGIN_BUILD_CORE_WITH_VR)
+    find_package(Vulkan REQUIRED)
+    message(STATUS "Found Vulkan: ${Vulkan_LIBRARY}")
+    rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/openxr BINARY_DIR ${CMAKE_BINARY_DIR}/lib/openxr)
+    rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/imgui BINARY_DIR ${CMAKE_BINARY_DIR}/lib/imgui)
 endif ()

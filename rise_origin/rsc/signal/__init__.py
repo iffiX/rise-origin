@@ -11,7 +11,7 @@ Example::
     from rise_origin import rsc
 
     push = rsc.signal.Force(
-        "push", structure_name="cube", source_controller_name="pilot",
+        "push", structure_name="cube", source_controller_reference="pilot",
         body_sid=0, segment_bid=0,
     )
 """

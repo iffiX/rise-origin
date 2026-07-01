@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "kernel_manager/rs_kernel_camera_perspective_manager.h"
+#include "kernel_manager/rs_kernel_camera_stereo_manager.h"
 #include "kernel_manager/rs_kernel_cosmic_background_manager.h"
 #include "kernel_manager/rs_kernel_floor_manager.h"
 #include "kernel_manager/rs_kernel_force_manager.h"
@@ -54,7 +55,8 @@ RS_ENUM(
     (RSE_KERNEL_MANAGER_FORCE, 4),
     (RSE_KERNEL_MANAGER_TORQUE, 5),
     (RSE_KERNEL_MANAGER_TRANSFORM, 6),
-    (RSE_KERNEL_MANAGER_INTERSECT_REGION, 7)
+    (RSE_KERNEL_MANAGER_INTERSECT_REGION, 7),
+    (RSE_KERNEL_MANAGER_CAMERA_STEREO, 8)
 )
 
 /**
@@ -77,6 +79,13 @@ struct RS_KernelRecorderStructureVoxelBundle {
  */
 struct RS_KernelRecorderCameraPerspectiveBundle {
     std::unordered_map<std::string, std::vector<RS_WorldCameraPerspectiveRecord>> camera_records;
+};
+
+/**
+ * @brief Per-recorder camera-stereo record bundle (keyed by recorder name).
+ */
+struct RS_KernelRecorderCameraStereoBundle {
+    std::unordered_map<std::string, std::vector<RS_WorldCameraStereoRecord>> camera_records;
 };
 
 /**
@@ -154,6 +163,8 @@ class RS_KernelManager {
     getRecorderStructureVoxelRecords();
     std::unordered_map<std::string, RS_KernelRecorderCameraPerspectiveBundle>
     getRecorderCameraPerspectiveRecords();
+    std::unordered_map<std::string, RS_KernelRecorderCameraStereoBundle>
+    getRecorderCameraStereoRecords();
     std::unordered_map<std::string, RS_KernelRecorderIntersectRegionBundle>
     getRecorderIntersectRegionRecords();
 
@@ -251,6 +262,8 @@ class RS_KernelManager {
     /*****************************************************************
      * Handle APIs
      *****************************************************************/
+    std::string getInfo(const std::string &info_name);
+
     void pauseKernel(bool sync = false);
     void resumeKernel(bool sync = false);
     void terminateKernel(bool sync = false);
@@ -308,6 +321,8 @@ class RS_KernelManager {
     unfreezeEntity(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
     bool isEntityFrozen(const std::string &name);
     rsc::RSC_EntityVariant findEntity(const std::string &name);
+    RIndex findEntityGID(const std::string &name);
+    std::string findEntityName(RIndex gid);
 
     void addRecord(
         const rsc::RSC_RecordVariant &record,
@@ -369,6 +384,8 @@ class RS_KernelManager {
     getKernelStructureVoxelManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelCameraPerspectiveManager>> &
     getKernelCameraPerspectiveManagers();
+    std::unordered_map<std::string, std::unique_ptr<RS_KernelCameraStereoManager>> &
+    getKernelCameraStereoManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelForceManager>> &
     getKernelForceManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelTorqueManager>> &
@@ -398,6 +415,15 @@ class RS_KernelManager {
     void exitKernelDataCriticalZone();
 
    private:
+    // RAII scope raising the command execution depth for one command, released on every exit path.
+    struct CommandExecutionScope {
+        RS_KernelManager *manager;
+        CommandExecutionScope(RS_KernelManager *manager) : manager(manager) {
+            manager->_acquireCommandExecution();
+        }
+        ~CommandExecutionScope() { manager->_releaseCommandExecution(); }
+    };
+
     RS_MemoryProvider *_device_provider = nullptr;
     RS_MemoryProvider *_host_provider = nullptr;
     std::shared_ptr<logging::logger> _logger;
@@ -407,7 +433,12 @@ class RS_KernelManager {
     std::mutex _command_queue_mutex;
     std::condition_variable _command_queue_cv;
 
-    std::recursive_mutex _command_execution_mutex;
+    // Finders and the callback raise the pause count; the sync thread and transactions raise the
+    // execution depth. Readers wait while a command executes; the sync thread waits while paused.
+    std::mutex _command_execution_mutex;
+    std::condition_variable _command_execution_cv;
+    RSize _command_pause_count = 0;
+    RSize _command_execution_depth = 0;
 
     std::recursive_mutex _kernel_data_mutex;
 
@@ -432,13 +463,14 @@ class RS_KernelManager {
     rsc::RSC_Simulation _simulation_rsc;
 
     /// Per-axis gid counters for device-side management.
-    RIndex _entity_counter = 0;
+    RIndex _entity_counter = RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM;
     RIndex _essence_counter = 0;
     RIndex _resource_counter = 0;
     RIndex _record_counter = 0;
     RIndex _signal_counter = 0;
 
     std::unordered_map<std::string, RIndex> _entity_gids;
+    std::unordered_map<RIndex, std::string> _entity_names;
     std::unordered_map<std::string, RIndex> _essence_gids;
     std::unordered_map<std::string, RIndex> _resource_gids;
     std::unordered_map<std::string, RIndex> _record_gids;
@@ -456,6 +488,8 @@ class RS_KernelManager {
         _kernel_structure_voxel_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelCameraPerspectiveManager>>
         _kernel_camera_perspective_managers;
+    std::unordered_map<std::string, std::unique_ptr<RS_KernelCameraStereoManager>>
+        _kernel_camera_stereo_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelForceManager>> _kernel_force_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelTorqueManager>>
         _kernel_torque_managers;
@@ -465,6 +499,9 @@ class RS_KernelManager {
         _kernel_intersect_region_managers;
 
     void _kernelSynchronizationThreadFunc();
+
+    void _acquireCommandExecution();
+    void _releaseCommandExecution();
 
     void _pauseKernel();
     void _resumeKernel();

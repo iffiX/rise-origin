@@ -30,8 +30,8 @@ regex = '(?P<value>.+)'
 # Portable SSE4.2-era baseline so the wheel runs on any x86-64-v2 CPU.
 RISE_ORIGIN_CPU_ARCH = "x86-64-v2"
 RISE_ORIGIN_BACKEND = "cpu"
-BUILD_RISE_ORIGIN = "ON"
-BUILD_RISE_ORIGIN_TEST = "OFF"
+RISE_ORIGIN_BUILD_CORE = "ON"
+RISE_ORIGIN_BUILD_TEST = "OFF"
 
 [tool.cibuildwheel.linux]
 build = "cp310-manylinux_x86_64 cp311-manylinux_x86_64 cp312-manylinux_x86_64 cp313-manylinux_x86_64"

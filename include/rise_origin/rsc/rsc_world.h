@@ -75,7 +75,9 @@ using RSC_EntityVariant = RS_Variant<
     RSC_FloorArray,
     RSC_StructureVoxel,
     RSC_CameraPerspectiveFree,
-    RSC_CameraPerspectiveRigidBodyLinked>;
+    RSC_CameraPerspectiveRigidBodyLinked,
+    RSC_CameraStereoFree,
+    RSC_CameraStereoRigidBodyLinked>;
 
 /**
  * @brief Record variant

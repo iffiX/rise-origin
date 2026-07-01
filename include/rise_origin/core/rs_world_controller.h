@@ -21,6 +21,7 @@ namespace rise {
 using RS_WorldRecordVariant = RS_Variant<
     RS_WorldStructureVoxelRecord,
     RS_WorldCameraPerspectiveRecord,
+    RS_WorldCameraStereoRecord,
     RS_WorldIntersectRegionRecord>;
 
 /**
@@ -31,6 +32,7 @@ using RS_WorldRecordVariant = RS_Variant<
 using RS_WorldSignalVariant = RS_Variant<
     RS_WorldStructureVoxelSignal,
     RS_WorldCameraPerspectiveSignal,
+    RS_WorldCameraStereoSignal,
     RS_WorldForceSignal,
     RS_WorldTorqueSignal,
     RS_WorldTransformSignal>;

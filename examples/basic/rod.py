@@ -179,7 +179,7 @@ def build():
         bodies=[main_body, stator_body],
         constraints=[hinge],
         signal=rsc.entity.StructureVoxelSignal(
-            "rod#signal", source_controller_name=CONTROLLER, hinge_signal_num=1
+            "rod#signal", source_controller_reference=CONTROLLER, hinge_signal_num=1
         ),
     )
 
@@ -191,7 +191,7 @@ def build():
     )
 
 
-def control(world_name, time, controllers):
+def control(time, controllers):
     """Wind the motor hinge back and forth, twisting the rod."""
     controller = _common.controller_by_name(controllers, CONTROLLER)
     if controller is None:

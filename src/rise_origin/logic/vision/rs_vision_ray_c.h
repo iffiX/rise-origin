@@ -8,21 +8,21 @@
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/logic/soft/rs_voxel_c.h"
 #include "rise_origin/logic/soft/rs_voxel_m.h"
-#include "rise_origin/logic/vision/rs_vision_material_m.h"
 #include "rise_origin/logic/vision/rs_camera_m.h"
 #include "rise_origin/logic/vision/rs_vision_cosmic_background_m.h"
 #include "rise_origin/logic/vision/rs_vision_floor_m.h"
+#include "rise_origin/logic/vision/rs_vision_material_m.h"
 #include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_conf.h"
 #include "rise_origin/utils/math/rs_triangle.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_conf.h"
 
 namespace rise {
 
 namespace logic {
 
 /**
- * @brief Camera path tracer over the voxel + floor BVHs.
+ * @brief Camera ray-based path tracer.
  *
  * @details One megakernel per camera per frame. Each thread integrates one camera ray to a
  * fixed `max_depth` using a simple Mitsuba-style dielectric / Lambertian / metallic BSDF set
@@ -116,7 +116,7 @@ class RS_VisionRayCompute {
 
     /// Sampled light against a shading point. `emission` is surface radiance L
     /// in W/m^2/sr. Voxels are area-sampled uniformly over the 1-3 front-facing
-    /// cube faces for efficiency, giving the `cos_emit * area_visible / dist^2` 
+    /// cube faces for efficiency, giving the `cos_emit * area_visible / dist^2`
     /// area-light geometry factor. Sun is parallel (`dist = RS_MAX_FLOAT`,
     /// `cos_emit = area_visible = 1`; the is_sun branch skips the geometry
     /// multiply).
@@ -260,8 +260,15 @@ class RS_VisionRayCompute {
             RIndex pixel_id;
             Vec3C ray_origin, ray_direction;
             _initCameraRGBRay(
-                k, camera, ray_id, image_width, image_height, samples_per_pixel,
-                ray_origin, ray_direction, pixel_id
+                k,
+                camera,
+                ray_id,
+                image_width,
+                image_height,
+                samples_per_pixel,
+                ray_origin,
+                ray_direction,
+                pixel_id
             );
             RIndex i = pixel_id / image_width;
             RIndex j = pixel_id - i * image_width;
@@ -280,10 +287,17 @@ class RS_VisionRayCompute {
                 Vec3C contribution;
                 bool continue_tracing;
                 _shadeRGBOnceBasic(
-                    k, depth, any_hit,
-                    random_state, current_ray, rec,
-                    throughput, current_medium_ior, last_bounce_brdf_pdf,
-                    contribution, continue_tracing
+                    k,
+                    depth,
+                    any_hit,
+                    random_state,
+                    current_ray,
+                    rec,
+                    throughput,
+                    current_medium_ior,
+                    last_bounce_brdf_pdf,
+                    contribution,
+                    continue_tracing
                 );
                 color_accum = color_accum + contribution;
                 if (!continue_tracing) break;
@@ -366,9 +380,7 @@ class RS_VisionRayCompute {
             // Specular chain → endpoint + chain bookkeeping AOVs.
             device::RS_RandomState chain_rs;
             chain_rs.init(
-                k->seed ^ uint64_t(0xC4A1D0E5),
-                static_cast<uint64_t>(pixel),
-                k->getDeviceStep()
+                k->seed ^ uint64_t(0xC4A1D0E5), static_cast<uint64_t>(pixel), k->getDeviceStep()
             );
 
             HitRecord endpoint_rec;
@@ -376,8 +388,15 @@ class RS_VisionRayCompute {
             Vec3C chain_reflect_radiance;
             RSE_VisionRestirChainTerminalType terminal_type;
             _shadeInfoOnceRestir(
-                k, ray, any_hit, rec, chain_rs,
-                endpoint_rec, chain_throughput, chain_reflect_radiance, terminal_type
+                k,
+                ray,
+                any_hit,
+                rec,
+                chain_rs,
+                endpoint_rec,
+                chain_throughput,
+                chain_reflect_radiance,
+                terminal_type
             );
 
             ctx.camera_aux_chain_throughput[camera][{i, j}] = RVec3f(
@@ -389,17 +408,14 @@ class RS_VisionRayCompute {
             // pass adds the on-chain reservoir term on top.
             if (_luminance(chain_reflect_radiance) > FloatC(0)) {
                 device::deviceAtomicAdd(
-                    &ctx.camera_current_rgb_canvas[camera][{i, j}],
-                    RVec3f(chain_reflect_radiance)
+                    &ctx.camera_current_rgb_canvas[camera][{i, j}], RVec3f(chain_reflect_radiance)
                 );
             }
 
             if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY) {
                 // endpoint_rec.p holds the terminal ray direction.
                 ctx.camera_aux_endpoint_hit_position[camera][{i, j}] = RVec3f(
-                    float(endpoint_rec.p.x),
-                    float(endpoint_rec.p.y),
-                    float(endpoint_rec.p.z)
+                    float(endpoint_rec.p.x), float(endpoint_rec.p.y), float(endpoint_rec.p.z)
                 );
                 ctx.camera_aux_endpoint_normal[camera][{i, j}] = RVec3f::zero();
                 ctx.camera_aux_endpoint_object_key[camera][{i, j}] =
@@ -408,8 +424,7 @@ class RS_VisionRayCompute {
                 ctx.camera_aux_endpoint_roughness[camera][{i, j}] = float(1);
                 ctx.camera_aux_endpoint_metalness[camera][{i, j}] = float(0);
                 ctx.camera_aux_endpoint_intensity[camera][{i, j}] = float(0);
-                ctx.camera_aux_endpoint_material_type[camera][{i, j}] =
-                    RSE_VISION_MATERIAL_OPAQUE;
+                ctx.camera_aux_endpoint_material_type[camera][{i, j}] = RSE_VISION_MATERIAL_OPAQUE;
                 ctx.camera_aux_endpoint_screen_motion[camera][{i, j}] = RVec2f(0.0f, 0.0f);
                 return;
             }
@@ -417,9 +432,8 @@ class RS_VisionRayCompute {
             auto& ehs = endpoint_rec.state.hit_state;
             RSE_VisionMaterialType endpoint_material_type =
                 static_cast<RSE_VisionMaterialType>(ehs.vision_material_type);
-            ctx.camera_aux_endpoint_hit_position[camera][{i, j}] = RVec3f(
-                float(endpoint_rec.p.x), float(endpoint_rec.p.y), float(endpoint_rec.p.z)
-            );
+            ctx.camera_aux_endpoint_hit_position[camera][{i, j}] =
+                RVec3f(float(endpoint_rec.p.x), float(endpoint_rec.p.y), float(endpoint_rec.p.z));
             ctx.camera_aux_endpoint_normal[camera][{i, j}] = RVec3f(
                 float(endpoint_rec.normal.x),
                 float(endpoint_rec.normal.y),
@@ -437,9 +451,7 @@ class RS_VisionRayCompute {
             ctx.camera_aux_endpoint_material_type[camera][{i, j}] = endpoint_material_type;
 
             Vec3C endpoint_world_velocity;
-            _computeWorldVelocity(
-                k, endpoint_rec.voxel, endpoint_rec.p, endpoint_world_velocity
-            );
+            _computeWorldVelocity(k, endpoint_rec.voxel, endpoint_rec.p, endpoint_world_velocity);
             RVec2f endpoint_screen_motion(0.0f, 0.0f);
             _computeScreenMotion(
                 k, camera, endpoint_rec.p, endpoint_world_velocity, i, j, endpoint_screen_motion
@@ -492,9 +504,9 @@ class RS_VisionRayCompute {
      *        slot `1 + emissive_idx`. Slot 0 is the sun and is written from the
      *        host before this launch.
      *
-     * @details Resolves the voxel handle through `ctx.structure_emissive_voxel_handles`, 
-     *          reads the vision material's albedo and intensity, and stores the luminance 
-     *          of `intensity` into `light_weight`. Then inclusive scan into `light_cdf` 
+     * @details Resolves the voxel handle through `ctx.structure_emissive_voxel_handles`,
+     *          reads the vision material's albedo and intensity, and stores the luminance
+     *          of `intensity` into `light_weight`. Then inclusive scan into `light_cdf`
      *          runs after this kernel.
      *
      * @param k             simulation kernel.
@@ -506,14 +518,14 @@ class RS_VisionRayCompute {
         using device::RS_ComputeFunction<RSCF_WriteEmissiveLightWeights>::index1D;
 
         template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel *k) {
+        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel* k) {
             auto& ctx = k->ctx;
             RIndex i = index1D();
             if (RSize(i) >= ctx.structure_emissive_voxel_handles.size()) return;
             RHandle voxel = ctx.structure_emissive_voxel_handles[i];
             RHandle vision_material = V_G(voxel, vision_material);
-            // Approximation using just intensity, for a better estimate, needs to 
-            // consider emission color (for texture probably average) and voxel size. 
+            // Approximation using just intensity, for a better estimate, needs to
+            // consider emission color (for texture probably average) and voxel size.
             FloatC intensity = FloatC(VSM_G(vision_material, emission_intensity));
             ctx.light_weight[RSize(i) + 1] = float(intensity);
         }
@@ -569,8 +581,14 @@ class RS_VisionRayCompute {
 
                 LightSample light_sample = _sampleLightSample(k, light_index, hit_position, rs);
                 Vec3C brdf_cos = _brdfCos(
-                    material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-                    normal, view_dir, light_sample.dir
+                    material_type,
+                    albedo,
+                    metalness,
+                    roughness,
+                    PBR_DEFAULT_IOR,
+                    normal,
+                    view_dir,
+                    light_sample.dir
                 );
                 Vec3C contribution =
                     brdf_cos.elemMul(light_sample.emission) * _lightGeometryFactor(light_sample);
@@ -583,9 +601,8 @@ class RS_VisionRayCompute {
                 // huge restir_weight = sum_all_tp / tp_survivor into the depth-0
                 // read and the visible-survivor frames overshoot to sum_all_tp
                 // instead of NEE's sum_visible_tp.
-                FloatC max_distance_c = light_sample.is_sun
-                                            ? FloatC(RS_MAX_FLOAT)
-                                            : light_sample.dist - FloatC(RS_EPS);
+                FloatC max_distance_c = light_sample.is_sun ? FloatC(RS_MAX_FLOAT)
+                                                            : light_sample.dist - FloatC(RS_EPS);
                 RHandle light_handle_c =
                     (light_index == RS_VISION_SUN_LIGHT_INDEX)
                         ? RS_NULL_HANDLE
@@ -605,8 +622,13 @@ class RS_VisionRayCompute {
                     float(light_sample.position.z)
                 );
                 _reservoirUpdateDI(
-                    sample_weight, light_index, light_position,
-                    transmission_c, target_pdf, rs, reservoir
+                    sample_weight,
+                    light_index,
+                    light_position,
+                    transmission_c,
+                    target_pdf,
+                    rs,
+                    reservoir
                 );
             }
             // Bitterli 2020 Alg 5: M counts every candidate examined, including
@@ -626,38 +648,41 @@ class RS_VisionRayCompute {
             // from wrapping when cast to unsigned RIndex.
             RSize image_height = CA_G(image_height);
             RVec2f screen_motion = ctx.camera_aux_endpoint_screen_motion[camera][{ii, jj}];
-            int ii_prev_signed = int(RS_FI::rs_round(
-                FloatC(ii) - FloatC(screen_motion.y) * FloatC(image_height)
-            ));
-            int jj_prev_signed = int(RS_FI::rs_round(
-                FloatC(jj) - FloatC(screen_motion.x) * FloatC(image_width)
-            ));
+            int ii_prev_signed =
+                int(RS_FI::rs_round(FloatC(ii) - FloatC(screen_motion.y) * FloatC(image_height)));
+            int jj_prev_signed =
+                int(RS_FI::rs_round(FloatC(jj) - FloatC(screen_motion.x) * FloatC(image_width)));
             ii_prev_signed = RS_MAX(0, RS_MIN(ii_prev_signed, int(image_height) - 1));
             jj_prev_signed = RS_MAX(0, RS_MIN(jj_prev_signed, int(image_width) - 1));
-            RS_ReservoirDI reservoir_prev = ctx.camera_prev_reservoir_di
-                [camera][{RIndex(ii_prev_signed), RIndex(jj_prev_signed)}];
+            RS_ReservoirDI reservoir_prev =
+                ctx.camera_prev_reservoir_di[camera]
+                                            [{RIndex(ii_prev_signed), RIndex(jj_prev_signed)}];
 
             // Multi-field temporal gate. Position threshold rejects same-key
             // surfaces that translated; normal threshold rejects rotations.
             FloatC disocclusion_position_threshold =
                 FloatC(k->vision_restir_disocclusion_position_threshold);
-            FloatC normal_cos_threshold =
-                FloatC(k->vision_restir_disocclusion_normal_threshold);
-            bool is_prev_valid = !k->vision_is_restir_reservoir_stale
-                && reservoir_prev.sample_count > 0
-                && reservoir_prev.object_key == object_key
-                && (Vec3C(reservoir_prev.prev_hit_position) - hit_position).length()
-                       < disocclusion_position_threshold
-                && Vec3C(reservoir_prev.prev_normal).dot(normal) > normal_cos_threshold;
+            FloatC normal_cos_threshold = FloatC(k->vision_restir_disocclusion_normal_threshold);
+            bool is_prev_valid =
+                !k->vision_is_restir_reservoir_stale && reservoir_prev.sample_count > 0 &&
+                reservoir_prev.object_key == object_key &&
+                (Vec3C(reservoir_prev.prev_hit_position) - hit_position).length() <
+                    disocclusion_position_threshold &&
+                Vec3C(reservoir_prev.prev_normal).dot(normal) > normal_cos_threshold;
 
             if (is_prev_valid) {
                 LightSample light_sample_prev = _evalStoredLightSample(
-                    k, reservoir_prev.light_index, hit_position,
-                    reservoir_prev.light_position
+                    k, reservoir_prev.light_index, hit_position, reservoir_prev.light_position
                 );
                 Vec3C brdf_cos_prev = _brdfCos(
-                    material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-                    normal, view_dir, light_sample_prev.dir
+                    material_type,
+                    albedo,
+                    metalness,
+                    roughness,
+                    PBR_DEFAULT_IOR,
+                    normal,
+                    view_dir,
+                    light_sample_prev.dir
                 );
                 // p̂ must be evaluated consistently with storage: the stored
                 // reservoir_prev.target_pdf included the candidate's shadow-walked
@@ -666,21 +691,24 @@ class RS_VisionRayCompute {
                 // target_pdf_prev_under_curr / reservoir_prev.target_pdf bounded
                 // by the BRDF / geometry change between frames rather than
                 // exploding by 1/transmission_storage on partial-shadow survivors.
-                Vec3C contribution_prev = brdf_cos_prev.elemMul(light_sample_prev.emission)
-                                       * _lightGeometryFactor(light_sample_prev);
-                Vec3C contribution_prev_vis = contribution_prev.elemMul(
-                    Vec3C(reservoir_prev.transmission.toVec3D())
-                );
+                Vec3C contribution_prev = brdf_cos_prev.elemMul(light_sample_prev.emission) *
+                                          _lightGeometryFactor(light_sample_prev);
+                Vec3C contribution_prev_vis =
+                    contribution_prev.elemMul(Vec3C(reservoir_prev.transmission.toVec3D()));
                 FloatC target_pdf_prev_under_curr = _luminance(contribution_prev_vis);
 
                 // Re-score the prior sample under current shading and merge in.
-                FloatC sample_weight_prev = target_pdf_prev_under_curr
-                    * FloatC(reservoir_prev.weight_sum)
-                    / (FloatC(reservoir_prev.target_pdf) + FloatC(RS_EPS));
+                FloatC sample_weight_prev = target_pdf_prev_under_curr *
+                                            FloatC(reservoir_prev.weight_sum) /
+                                            (FloatC(reservoir_prev.target_pdf) + FloatC(RS_EPS));
                 _reservoirUpdateDI(
-                    sample_weight_prev, reservoir_prev.light_index,
-                    reservoir_prev.light_position, reservoir_prev.transmission,
-                    target_pdf_prev_under_curr, rs, reservoir
+                    sample_weight_prev,
+                    reservoir_prev.light_index,
+                    reservoir_prev.light_position,
+                    reservoir_prev.transmission,
+                    target_pdf_prev_under_curr,
+                    rs,
+                    reservoir
                 );
                 // Combined sample count is this frame plus prior frame.
                 reservoir.sample_count =
@@ -688,9 +716,8 @@ class RS_VisionRayCompute {
 
                 // Cap retained history so stale samples can't dominate; rescale
                 // weight_sum to keep the per-sample average unchanged.
-                RSize m_cap = RS_MAX(
-                    RSize(1), RSize(k->vision_restir_di_m_cap) * initial_candidate_count
-                );
+                RSize m_cap =
+                    RS_MAX(RSize(1), RSize(k->vision_restir_di_m_cap) * initial_candidate_count);
                 if (reservoir.sample_count > m_cap) {
                     FloatC scale = FloatC(m_cap) / FloatC(reservoir.sample_count);
                     reservoir.weight_sum = float(FloatC(reservoir.weight_sum) * scale);
@@ -706,10 +733,10 @@ class RS_VisionRayCompute {
                 FloatC max_distance = light_sample_survivor.is_sun
                                           ? FloatC(RS_MAX_FLOAT)
                                           : light_sample_survivor.dist - FloatC(RS_EPS);
-                RHandle light_handle = (reservoir.light_index == RS_VISION_SUN_LIGHT_INDEX)
-                                           ? RS_NULL_HANDLE
-                                           : ctx.structure_emissive_voxel_handles
-                                                 [reservoir.light_index - 1];
+                RHandle light_handle =
+                    (reservoir.light_index == RS_VISION_SUN_LIGHT_INDEX)
+                        ? RS_NULL_HANDLE
+                        : ctx.structure_emissive_voxel_handles[reservoir.light_index - 1];
                 Vec3C origin = _offsetRayOrigin(hit_position, normal);
                 reservoir.transmission = _shadowWalkWithTransmission(
                     k, origin, light_sample_survivor.dir, max_distance, light_handle
@@ -720,12 +747,9 @@ class RS_VisionRayCompute {
 
             // Identity and disocclusion bookkeeping for next frame.
             reservoir.object_key = object_key;
-            reservoir.prev_hit_position = RVec3f(
-                float(hit_position.x), float(hit_position.y), float(hit_position.z)
-            );
-            reservoir.prev_normal = RVec3f(
-                float(normal.x), float(normal.y), float(normal.z)
-            );
+            reservoir.prev_hit_position =
+                RVec3f(float(hit_position.x), float(hit_position.y), float(hit_position.z));
+            reservoir.prev_normal = RVec3f(float(normal.x), float(normal.y), float(normal.z));
             ctx.camera_current_reservoir_di[camera][{ii, jj}] = reservoir;
         }
     };
@@ -766,9 +790,7 @@ class RS_VisionRayCompute {
         : public device::RS_ComputeFunction<RSCF_SpatialReuseReservoirDI> {
        public:
         template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(
-            Kernel* k, RHandle camera, RHandle pixel
-        ) {
+        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel* k, RHandle camera, RHandle pixel) {
             if (k == nullptr || camera == RS_NULL_HANDLE) return;
             auto& ctx = k->ctx;
 
@@ -802,19 +824,14 @@ class RS_VisionRayCompute {
             RS_ReservoirDI reservoir = ctx.camera_current_reservoir_di[camera][{ii, jj}];
 
             device::RS_RandomState rs;
-            rs.init(
-                k->seed + uint64_t(0x517D),
-                static_cast<uint64_t>(pixel),
-                k->getDeviceStep()
-            );
+            rs.init(k->seed + uint64_t(0x517D), static_cast<uint64_t>(pixel), k->getDeviceStep());
 
             FloatC spatial_radius = FloatC(k->vision_restir_di_spatial_radius);
             RSize neighbor_count = k->vision_restir_di_spatial_neighbors;
             RSize history_ratio = RSize(k->vision_restir_di_m_cap);
             RSize candidate_count = CA_G(samples_per_pixel);
             RSize sample_count_cap = history_ratio * candidate_count;
-            FloatC NORMAL_COS_THRESHOLD =
-                FloatC(k->vision_restir_disocclusion_normal_threshold);
+            FloatC NORMAL_COS_THRESHOLD = FloatC(k->vision_restir_disocclusion_normal_threshold);
             constexpr FloatC DEPTH_REL_THRESHOLD = FloatC(0.1);
 
             for (RSize n = 0; n < neighbor_count; ++n) {
@@ -839,8 +856,7 @@ class RS_VisionRayCompute {
                 if (RS_ABS(depth_neighbor - depth_curr) > DEPTH_REL_THRESHOLD * depth_ratio_denom) {
                     continue;
                 }
-                Vec3C normal_neighbor =
-                    Vec3C(ctx.camera_aux_endpoint_normal[camera][{ii_n, jj_n}]);
+                Vec3C normal_neighbor = Vec3C(ctx.camera_aux_endpoint_normal[camera][{ii_n, jj_n}]);
                 if (normal_neighbor.dot(normal) < NORMAL_COS_THRESHOLD) continue;
 
                 RS_ReservoirDI reservoir_neighbor =
@@ -849,12 +865,20 @@ class RS_VisionRayCompute {
                 if (FloatC(reservoir_neighbor.target_pdf) <= FloatC(0)) continue;
 
                 LightSample light_sample_neighbor = _evalStoredLightSample(
-                    k, reservoir_neighbor.light_index, hit_position,
+                    k,
+                    reservoir_neighbor.light_index,
+                    hit_position,
                     reservoir_neighbor.light_position
                 );
                 Vec3C brdf_cos = _brdfCos(
-                    material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-                    normal, view_dir, light_sample_neighbor.dir
+                    material_type,
+                    albedo,
+                    metalness,
+                    roughness,
+                    PBR_DEFAULT_IOR,
+                    normal,
+                    view_dir,
+                    light_sample_neighbor.dir
                 );
                 // p̂ must include visibility for consistency with the neighbor's
                 // stored target_pdf; biased Algorithm 6 reuses the neighbor's
@@ -863,31 +887,31 @@ class RS_VisionRayCompute {
                 // target_pdf_at_curr / reservoir_neighbor.target_pdf blows up
                 // when the neighbor's survivor was in partial shadow, dragging
                 // an inflated sample_weight into our weight_sum.
-                Vec3C contribution = brdf_cos.elemMul(light_sample_neighbor.emission)
-                                   * _lightGeometryFactor(light_sample_neighbor);
-                Vec3C contribution_vis = contribution.elemMul(
-                    Vec3C(reservoir_neighbor.transmission.toVec3D())
-                );
+                Vec3C contribution = brdf_cos.elemMul(light_sample_neighbor.emission) *
+                                     _lightGeometryFactor(light_sample_neighbor);
+                Vec3C contribution_vis =
+                    contribution.elemMul(Vec3C(reservoir_neighbor.transmission.toVec3D()));
                 FloatC target_pdf_at_curr = _luminance(contribution_vis);
                 if (target_pdf_at_curr <= FloatC(0)) continue;
 
                 // Re-score the neighbor's sample under our shading and merge.
-                FloatC sample_weight = target_pdf_at_curr
-                    * FloatC(reservoir_neighbor.weight_sum)
-                    / (FloatC(reservoir_neighbor.target_pdf) + FloatC(RS_EPS));
+                FloatC sample_weight = target_pdf_at_curr * FloatC(reservoir_neighbor.weight_sum) /
+                                       (FloatC(reservoir_neighbor.target_pdf) + FloatC(RS_EPS));
                 _reservoirUpdateDI(
-                    sample_weight, reservoir_neighbor.light_index,
-                    reservoir_neighbor.light_position, reservoir_neighbor.transmission,
-                    target_pdf_at_curr, rs, reservoir
+                    sample_weight,
+                    reservoir_neighbor.light_index,
+                    reservoir_neighbor.light_position,
+                    reservoir_neighbor.transmission,
+                    target_pdf_at_curr,
+                    rs,
+                    reservoir
                 );
-                reservoir.sample_count = reservoir.sample_count - 1 +
-                    RSize(reservoir_neighbor.sample_count);
+                reservoir.sample_count =
+                    reservoir.sample_count - 1 + RSize(reservoir_neighbor.sample_count);
             }
 
             // Cap accumulated samples; rescale weight to keep its mean.
-            RSize m_cap_spatial = RS_MAX(
-                RSize(1), sample_count_cap * (neighbor_count + RSize(1))
-            );
+            RSize m_cap_spatial = RS_MAX(RSize(1), sample_count_cap * (neighbor_count + RSize(1)));
             if (reservoir.sample_count > m_cap_spatial) {
                 FloatC scale = FloatC(m_cap_spatial) / FloatC(reservoir.sample_count);
                 reservoir.weight_sum = float(FloatC(reservoir.weight_sum) * scale);
@@ -897,12 +921,9 @@ class RS_VisionRayCompute {
             // Write to the spatial buffer; the temporal buffer stays untouched
             // so next frame's merge keeps reading from this frame's resample.
             reservoir.object_key = object_key;
-            reservoir.prev_hit_position = RVec3f(
-                float(hit_position.x), float(hit_position.y), float(hit_position.z)
-            );
-            reservoir.prev_normal = RVec3f(
-                float(normal.x), float(normal.y), float(normal.z)
-            );
+            reservoir.prev_hit_position =
+                RVec3f(float(hit_position.x), float(hit_position.y), float(hit_position.z));
+            reservoir.prev_normal = RVec3f(float(normal.x), float(normal.y), float(normal.z));
             ctx.camera_spatial_reservoir_di[camera][{ii, jj}] = reservoir;
         }
     };
@@ -966,11 +987,7 @@ class RS_VisionRayCompute {
             Vec3C view_dir = (camera_position - hit_position).normalized();
 
             device::RS_RandomState rs;
-            rs.init(
-                k->seed ^ uint64_t(0x6122),
-                static_cast<uint64_t>(pixel),
-                k->getDeviceStep()
-            );
+            rs.init(k->seed ^ uint64_t(0x6122), static_cast<uint64_t>(pixel), k->getDeviceStep());
 
             // M_init initial candidates: per-camera samples_per_pixel.
             RS_ReservoirGI reservoir{};
@@ -989,8 +1006,14 @@ class RS_VisionRayCompute {
                 _scatterOpaque(incoming, rs, scatter_rec);
                 Vec3C bounce_dir = scatter_rec.scattered.ray_direction;
                 FloatC brdf_pdf = _brdfPdf(
-                    material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-                    normal, view_dir, bounce_dir
+                    material_type,
+                    albedo,
+                    metalness,
+                    roughness,
+                    PBR_DEFAULT_IOR,
+                    normal,
+                    view_dir,
+                    bounce_dir
                 );
                 if (brdf_pdf <= FloatC(RS_EPS)) continue;
 
@@ -1034,24 +1057,42 @@ class RS_VisionRayCompute {
                     } else if (bounce_mt == RSE_VISION_MATERIAL_OPAQUE) {
                         if (k->vision_restir_gi_is_bounce_nee_enabled) {
                             l_incoming = _evalNeeAtBounce(
-                                k, bounce_rec.p, bounce_rec.normal, -bounce_dir,
-                                bounce_mt, bounce_rec.albedo, bounce_rec.metalness,
-                                bounce_rec.roughness, rs
+                                k,
+                                bounce_rec.p,
+                                bounce_rec.normal,
+                                -bounce_dir,
+                                bounce_mt,
+                                bounce_rec.albedo,
+                                bounce_rec.metalness,
+                                bounce_rec.roughness,
+                                rs
                             );
                         }
                         l_incoming = l_incoming + _gatherIndirectPath(
-                            k, bounce_rec.p, bounce_rec.normal, bounce_rec.albedo,
-                            bounce_rec.metalness, bounce_rec.roughness,
-                            bounce_dir, CA_G(max_depth), rs
-                        );
+                                                      k,
+                                                      bounce_rec.p,
+                                                      bounce_rec.normal,
+                                                      bounce_rec.albedo,
+                                                      bounce_rec.metalness,
+                                                      bounce_rec.roughness,
+                                                      bounce_dir,
+                                                      CA_G(max_depth),
+                                                      rs
+                                                  );
                     }
                     // TRANSPARENT bounce leaves l_incoming = 0.
                 }
 
                 Vec3C l_weighted = l_incoming * mis_brdf;
                 Vec3C brdf_cos = _brdfCos(
-                    material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-                    normal, view_dir, bounce_dir
+                    material_type,
+                    albedo,
+                    metalness,
+                    roughness,
+                    PBR_DEFAULT_IOR,
+                    normal,
+                    view_dir,
+                    bounce_dir
                 );
                 Vec3C contribution = brdf_cos.elemMul(l_weighted);
                 FloatC target_pdf = _luminance(contribution);
@@ -1075,9 +1116,14 @@ class RS_VisionRayCompute {
                     float(l_weighted.x), float(l_weighted.y), float(l_weighted.z)
                 );
                 _reservoirUpdateGI(
-                    sample_weight, bounce_direction_storage, bounce_hit_position_storage,
-                    bounce_hit_normal_storage, l_incoming_storage,
-                    target_pdf, rs, reservoir
+                    sample_weight,
+                    bounce_direction_storage,
+                    bounce_hit_position_storage,
+                    bounce_hit_normal_storage,
+                    l_incoming_storage,
+                    target_pdf,
+                    rs,
+                    reservoir
                 );
             }
             // M counts every candidate examined (Bitterli 2020 Alg 5);
@@ -1091,51 +1137,55 @@ class RS_VisionRayCompute {
             // Temporal merge via endpoint reprojection.
             RSize image_height = CA_G(image_height);
             RVec2f screen_motion = ctx.camera_aux_endpoint_screen_motion[camera][{ii, jj}];
-            int ii_prev_signed = int(RS_FI::rs_round(
-                FloatC(ii) - FloatC(screen_motion.y) * FloatC(image_height)
-            ));
-            int jj_prev_signed = int(RS_FI::rs_round(
-                FloatC(jj) - FloatC(screen_motion.x) * FloatC(image_width)
-            ));
+            int ii_prev_signed =
+                int(RS_FI::rs_round(FloatC(ii) - FloatC(screen_motion.y) * FloatC(image_height)));
+            int jj_prev_signed =
+                int(RS_FI::rs_round(FloatC(jj) - FloatC(screen_motion.x) * FloatC(image_width)));
             ii_prev_signed = RS_MAX(0, RS_MIN(ii_prev_signed, int(image_height) - 1));
             jj_prev_signed = RS_MAX(0, RS_MIN(jj_prev_signed, int(image_width) - 1));
-            RS_ReservoirGI reservoir_prev = ctx.camera_prev_reservoir_gi
-                [camera][{RIndex(ii_prev_signed), RIndex(jj_prev_signed)}];
+            RS_ReservoirGI reservoir_prev =
+                ctx.camera_prev_reservoir_gi[camera]
+                                            [{RIndex(ii_prev_signed), RIndex(jj_prev_signed)}];
 
             FloatC disocclusion_position_threshold =
                 FloatC(k->vision_restir_disocclusion_position_threshold);
-            FloatC normal_cos_threshold =
-                FloatC(k->vision_restir_disocclusion_normal_threshold);
+            FloatC normal_cos_threshold = FloatC(k->vision_restir_disocclusion_normal_threshold);
             // Drop the stored sample every N frames if its geometry went stale.
             RSize validation_period = k->vision_restir_gi_validation_period;
-            bool is_validation_frame = validation_period > 0
-                && (k->getDeviceStep() % validation_period == 0);
-            bool is_sample_geometrically_valid = !is_validation_frame
-                || _validateReservoirGISample(
-                       k, hit_position, normal, reservoir_prev,
-                       disocclusion_position_threshold
-                   );
-            bool is_prev_valid = is_sample_geometrically_valid
-                && reservoir_prev.sample_count > 0
-                && reservoir_prev.object_key == object_key
-                && (Vec3C(reservoir_prev.prev_hit_position) - hit_position).length()
-                       < disocclusion_position_threshold
-                && Vec3C(reservoir_prev.prev_normal).dot(normal) > normal_cos_threshold;
+            bool is_validation_frame = validation_period > 0 &&
+                                       (k->getDeviceStep() % validation_period == 0);
+            bool is_sample_geometrically_valid =
+                !is_validation_frame ||
+                _validateReservoirGISample(
+                    k, hit_position, normal, reservoir_prev, disocclusion_position_threshold
+                );
+            bool is_prev_valid =
+                is_sample_geometrically_valid && reservoir_prev.sample_count > 0 &&
+                reservoir_prev.object_key == object_key &&
+                (Vec3C(reservoir_prev.prev_hit_position) - hit_position).length() <
+                    disocclusion_position_threshold &&
+                Vec3C(reservoir_prev.prev_normal).dot(normal) > normal_cos_threshold;
 
             if (is_prev_valid) {
                 Vec3C bounce_dir_prev = Vec3C(reservoir_prev.bounce_direction);
                 Vec3C l_incoming_prev = Vec3C(reservoir_prev.l_incoming.toVec3D());
                 Vec3C brdf_cos_prev = _brdfCos(
-                    material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-                    normal, view_dir, bounce_dir_prev
+                    material_type,
+                    albedo,
+                    metalness,
+                    roughness,
+                    PBR_DEFAULT_IOR,
+                    normal,
+                    view_dir,
+                    bounce_dir_prev
                 );
                 Vec3C contribution_prev = brdf_cos_prev.elemMul(l_incoming_prev);
                 FloatC target_pdf_prev_under_curr = _luminance(contribution_prev);
 
                 // Re-score the prior sample under current shading and merge in.
-                FloatC sample_weight_prev = target_pdf_prev_under_curr
-                    * FloatC(reservoir_prev.weight_sum)
-                    / (FloatC(reservoir_prev.target_pdf) + FloatC(RS_EPS));
+                FloatC sample_weight_prev = target_pdf_prev_under_curr *
+                                            FloatC(reservoir_prev.weight_sum) /
+                                            (FloatC(reservoir_prev.target_pdf) + FloatC(RS_EPS));
 
                 _reservoirUpdateGI(
                     sample_weight_prev,
@@ -1144,15 +1194,15 @@ class RS_VisionRayCompute {
                     reservoir_prev.bounce_hit_normal,
                     reservoir_prev.l_incoming,
                     target_pdf_prev_under_curr,
-                    rs, reservoir
+                    rs,
+                    reservoir
                 );
                 // Combined sample count is this frame plus prior frame.
                 reservoir.sample_count =
                     initial_candidate_count + RSize(reservoir_prev.sample_count);
                 // Cap retained history; rescale weight to keep its mean.
-                RSize m_cap = RS_MAX(
-                    RSize(1), RSize(k->vision_restir_gi_m_cap) * initial_candidate_count
-                );
+                RSize m_cap =
+                    RS_MAX(RSize(1), RSize(k->vision_restir_gi_m_cap) * initial_candidate_count);
                 if (reservoir.sample_count > m_cap) {
                     FloatC scale = FloatC(m_cap) / FloatC(reservoir.sample_count);
                     reservoir.weight_sum = float(FloatC(reservoir.weight_sum) * scale);
@@ -1161,12 +1211,9 @@ class RS_VisionRayCompute {
             }
 
             reservoir.object_key = object_key;
-            reservoir.prev_hit_position = RVec3f(
-                float(hit_position.x), float(hit_position.y), float(hit_position.z)
-            );
-            reservoir.prev_normal = RVec3f(
-                float(normal.x), float(normal.y), float(normal.z)
-            );
+            reservoir.prev_hit_position =
+                RVec3f(float(hit_position.x), float(hit_position.y), float(hit_position.z));
+            reservoir.prev_normal = RVec3f(float(normal.x), float(normal.y), float(normal.z));
             // Pre-spatial output: contributing-source count equals sample count.
             reservoir.Z_count = reservoir.sample_count;
             ctx.camera_current_reservoir_gi[camera][{ii, jj}] = reservoir;
@@ -1202,9 +1249,7 @@ class RS_VisionRayCompute {
         : public device::RS_ComputeFunction<RSCF_SpatialReuseReservoirGI> {
        public:
         template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(
-            Kernel* k, RHandle camera, RHandle pixel
-        ) {
+        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel* k, RHandle camera, RHandle pixel) {
             if (k == nullptr || camera == RS_NULL_HANDLE) return;
             auto& ctx = k->ctx;
 
@@ -1247,8 +1292,7 @@ class RS_VisionRayCompute {
             RSize history_ratio = RSize(k->vision_restir_gi_m_cap);
             RSize candidate_count = CA_G(samples_per_pixel);
             RSize sample_count_cap = history_ratio * candidate_count;
-            FloatC NORMAL_COS_THRESHOLD =
-                FloatC(k->vision_restir_disocclusion_normal_threshold);
+            FloatC NORMAL_COS_THRESHOLD = FloatC(k->vision_restir_disocclusion_normal_threshold);
             constexpr FloatC DEPTH_REL_THRESHOLD = FloatC(0.1);
 
             // Remember each accepted neighbor so the post-loop pass can
@@ -1287,8 +1331,7 @@ class RS_VisionRayCompute {
                 if (RS_ABS(depth_neighbor - depth_curr) > DEPTH_REL_THRESHOLD * depth_ratio_denom) {
                     continue;
                 }
-                Vec3C normal_neighbor =
-                    Vec3C(ctx.camera_aux_endpoint_normal[camera][{ii_n, jj_n}]);
+                Vec3C normal_neighbor = Vec3C(ctx.camera_aux_endpoint_normal[camera][{ii_n, jj_n}]);
                 if (normal_neighbor.dot(normal) < NORMAL_COS_THRESHOLD) continue;
 
                 RS_ReservoirGI reservoir_neighbor =
@@ -1303,9 +1346,8 @@ class RS_VisionRayCompute {
                 Vec3C sample_point = Vec3C(reservoir_neighbor.bounce_hit_position);
                 Vec3C bounce_dir;
                 FloatC shadow_max_dist;
-                bool is_sky_bounce = sample_point.x == FloatC(0)
-                                  && sample_point.y == FloatC(0)
-                                  && sample_point.z == FloatC(0);
+                bool is_sky_bounce = sample_point.x == FloatC(0) && sample_point.y == FloatC(0) &&
+                                     sample_point.z == FloatC(0);
                 if (is_sky_bounce) {
                     bounce_dir = Vec3C(reservoir_neighbor.bounce_direction);
                     shadow_max_dist = FloatC(RS_MAX_FLOAT);
@@ -1319,8 +1361,14 @@ class RS_VisionRayCompute {
 
                 Vec3C l_incoming = Vec3C(reservoir_neighbor.l_incoming.toVec3D());
                 Vec3C brdf_cos = _brdfCos(
-                    material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-                    normal, view_dir, bounce_dir
+                    material_type,
+                    albedo,
+                    metalness,
+                    roughness,
+                    PBR_DEFAULT_IOR,
+                    normal,
+                    view_dir,
+                    bounce_dir
                 );
                 Vec3C contribution = brdf_cos.elemMul(l_incoming);
                 FloatC target_pdf_at_curr = _luminance(contribution);
@@ -1339,9 +1387,8 @@ class RS_VisionRayCompute {
                 // out-of-band Jacobians before applying the correction so
                 // that bad candidates contribute nothing rather than spiking.
                 if (!is_sky_bounce) {
-                    Vec3C neighbor_hit_position = Vec3C(
-                        ctx.camera_aux_endpoint_hit_position[camera][{ii_n, jj_n}]
-                    );
+                    Vec3C neighbor_hit_position =
+                        Vec3C(ctx.camera_aux_endpoint_hit_position[camera][{ii_n, jj_n}]);
                     Vec3C bhn = Vec3C(reservoir_neighbor.bounce_hit_normal);
                     Vec3C from_neighbor = neighbor_hit_position - sample_point;
                     FloatC dist_neighbor = from_neighbor.length();
@@ -1353,17 +1400,15 @@ class RS_VisionRayCompute {
                     Vec3C from_curr = hit_position - sample_point;
                     FloatC dist_curr = from_curr.length();
                     if (dist_curr < FloatC(RS_EPS)) continue;
-                    FloatC cos_phi_curr =
-                        RS_ABS(bhn.dot(from_curr * (FloatC(1) / dist_curr)));
+                    FloatC cos_phi_curr = RS_ABS(bhn.dot(from_curr * (FloatC(1) / dist_curr)));
                     if (cos_phi_curr < RESTIR_RECONNECT_COS_PHI_MIN) continue;
 
                     FloatC dist_ratio = dist_curr / dist_neighbor;
                     if (dist_ratio > RESTIR_RECONNECT_DIST_RATIO_MAX) continue;
                     if (dist_ratio < FloatC(1) / RESTIR_RECONNECT_DIST_RATIO_MAX) continue;
 
-                    FloatC jacobian = (cos_phi_curr / cos_phi_neighbor)
-                                    * (dist_neighbor * dist_neighbor)
-                                    / (dist_curr * dist_curr);
+                    FloatC jacobian = (cos_phi_curr / cos_phi_neighbor) *
+                                      (dist_neighbor * dist_neighbor) / (dist_curr * dist_curr);
                     if (jacobian < RESTIR_RECONNECT_JACOBIAN_MIN) continue;
                     if (jacobian > RESTIR_RECONNECT_JACOBIAN_MAX) continue;
 
@@ -1371,9 +1416,8 @@ class RS_VisionRayCompute {
                 }
 
                 // Re-score the neighbor's sample under our shading and merge.
-                FloatC sample_weight = target_pdf_at_curr
-                    * FloatC(reservoir_neighbor.weight_sum)
-                    / (FloatC(reservoir_neighbor.target_pdf) + FloatC(RS_EPS));
+                FloatC sample_weight = target_pdf_at_curr * FloatC(reservoir_neighbor.weight_sum) /
+                                       (FloatC(reservoir_neighbor.target_pdf) + FloatC(RS_EPS));
                 // Store the recomputed direction so later reads of this
                 // reservoir see a direction consistent with the sample point.
                 RVec3f bounce_dir_storage(
@@ -1385,10 +1429,12 @@ class RS_VisionRayCompute {
                     reservoir_neighbor.bounce_hit_position,
                     reservoir_neighbor.bounce_hit_normal,
                     reservoir_neighbor.l_incoming,
-                    target_pdf_at_curr, rs, reservoir
+                    target_pdf_at_curr,
+                    rs,
+                    reservoir
                 );
-                reservoir.sample_count = reservoir.sample_count - 1 +
-                    RSize(reservoir_neighbor.sample_count);
+                reservoir.sample_count =
+                    reservoir.sample_count - 1 + RSize(reservoir_neighbor.sample_count);
                 if (visited_count < MAX_VISITED_NEIGHBORS) {
                     visited_ii[visited_count] = ii_n;
                     visited_jj[visited_count] = jj_n;
@@ -1398,17 +1444,12 @@ class RS_VisionRayCompute {
             }
 
             reservoir.object_key = object_key;
-            reservoir.prev_hit_position = RVec3f(
-                float(hit_position.x), float(hit_position.y), float(hit_position.z)
-            );
-            reservoir.prev_normal = RVec3f(
-                float(normal.x), float(normal.y), float(normal.z)
-            );
+            reservoir.prev_hit_position =
+                RVec3f(float(hit_position.x), float(hit_position.y), float(hit_position.z));
+            reservoir.prev_normal = RVec3f(float(normal.x), float(normal.y), float(normal.z));
 
             // Cap accumulated samples; rescale weight to keep its mean.
-            RSize m_cap_spatial = RS_MAX(
-                RSize(1), sample_count_cap * (neighbor_count + RSize(1))
-            );
+            RSize m_cap_spatial = RS_MAX(RSize(1), sample_count_cap * (neighbor_count + RSize(1)));
             if (reservoir.sample_count > m_cap_spatial) {
                 FloatC scale = FloatC(m_cap_spatial) / FloatC(reservoir.sample_count);
                 reservoir.weight_sum = float(FloatC(reservoir.weight_sum) * scale);
@@ -1421,20 +1462,18 @@ class RS_VisionRayCompute {
             RSize Z = (self_m > 0) ? self_m : RSize(0);
             Vec3C survivor_sample_point = Vec3C(reservoir.bounce_hit_position);
             Vec3C survivor_bounce_dir = Vec3C(reservoir.bounce_direction);
-            bool survivor_is_sky = survivor_sample_point.x == FloatC(0)
-                                && survivor_sample_point.y == FloatC(0)
-                                && survivor_sample_point.z == FloatC(0);
+            bool survivor_is_sky = survivor_sample_point.x == FloatC(0) &&
+                                   survivor_sample_point.y == FloatC(0) &&
+                                   survivor_sample_point.z == FloatC(0);
             for (RSize v = 0; v < visited_count; ++v) {
-                Vec3C n_normal = Vec3C(
-                    ctx.camera_aux_endpoint_normal[camera][{visited_ii[v], visited_jj[v]}]
-                );
+                Vec3C n_normal =
+                    Vec3C(ctx.camera_aux_endpoint_normal[camera][{visited_ii[v], visited_jj[v]}]);
                 Vec3C dir_at_n;
                 if (survivor_is_sky) {
                     dir_at_n = survivor_bounce_dir;
                 } else {
                     Vec3C n_pos = Vec3C(
-                        ctx.camera_aux_endpoint_hit_position
-                            [camera][{visited_ii[v], visited_jj[v]}]
+                        ctx.camera_aux_endpoint_hit_position[camera][{visited_ii[v], visited_jj[v]}]
                     );
                     Vec3C diff = survivor_sample_point - n_pos;
                     FloatC dist = diff.length();
@@ -1498,23 +1537,40 @@ class RS_VisionRayCompute {
         Quat3C orientation = CA_G(orientation);
         Vec3C unit_lookat = orientation.toOrthoAxisX();
         Vec3C unit_up = orientation.toOrthoAxisZ();
-        Vec3C unit_right = orientation.toOrthoAxisY();
-        Vec3C pixel_delta_u = -unit_right * CA_G(pixel_width);
-        Vec3C pixel_delta_v = -unit_up * CA_G(pixel_height);
-        Vec3C viewport_upper_left =
-            center + (CA_G(focus_distance) * unit_lookat) -
-            ((FloatC(0.5) * static_cast<FloatC>(image_width)) * pixel_delta_u) -
-            ((FloatC(0.5) * static_cast<FloatC>(image_height)) * pixel_delta_v);
-        Vec3C pixel_00_loc =
-            viewport_upper_left + (FloatC(0.5) * pixel_delta_u) + (FloatC(0.5) * pixel_delta_v);
+        Vec3C unit_right = -orientation.toOrthoAxisY();
 
         RIndex i = RSize(pixel) / image_width;
         RIndex j = RSize(pixel) - i * image_width;
-        Vec3C pixel_target = pixel_00_loc + pixel_delta_u * static_cast<FloatC>(j) +
-                             pixel_delta_v * static_cast<FloatC>(i);
 
-        ray_origin_out = center;
-        ray_direction_out = (pixel_target - center).normalized();
+        RS_CameraStateUnion state_union{CA_G(state)};
+        if (state_union.camera_state.type == RSE_CAMERA_FREE_STEREO ||
+            state_union.camera_state.type == RSE_CAMERA_RIGID_BODY_LINKED_STEREO) {
+            FloatC tan_left = RS_FI::rs_tan(FloatC(CA_G(angle_left)));
+            FloatC tan_right = RS_FI::rs_tan(FloatC(CA_G(angle_right)));
+            FloatC tan_up = RS_FI::rs_tan(FloatC(CA_G(angle_up)));
+            FloatC tan_down = RS_FI::rs_tan(FloatC(CA_G(angle_down)));
+            FloatC pixel_delta_u =
+                (static_cast<FloatC>(j) + FloatC(0.5)) / static_cast<FloatC>(image_width);
+            FloatC pixel_delta_v =
+                (static_cast<FloatC>(i) + FloatC(0.5)) / static_cast<FloatC>(image_height);
+            FloatC x_tan = tan_left + pixel_delta_u * (tan_right - tan_left);
+            FloatC y_tan = tan_up + pixel_delta_v * (tan_down - tan_up);
+            ray_origin_out = center;
+            ray_direction_out = (unit_lookat + unit_right * x_tan + unit_up * y_tan).normalized();
+        } else {
+            Vec3C pixel_delta_u = unit_right * CA_G(pixel_width);
+            Vec3C pixel_delta_v = -unit_up * CA_G(pixel_height);
+            Vec3C viewport_upper_left =
+                center + (CA_G(focus_distance) * unit_lookat) -
+                ((FloatC(0.5) * static_cast<FloatC>(image_width)) * pixel_delta_u) -
+                ((FloatC(0.5) * static_cast<FloatC>(image_height)) * pixel_delta_v);
+            Vec3C pixel_00_loc =
+                viewport_upper_left + (FloatC(0.5) * pixel_delta_u) + (FloatC(0.5) * pixel_delta_v);
+            Vec3C pixel_target = pixel_00_loc + pixel_delta_u * static_cast<FloatC>(j) +
+                                 pixel_delta_v * static_cast<FloatC>(i);
+            ray_origin_out = center;
+            ray_direction_out = (pixel_target - center).normalized();
+        }
     }
 
     /**
@@ -1533,23 +1589,12 @@ class RS_VisionRayCompute {
         RIndex& pixel_id_out
     ) {
         auto& ctx = k->ctx;
-        FloatC defocus_radius = CA_G(defocus_radius);
 
         Vec3C center = CA_G(position);
         Quat3C orientation = CA_G(orientation);
         Vec3C unit_lookat = orientation.toOrthoAxisX();
         Vec3C unit_up = orientation.toOrthoAxisZ();
-        Vec3C unit_right = orientation.toOrthoAxisY();
-        Vec3C pixel_delta_u = -unit_right * CA_G(pixel_width);
-        Vec3C pixel_delta_v = -unit_up * CA_G(pixel_height);
-        Vec3C viewport_upper_left =
-            center + (CA_G(focus_distance) * unit_lookat) -
-            ((FloatC(0.5) * static_cast<FloatC>(image_width)) * pixel_delta_u) -
-            ((FloatC(0.5) * static_cast<FloatC>(image_height)) * pixel_delta_v);
-        Vec3C pixel_00_loc =
-            viewport_upper_left + (FloatC(0.5) * pixel_delta_u) + (FloatC(0.5) * pixel_delta_v);
-        Vec3C defocus_disk_u = unit_right * defocus_radius;
-        Vec3C defocus_disk_v = unit_up * defocus_radius;
+        Vec3C unit_right = -orientation.toOrthoAxisY();
 
         pixel_id_out = RIndex(ray_id) / samples_per_pixel;
         RIndex i = pixel_id_out / image_width;
@@ -1558,13 +1603,43 @@ class RS_VisionRayCompute {
 
         FloatC offset_x = _haltonSample(local_ray_id, 2) - FloatC(0.5);
         FloatC offset_y = _haltonSample(local_ray_id, 3) - FloatC(0.5);
-        Vec3C pixel_target = pixel_00_loc + (pixel_delta_u * (FloatC(j) + offset_x)) +
-                             (pixel_delta_v * (FloatC(i) + offset_y));
 
-        Vec2C disk =
-            _generateUnitDiskPoint(_haltonSample(local_ray_id, 5), _haltonSample(local_ray_id, 7));
-        ray_origin_out = center + (disk.x * defocus_disk_u) + (disk.y * defocus_disk_v);
-        ray_direction_out = (pixel_target - ray_origin_out).normalized();
+        RS_CameraStateUnion state_union{CA_G(state)};
+        if (state_union.camera_state.type == RSE_CAMERA_FREE_STEREO ||
+            state_union.camera_state.type == RSE_CAMERA_RIGID_BODY_LINKED_STEREO) {
+            FloatC tan_left = RS_FI::rs_tan(FloatC(CA_G(angle_left)));
+            FloatC tan_right = RS_FI::rs_tan(FloatC(CA_G(angle_right)));
+            FloatC tan_up = RS_FI::rs_tan(FloatC(CA_G(angle_up)));
+            FloatC tan_down = RS_FI::rs_tan(FloatC(CA_G(angle_down)));
+            FloatC pixel_delta_u = (static_cast<FloatC>(j) + FloatC(0.5) + offset_x) /
+                                   static_cast<FloatC>(image_width);
+            FloatC pixel_delta_v = (static_cast<FloatC>(i) + FloatC(0.5) + offset_y) /
+                                   static_cast<FloatC>(image_height);
+            FloatC x_tan = tan_left + pixel_delta_u * (tan_right - tan_left);
+            FloatC y_tan = tan_up + pixel_delta_v * (tan_down - tan_up);
+            ray_origin_out = center;
+            ray_direction_out = (unit_lookat + unit_right * x_tan + unit_up * y_tan).normalized();
+        } else {
+            FloatC defocus_radius = CA_G(defocus_radius);
+            Vec3C pixel_delta_u = unit_right * CA_G(pixel_width);
+            Vec3C pixel_delta_v = -unit_up * CA_G(pixel_height);
+            Vec3C viewport_upper_left =
+                center + (CA_G(focus_distance) * unit_lookat) -
+                ((FloatC(0.5) * static_cast<FloatC>(image_width)) * pixel_delta_u) -
+                ((FloatC(0.5) * static_cast<FloatC>(image_height)) * pixel_delta_v);
+            Vec3C pixel_00_loc =
+                viewport_upper_left + (FloatC(0.5) * pixel_delta_u) + (FloatC(0.5) * pixel_delta_v);
+            Vec3C defocus_disk_u = unit_right * defocus_radius;
+            Vec3C defocus_disk_v = unit_up * defocus_radius;
+            Vec3C pixel_target = pixel_00_loc + (pixel_delta_u * (FloatC(j) + offset_x)) +
+                                 (pixel_delta_v * (FloatC(i) + offset_y));
+
+            Vec2C disk = _generateUnitDiskPoint(
+                _haltonSample(local_ray_id, 5), _haltonSample(local_ray_id, 7)
+            );
+            ray_origin_out = center + (disk.x * defocus_disk_u) + (disk.y * defocus_disk_v);
+            ray_direction_out = (pixel_target - ray_origin_out).normalized();
+        }
     }
 
     /*****************************************************************
@@ -2138,8 +2213,7 @@ class RS_VisionRayCompute {
         auto& ctx = k->ctx;
         switch (vsm_state.vision_material_state.albedo_input_type) {
             case RSE_VISION_SAMPLE_INPUT_GRID:
-                albedo_out =
-                    _sampleGridTexture(k, VSM_G(vision_material, albedo).texture, pos, uv);
+                albedo_out = _sampleGridTexture(k, VSM_G(vision_material, albedo).texture, pos, uv);
                 break;
             default:
                 albedo_out = VSM_G(vision_material, albedo).constant.toVec3D();
@@ -2163,9 +2237,8 @@ class RS_VisionRayCompute {
         auto& ctx = k->ctx;
         switch (vsm_state.vision_material_state.emission_input_type) {
             case RSE_VISION_SAMPLE_INPUT_GRID:
-                emission_color_out = _sampleGridTexture(
-                    k, VSM_G(vision_material, emission_color).texture, pos, uv
-                );
+                emission_color_out =
+                    _sampleGridTexture(k, VSM_G(vision_material, emission_color).texture, pos, uv);
                 break;
             default:
                 emission_color_out = VSM_G(vision_material, emission_color).constant.toVec3D();
@@ -2222,9 +2295,8 @@ class RS_VisionRayCompute {
         const Vec3C voxel_center = Vec3C(V_G(voxel, position));
         RHandle voxel_material = V_G(voxel, voxel_material);
         const FloatC voxel_size = FloatC(VM_G(voxel_material, voxel_size));
-        const Vec2C uv = _voxelFaceUV(
-            rec_out.p, rec_out.state.hit_state.face, voxel_center, voxel_size
-        );
+        const Vec2C uv =
+            _voxelFaceUV(rec_out.p, rec_out.state.hit_state.face, voxel_center, voxel_size);
         const Vec2C pos = uv * voxel_size;
         rec_out.uv = uv;
 
@@ -2321,9 +2393,10 @@ class RS_VisionRayCompute {
      *        `rec.color = f * NoL / pdf` so callers multiply it into their
      *        running throughput unchanged.
      */
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    _scatterOpaque(
-        const Ray& incoming_ray, device::RS_RandomState& rs_in_out, HitRecord& rec_in_out
+    HOST_DEVICE_INLINE_QUALIFIER static void _scatterOpaque(
+        const Ray& incoming_ray,
+        device::RS_RandomState& rs_in_out,
+        HitRecord& rec_in_out
     ) {
         FloatC roughness = RS_MAX(rec_in_out.roughness, PBR_MIN_ROUGHNESS);
         FloatC alpha = roughness * roughness;
@@ -2390,8 +2463,7 @@ class RS_VisionRayCompute {
         FloatC pdf_diff = NoL / FloatC(RS_PI);
         FloatC pdf_combined = spec_prob * pdf_spec + (FloatC(1) - spec_prob) * pdf_diff;
 
-        Vec3C L_world =
-            (u_axis * L_local.x + v_axis * L_local.y + n * L_local.z).normalized();
+        Vec3C L_world = (u_axis * L_local.x + v_axis * L_local.y + n * L_local.z).normalized();
         rec_in_out.color = f_total * (NoL / RS_MAX(pdf_combined, FloatC(RS_EPS)));
         rec_in_out.scattered = Ray(_offsetRayOrigin(rec_in_out.p, n), L_world);
     }
@@ -2438,9 +2510,7 @@ class RS_VisionRayCompute {
         FloatC eta = ior_from / ior_to;
         FloatC sin2_t = eta * eta * (FloatC(1) - cos_theta * cos_theta);
         bool cannot_refract = sin2_t > FloatC(1);
-        FloatC F = cannot_refract
-                       ? FloatC(1)
-                       : _fresnelDielectric(cos_theta, ior_to / ior_from);
+        FloatC F = cannot_refract ? FloatC(1) : _fresnelDielectric(cos_theta, ior_to / ior_from);
         bool is_reflect = cannot_refract || (rs_in_out.template rand<FloatC>() < F);
 
         Vec3C direction;
@@ -2683,12 +2753,12 @@ class RS_VisionRayCompute {
      *        used by PTUD's restir info pass. TRANSPARENT always; OPAQUE only
      *        when it is close to a perfect mirror (high metalness, low roughness).
      */
-    HOST_DEVICE_INLINE_QUALIFIER static bool _isSpecularSurface(
-        RSE_VisionMaterialType material_type, FloatC roughness, FloatC metalness
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER static bool
+    _isSpecularSurface(RSE_VisionMaterialType material_type, FloatC roughness, FloatC metalness) {
         if (material_type == RSE_VISION_MATERIAL_TRANSPARENT) return true;
-        if (material_type == RSE_VISION_MATERIAL_OPAQUE
-            && metalness > FloatC(0.5) && roughness < FloatC(0.05)) return true;
+        if (material_type == RSE_VISION_MATERIAL_OPAQUE && metalness > FloatC(0.5) &&
+            roughness < FloatC(0.05))
+            return true;
         return false;
     }
 
@@ -2704,8 +2774,7 @@ class RS_VisionRayCompute {
      *        is the delta sentinel `MIS_DELTA_BRDF_PDF` so mirror / glass
      *        bounces preserve their full contribution.
      */
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC
-    _powerHeuristicMIS(FloatC pdf_a, FloatC pdf_b) {
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _powerHeuristicMIS(FloatC pdf_a, FloatC pdf_b) {
         if (pdf_a >= MIS_DELTA_BRDF_PDF) return FloatC(1);
         FloatC a2 = pdf_a * pdf_a;
         FloatC b2 = pdf_b * pdf_b;
@@ -2783,8 +2852,11 @@ class RS_VisionRayCompute {
      *        the voxel.
      */
     HOST_DEVICE_INLINE_QUALIFIER static void _voxelFrontFaces(
-        const Vec3C& voxel_center, FloatC voxel_size, const Vec3C& receiver,
-        int& n_front_out, FloatC& area_visible_out
+        const Vec3C& voxel_center,
+        FloatC voxel_size,
+        const Vec3C& receiver,
+        int& n_front_out,
+        FloatC& area_visible_out
     ) {
         FloatC half = voxel_size * FloatC(0.5);
         int n = 0;
@@ -2819,8 +2891,7 @@ class RS_VisionRayCompute {
      * @brief Area-light estimator geometry factor `cos_emit * area / dist^2`.
      *        Sun returns 1 (parallel light has no inverse-square or emit-cos).
      */
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC
-    _lightGeometryFactor(const LightSample& ls) {
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _lightGeometryFactor(const LightSample& ls) {
         if (ls.is_sun) return FloatC(1);
         return ls.cos_emit * ls.area_visible / (ls.dist * ls.dist);
     }
@@ -2840,8 +2911,7 @@ class RS_VisionRayCompute {
         RS_ReservoirDI& reservoir_in_out
     ) {
         reservoir_in_out.sample_count = reservoir_in_out.sample_count + 1;
-        reservoir_in_out.weight_sum =
-            float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
+        reservoir_in_out.weight_sum = float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
         FloatC rand_u = rs_in_out.template rand<FloatC>();
         if (rand_u * FloatC(reservoir_in_out.weight_sum) < sample_weight) {
             reservoir_in_out.light_index = light_index;
@@ -2866,8 +2936,7 @@ class RS_VisionRayCompute {
         RS_ReservoirGI& reservoir_in_out
     ) {
         reservoir_in_out.sample_count = reservoir_in_out.sample_count + 1;
-        reservoir_in_out.weight_sum =
-            float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
+        reservoir_in_out.weight_sum = float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
         FloatC rand_u = rs_in_out.template rand<FloatC>();
         if (rand_u * FloatC(reservoir_in_out.weight_sum) < sample_weight) {
             reservoir_in_out.bounce_direction = bounce_direction;
@@ -2926,8 +2995,11 @@ class RS_VisionRayCompute {
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void _readVoxelLight(
-        Kernel* k, RIndex light_index,
-        Vec3C& position_out, FloatC& voxel_size_out, Vec3C& emission_out
+        Kernel* k,
+        RIndex light_index,
+        Vec3C& position_out,
+        FloatC& voxel_size_out,
+        Vec3C& emission_out
     ) {
         auto& ctx = k->ctx;
         RHandle voxel = ctx.structure_emissive_voxel_handles[light_index - 1];
@@ -2960,16 +3032,13 @@ class RS_VisionRayCompute {
         FloatC u1 = rs_in_out.template rand<FloatC>();
         FloatC u2 = rs_in_out.template rand<FloatC>();
         FloatC cos_alpha = FloatC(1) - u1 * one_minus_cos;
-        FloatC sin_alpha = RS_FI::rs_sqrt(
-            RS_MAX(FloatC(1) - cos_alpha * cos_alpha, FloatC(0))
-        );
+        FloatC sin_alpha = RS_FI::rs_sqrt(RS_MAX(FloatC(1) - cos_alpha * cos_alpha, FloatC(0)));
         FloatC phi = FloatC(2) * FloatC(RS_PI) * u2;
         FloatC sin_phi = RS_FI::rs_sin(phi);
         FloatC cos_phi = RS_FI::rs_cos(phi);
         Vec3C onb_u, onb_v;
         _buildONB(sun_dir, onb_u, onb_v);
-        return (onb_u * (sin_alpha * cos_phi) + onb_v * (sin_alpha * sin_phi) +
-                sun_dir * cos_alpha)
+        return (onb_u * (sin_alpha * cos_phi) + onb_v * (sin_alpha * sin_phi) + sun_dir * cos_alpha)
             .normalized();
     }
 
@@ -2983,7 +3052,9 @@ class RS_VisionRayCompute {
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static LightSample _sampleLightSample(
-        Kernel* k, RIndex light_index, const Vec3C& hit_pos,
+        Kernel* k,
+        RIndex light_index,
+        const Vec3C& hit_pos,
         device::RS_RandomState& rs_in_out
     ) {
         LightSample ls;
@@ -3020,12 +3091,18 @@ class RS_VisionRayCompute {
         // Pick one of the front-facing axes uniformly.
         FloatC half = voxel_size * FloatC(0.5);
         int signs[3] = {0, 0, 0};
-        if (hit_pos.x < voxel_center.x - half) signs[0] = -1;
-        else if (hit_pos.x > voxel_center.x + half) signs[0] = +1;
-        if (hit_pos.y < voxel_center.y - half) signs[1] = -1;
-        else if (hit_pos.y > voxel_center.y + half) signs[1] = +1;
-        if (hit_pos.z < voxel_center.z - half) signs[2] = -1;
-        else if (hit_pos.z > voxel_center.z + half) signs[2] = +1;
+        if (hit_pos.x < voxel_center.x - half)
+            signs[0] = -1;
+        else if (hit_pos.x > voxel_center.x + half)
+            signs[0] = +1;
+        if (hit_pos.y < voxel_center.y - half)
+            signs[1] = -1;
+        else if (hit_pos.y > voxel_center.y + half)
+            signs[1] = +1;
+        if (hit_pos.z < voxel_center.z - half)
+            signs[2] = -1;
+        else if (hit_pos.z > voxel_center.z + half)
+            signs[2] = +1;
 
         FloatC u_face = rs_in_out.template rand<FloatC>();
         int pick = int(u_face * FloatC(n_front));
@@ -3033,7 +3110,10 @@ class RS_VisionRayCompute {
         int axis = 0;
         for (int a = 0, seen = 0; a < 3; ++a) {
             if (signs[a] != 0) {
-                if (seen == pick) { axis = a; break; }
+                if (seen == pick) {
+                    axis = a;
+                    break;
+                }
                 ++seen;
             }
         }
@@ -3058,10 +3138,8 @@ class RS_VisionRayCompute {
             tangent_u = Vec3C(1, 0, 0);
             tangent_v = Vec3C(0, 1, 0);
         }
-        Vec3C sample_point = voxel_center
-                           + face_normal * half
-                           + tangent_u * (u * voxel_size)
-                           + tangent_v * (v * voxel_size);
+        Vec3C sample_point = voxel_center + face_normal * half + tangent_u * (u * voxel_size) +
+                             tangent_v * (v * voxel_size);
 
         Vec3C diff = sample_point - hit_pos;
         FloatC d = diff.length();
@@ -3083,7 +3161,9 @@ class RS_VisionRayCompute {
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static LightSample _evalStoredLightSample(
-        Kernel* k, RIndex light_index, const Vec3C& hit_pos,
+        Kernel* k,
+        RIndex light_index,
+        const Vec3C& hit_pos,
         const RVec3f& stored_position
     ) {
         LightSample ls;
@@ -3125,8 +3205,7 @@ class RS_VisionRayCompute {
      *        `p_pick_sun / omega_sun_cone` inside the cone, zero outside.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC
-    _evalNeePdfSun(Kernel* k, const Vec3C& dir) {
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalNeePdfSun(Kernel* k, const Vec3C& dir) {
         if (!_isInCosmicBackgroundSunCone(k, dir)) return FloatC(0);
         FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
         FloatC cos_half = RS_FI::rs_cos(half_angle);
@@ -3285,31 +3364,40 @@ class RS_VisionRayCompute {
 
         LightSample light_sample = _sampleLightSample(k, light_index, hit_position, rs_in_out);
         Vec3C brdf_cos = _brdfCos(
-            material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-            normal, view_dir, light_sample.dir
+            material_type,
+            albedo,
+            metalness,
+            roughness,
+            PBR_DEFAULT_IOR,
+            normal,
+            view_dir,
+            light_sample.dir
         );
         Vec3C contribution =
             brdf_cos.elemMul(light_sample.emission) * _lightGeometryFactor(light_sample);
         if (_luminance(contribution) <= FloatC(RS_EPS)) return Vec3C::zero();
 
-        FloatC max_distance = light_sample.is_sun
-                                  ? FloatC(RS_MAX_FLOAT)
-                                  : light_sample.dist - FloatC(RS_EPS);
+        FloatC max_distance = light_sample.is_sun ? FloatC(RS_MAX_FLOAT)
+                                                  : light_sample.dist - FloatC(RS_EPS);
         RHandle light_handle = (light_index == RS_VISION_SUN_LIGHT_INDEX)
                                    ? RS_NULL_HANDLE
                                    : ctx.structure_emissive_voxel_handles[light_index - 1];
         Vec3C origin = _offsetRayOrigin(hit_position, normal);
-        RColor3f transmission = _shadowWalkWithTransmission(
-            k, origin, light_sample.dir, max_distance, light_handle
-        );
+        RColor3f transmission =
+            _shadowWalkWithTransmission(k, origin, light_sample.dir, max_distance, light_handle);
         FloatC p_nee_picked = _evalNeePdf(k, light_index, light_sample);
         FloatC p_brdf_picked = _brdfPdf(
-            material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-            normal, view_dir, light_sample.dir
+            material_type,
+            albedo,
+            metalness,
+            roughness,
+            PBR_DEFAULT_IOR,
+            normal,
+            view_dir,
+            light_sample.dir
         );
         FloatC mis_nee = _powerHeuristicMIS(p_nee_picked, p_brdf_picked);
-        return contribution.elemMul(Vec3C(transmission.toVec3D())) *
-               (mis_nee / source_pdf);
+        return contribution.elemMul(Vec3C(transmission.toVec3D())) * (mis_nee / source_pdf);
     }
 
     /*****************************************************************
@@ -3395,8 +3483,14 @@ class RS_VisionRayCompute {
             _scatterOpaque(incoming_ray, rs_in_out, scatter_rec);
             Vec3C bounce_dir = scatter_rec.scattered.ray_direction;
             FloatC brdf_pdf = _brdfPdf(
-                cur_mt, cur_albedo, cur_metalness, cur_roughness, PBR_DEFAULT_IOR,
-                cur_normal, -cur_incoming_dir, bounce_dir
+                cur_mt,
+                cur_albedo,
+                cur_metalness,
+                cur_roughness,
+                PBR_DEFAULT_IOR,
+                cur_normal,
+                -cur_incoming_dir,
+                bounce_dir
             );
             if (brdf_pdf <= FloatC(RS_EPS)) break;
 
@@ -3430,9 +3524,8 @@ class RS_VisionRayCompute {
                 // BRDF-into-emissive: MIS against the voxel-pick NEE pdf.
                 Vec3C emission = bounce_rec.albedo * bounce_rec.intensity;
                 FloatC p_nee = _evalNeePdfVoxel(k, cur_p, bounce_dir, bounce_rec.voxel);
-                FloatC mis_brdf = p_nee > FloatC(0)
-                                  ? _powerHeuristicMIS(brdf_pdf, p_nee)
-                                  : FloatC(1);
+                FloatC mis_brdf = p_nee > FloatC(0) ? _powerHeuristicMIS(brdf_pdf, p_nee)
+                                                    : FloatC(1);
                 indirect = indirect + throughput.elemMul(emission * mis_brdf);
                 break;
             }
@@ -3444,9 +3537,15 @@ class RS_VisionRayCompute {
             // NEE at this opaque vertex contributes for the current depth.
             if (k->vision_restir_gi_is_bounce_nee_enabled) {
                 Vec3C nee = _evalNeeAtBounce(
-                    k, bounce_rec.p, bounce_rec.normal, -bounce_dir,
-                    bounce_mt, bounce_rec.albedo, bounce_rec.metalness,
-                    bounce_rec.roughness, rs_in_out
+                    k,
+                    bounce_rec.p,
+                    bounce_rec.normal,
+                    -bounce_dir,
+                    bounce_mt,
+                    bounce_rec.albedo,
+                    bounce_rec.metalness,
+                    bounce_rec.roughness,
+                    rs_in_out
                 );
                 indirect = indirect + throughput.elemMul(nee);
             }
@@ -3511,9 +3610,7 @@ class RS_VisionRayCompute {
         FloatC eta = ior_from / ior_to;
         FloatC sin2_t = eta * eta * (FloatC(1) - cos_theta * cos_theta);
         bool cannot_refract = sin2_t > FloatC(1);
-        FloatC F = cannot_refract
-                       ? FloatC(1)
-                       : _fresnelDielectric(cos_theta, ior_to / ior_from);
+        FloatC F = cannot_refract ? FloatC(1) : _fresnelDielectric(cos_theta, ior_to / ior_from);
         if (F <= FloatC(RS_EPS)) return Vec3C::zero();
 
         Vec3C reflect_dir =
@@ -3558,8 +3655,14 @@ class RS_VisionRayCompute {
             if (!_isSpecularSurface(smt, sub_rec.roughness, sub_rec.metalness)) {
                 Vec3C view_dir = -cur_ray.ray_direction.normalized();
                 Vec3C nee = _evalNeeAtBounce(
-                    k, sub_rec.p, sub_rec.normal, view_dir,
-                    smt, sub_rec.albedo, sub_rec.metalness, sub_rec.roughness,
+                    k,
+                    sub_rec.p,
+                    sub_rec.normal,
+                    view_dir,
+                    smt,
+                    sub_rec.albedo,
+                    sub_rec.metalness,
+                    sub_rec.roughness,
                     rs_in_out
                 );
                 return sub_throughput.elemMul(nee) * F;
@@ -3602,9 +3705,8 @@ class RS_VisionRayCompute {
         if (reservoir.sample_count == 0) return true;
         Vec3C stored_dir = Vec3C(reservoir.bounce_direction);
         Vec3C stored_hit = Vec3C(reservoir.bounce_hit_position);
-        bool stored_is_sky = stored_hit.x == FloatC(0)
-                          && stored_hit.y == FloatC(0)
-                          && stored_hit.z == FloatC(0);
+        bool stored_is_sky = stored_hit.x == FloatC(0) && stored_hit.y == FloatC(0) &&
+                             stored_hit.z == FloatC(0);
 
         Ray validate_ray(_offsetRayOrigin(endpoint_position, endpoint_normal), stored_dir);
         HitRecord validate_rec;
@@ -3641,8 +3743,14 @@ class RS_VisionRayCompute {
             k, reservoir.light_index, hit_position, reservoir.light_position
         );
         Vec3C brdf_cos = _brdfCos(
-            material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-            normal, view_dir, light_sample.dir
+            material_type,
+            albedo,
+            metalness,
+            roughness,
+            PBR_DEFAULT_IOR,
+            normal,
+            view_dir,
+            light_sample.dir
         );
         Vec3C contribution =
             brdf_cos.elemMul(light_sample.emission) * _lightGeometryFactor(light_sample);
@@ -3660,12 +3768,17 @@ class RS_VisionRayCompute {
         FloatC target_pdf_at_read = _luminance(contribution_vis);
         if (target_pdf_at_read <= FloatC(RS_EPS)) return Vec3C::zero();
         FloatC restir_weight =
-            FloatC(reservoir.weight_sum) /
-            (FloatC(reservoir.sample_count) * target_pdf_at_read);
+            FloatC(reservoir.weight_sum) / (FloatC(reservoir.sample_count) * target_pdf_at_read);
         FloatC p_nee_survivor = _evalNeePdf(k, reservoir.light_index, light_sample);
         FloatC p_brdf_survivor = _brdfPdf(
-            material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-            normal, view_dir, light_sample.dir
+            material_type,
+            albedo,
+            metalness,
+            roughness,
+            PBR_DEFAULT_IOR,
+            normal,
+            view_dir,
+            light_sample.dir
         );
         FloatC mis_nee = _powerHeuristicMIS(p_nee_survivor, p_brdf_survivor);
         return contribution_vis * (restir_weight * mis_nee);
@@ -3692,8 +3805,14 @@ class RS_VisionRayCompute {
 
         Vec3C bounce_dir = Vec3C(reservoir.bounce_direction);
         Vec3C brdf_cos = _brdfCos(
-            material_type, albedo, metalness, roughness, PBR_DEFAULT_IOR,
-            normal, view_dir, bounce_dir
+            material_type,
+            albedo,
+            metalness,
+            roughness,
+            PBR_DEFAULT_IOR,
+            normal,
+            view_dir,
+            bounce_dir
         );
         Vec3C l_incoming = Vec3C(reservoir.l_incoming.toVec3D());
         Vec3C contribution = brdf_cos.elemMul(l_incoming);
@@ -3704,11 +3823,9 @@ class RS_VisionRayCompute {
         FloatC target_pdf_at_read = _luminance(contribution);
         if (target_pdf_at_read <= FloatC(RS_EPS)) return Vec3C::zero();
         // Stored contributing-source count when set, else raw sample count.
-        RSize normalizer = (reservoir.Z_count > 0)
-                               ? reservoir.Z_count
-                               : reservoir.sample_count;
-        FloatC restir_weight = FloatC(reservoir.weight_sum) /
-                               (FloatC(normalizer) * target_pdf_at_read);
+        RSize normalizer = (reservoir.Z_count > 0) ? reservoir.Z_count : reservoir.sample_count;
+        FloatC restir_weight =
+            FloatC(reservoir.weight_sum) / (FloatC(normalizer) * target_pdf_at_read);
         return contribution * restir_weight;
     }
 
@@ -3744,8 +3861,7 @@ class RS_VisionRayCompute {
                 Vec3C sun_disk = _evalCosmicBackgroundSunDisk(k, dir);
                 if (_luminance(sun_disk) > FloatC(0)) {
                     FloatC p_nee = _evalNeePdfSun(k, dir);
-                    FloatC mis_brdf =
-                        _powerHeuristicMIS(last_bounce_brdf_pdf_in_out, p_nee);
+                    FloatC mis_brdf = _powerHeuristicMIS(last_bounce_brdf_pdf_in_out, p_nee);
                     sky = sky + sun_disk * (mis_brdf - FloatC(1));
                 }
             }
@@ -3761,13 +3877,19 @@ class RS_VisionRayCompute {
         if (material_type == RSE_VISION_MATERIAL_OPAQUE) {
             Vec3C view_dir = -current_ray_in_out.ray_direction;
             Vec3C nee = _evalNeeAtBounce(
-                k, rec_in_out.p, rec_in_out.normal, view_dir,
-                material_type, rec_in_out.albedo, rec_in_out.metalness, rec_in_out.roughness,
+                k,
+                rec_in_out.p,
+                rec_in_out.normal,
+                view_dir,
+                material_type,
+                rec_in_out.albedo,
+                rec_in_out.metalness,
+                rec_in_out.roughness,
                 rs_in_out
             );
             if (_luminance(nee) > FloatC(0)) {
-                contribution_out = contribution_out +
-                                   _fireflyClamp(k, throughput_in_out.elemMul(nee), depth);
+                contribution_out =
+                    contribution_out + _fireflyClamp(k, throughput_in_out.elemMul(nee), depth);
             }
         }
 
@@ -3779,8 +3901,7 @@ class RS_VisionRayCompute {
         } else if (material_type == RSE_VISION_MATERIAL_TRANSPARENT) {
             FloatC ior_to = hs.is_front_face ? rec_in_out.ior : FloatC(1);
             _scatterTransparentWithIOR(
-                current_ray_in_out, current_medium_in_out, ior_to,
-                rs_in_out, rec_in_out
+                current_ray_in_out, current_medium_in_out, ior_to, rs_in_out, rec_in_out
             );
             if (hs.is_refraction) current_medium_in_out = ior_to;
         } else {
@@ -3806,8 +3927,14 @@ class RS_VisionRayCompute {
         // sees the previous step as a delta.
         Vec3C view_dir = -current_ray_in_out.ray_direction;
         last_bounce_brdf_pdf_in_out = _brdfPdf(
-            material_type, rec_in_out.albedo, rec_in_out.metalness, rec_in_out.roughness,
-            rec_in_out.ior, rec_in_out.normal, view_dir, rec_in_out.scattered.ray_direction
+            material_type,
+            rec_in_out.albedo,
+            rec_in_out.metalness,
+            rec_in_out.roughness,
+            rec_in_out.ior,
+            rec_in_out.normal,
+            view_dir,
+            rec_in_out.scattered.ray_direction
         );
 
         current_ray_in_out = rec_in_out.scattered;
@@ -3884,12 +4011,17 @@ class RS_VisionRayCompute {
                 // Reflect side: mini-PTUD off the glass, Fresnel-weighted, added
                 // to off-chain radiance. Refract side continues the main chain.
                 Vec3C reflect_contrib = _gatherReflectChain(
-                    k, cur_rec.p, cur_rec.normal,
-                    cur_ray.ray_direction, cur_rec.roughness,
-                    medium_ior, ior_to, rs_in_out
+                    k,
+                    cur_rec.p,
+                    cur_rec.normal,
+                    cur_ray.ray_direction,
+                    cur_rec.roughness,
+                    medium_ior,
+                    ior_to,
+                    rs_in_out
                 );
-                chain_reflect_radiance_out = chain_reflect_radiance_out +
-                    chain_throughput_out.elemMul(reflect_contrib);
+                chain_reflect_radiance_out =
+                    chain_reflect_radiance_out + chain_throughput_out.elemMul(reflect_contrib);
                 _scatterTransparentWithIORDeterministic(
                     cur_ray, medium_ior, ior_to, rs_in_out, cur_rec
                 );
@@ -3919,13 +4051,8 @@ class RS_VisionRayCompute {
      *        `vision_is_restir_enabled == true`.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static void _shadeRGBOnceRestir(
-        Kernel* k,
-        RHandle camera,
-        RIndex ii,
-        RIndex jj,
-        Vec3C& contribution_out
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    _shadeRGBOnceRestir(Kernel* k, RHandle camera, RIndex ii, RIndex jj, Vec3C& contribution_out) {
         contribution_out = Vec3C::zero();
         if (k == nullptr) return;
         auto& ctx = k->ctx;
@@ -3961,17 +4088,21 @@ class RS_VisionRayCompute {
         Vec3C view_dir = (camera_position - hit_position).normalized();
 
         // Shading reads the spatial buffer, the final per-pixel reservoir.
-        const RS_ReservoirDI& di_reservoir =
-            ctx.camera_spatial_reservoir_di[camera][{ii, jj}];
-        const RS_ReservoirGI& gi_reservoir =
-            ctx.camera_spatial_reservoir_gi[camera][{ii, jj}];
+        const RS_ReservoirDI& di_reservoir = ctx.camera_spatial_reservoir_di[camera][{ii, jj}];
+        const RS_ReservoirGI& gi_reservoir = ctx.camera_spatial_reservoir_gi[camera][{ii, jj}];
         Vec3C direct = _evalReservoirDI(
-            k, di_reservoir, material_type,
-            hit_position, normal, albedo, metalness, roughness, view_dir
+            k,
+            di_reservoir,
+            material_type,
+            hit_position,
+            normal,
+            albedo,
+            metalness,
+            roughness,
+            view_dir
         );
         Vec3C indirect = _evalReservoirGI(
-            k, gi_reservoir, material_type,
-            normal, albedo, metalness, roughness, view_dir
+            k, gi_reservoir, material_type, normal, albedo, metalness, roughness, view_dir
         );
         // Cap multi-bounce escape spikes at concave corners.
         indirect = _fireflyClamp(k, indirect, RSize(1));
@@ -3999,26 +4130,44 @@ class RS_VisionRayCompute {
     ) {
         auto& ctx = k->ctx;
         constexpr FloatC PROJECTION_FORWARD_EPS = FloatC(1e-4);
+        RSize image_width = CA_G(image_width);
+        RSize image_height = CA_G(image_height);
+
         Vec3C unit_lookat = camera_orientation.toOrthoAxisX();
         Vec3C unit_up = camera_orientation.toOrthoAxisZ();
-        Vec3C unit_right = camera_orientation.toOrthoAxisY();
+        Vec3C unit_right = -camera_orientation.toOrthoAxisY();
+
         Vec3C offset = world_point - camera_position;
         FloatC forward = offset.dot(unit_lookat);
         if (forward <= PROJECTION_FORWARD_EPS) return false;
 
-        FloatC focus_distance = FloatC(CA_G(focus_distance));
-        FloatC pixel_width = FloatC(CA_G(pixel_width));
-        FloatC pixel_height = FloatC(CA_G(pixel_height));
-        RSize image_width = CA_G(image_width);
-        RSize image_height = CA_G(image_height);
-
-        Vec3C focus_offset = offset * (focus_distance / forward);
-        FloatC right_component = focus_offset.dot(unit_right);
-        FloatC up_component = focus_offset.dot(unit_up);
-        j_out = -right_component / pixel_width
-                + FloatC(0.5) * FloatC(image_width) - FloatC(0.5);
-        i_out = -up_component / pixel_height
-                + FloatC(0.5) * FloatC(image_height) - FloatC(0.5);
+        RS_CameraStateUnion state_union{CA_G(state)};
+        FloatC pixel_delta_u = FloatC(0);
+        FloatC pixel_delta_v = FloatC(0);
+        if (state_union.camera_state.type == RSE_CAMERA_FREE_STEREO ||
+            state_union.camera_state.type == RSE_CAMERA_RIGID_BODY_LINKED_STEREO) {
+            FloatC tan_left = RS_FI::rs_tan(FloatC(CA_G(angle_left)));
+            FloatC tan_right = RS_FI::rs_tan(FloatC(CA_G(angle_right)));
+            FloatC tan_up = RS_FI::rs_tan(FloatC(CA_G(angle_up)));
+            FloatC tan_down = RS_FI::rs_tan(FloatC(CA_G(angle_down)));
+            FloatC x_tan = offset.dot(unit_right) / forward;
+            FloatC y_tan = offset.dot(unit_up) / forward;
+            pixel_delta_u = (x_tan - tan_left) / (tan_right - tan_left);
+            pixel_delta_v = (y_tan - tan_up) / (tan_down - tan_up);
+        } else {
+            FloatC focus_distance = FloatC(CA_G(focus_distance));
+            FloatC pixel_width = FloatC(CA_G(pixel_width));
+            FloatC pixel_height = FloatC(CA_G(pixel_height));
+            Vec3C focus_offset = offset * (focus_distance / forward);
+            pixel_delta_u =
+                focus_offset.dot(unit_right) / (pixel_width * static_cast<FloatC>(image_width)) +
+                FloatC(0.5);
+            pixel_delta_v =
+                -focus_offset.dot(unit_up) / (pixel_height * static_cast<FloatC>(image_height)) +
+                FloatC(0.5);
+        }
+        j_out = pixel_delta_u * static_cast<FloatC>(image_width) - FloatC(0.5);
+        i_out = pixel_delta_v * static_cast<FloatC>(image_height) - FloatC(0.5);
         return true;
     }
 
@@ -4090,8 +4239,13 @@ class RS_VisionRayCompute {
 
         FloatC ii_prev_f, jj_prev_f;
         bool is_in_frustum = _projectToPixel(
-            k, camera, prev_world, prev_camera_position, prev_camera_orientation,
-            ii_prev_f, jj_prev_f
+            k,
+            camera,
+            prev_world,
+            prev_camera_position,
+            prev_camera_orientation,
+            ii_prev_f,
+            jj_prev_f
         );
         if (!is_in_frustum) {
             screen_motion_out = RVec2f(0.0f, 0.0f);
@@ -4231,9 +4385,8 @@ class RS_VisionRayCompute {
     _sampleGGXVNDF(const Vec3C& Ve, FloatC alpha, FloatC r1, FloatC r2) {
         Vec3C Vh = Vec3C(alpha * Ve.x, alpha * Ve.y, Ve.z).normalized();
         FloatC lensq = Vh.x * Vh.x + Vh.y * Vh.y;
-        Vec3C T1 = lensq > FloatC(0)
-                       ? Vec3C(-Vh.y, Vh.x, FloatC(0)) / RS_FI::rs_sqrt(lensq)
-                       : Vec3C(FloatC(1), FloatC(0), FloatC(0));
+        Vec3C T1 = lensq > FloatC(0) ? Vec3C(-Vh.y, Vh.x, FloatC(0)) / RS_FI::rs_sqrt(lensq)
+                                     : Vec3C(FloatC(1), FloatC(0), FloatC(0));
         Vec3C T2 = Vh.cross(T1);
         FloatC r = RS_FI::rs_sqrt(r1);
         FloatC phi = FloatC(2) * FloatC(RS_PI) * r2;
@@ -4273,8 +4426,7 @@ class RS_VisionRayCompute {
     /**
      * @brief Schlick approximation of metallic Fresnel; vec3 F0 = albedo.
      */
-    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
-    _fresnelSchlick(FloatC cos_i, const Vec3C& F0) {
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _fresnelSchlick(FloatC cos_i, const Vec3C& F0) {
         FloatC c = cos_i > FloatC(0) ? cos_i : -cos_i;
         return F0 + (Vec3C::one() - F0) * _pow5(FloatC(1) - c);
     }
@@ -4283,9 +4435,8 @@ class RS_VisionRayCompute {
      * @brief Per-direction Fresnel at the half-vector for the two-lobe opaque
      *        BSDF: dielectric + metal blended by metalness.
      */
-    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _fresnelOpaqueAtH(
-        const Vec3C& albedo, FloatC metalness, FloatC ior, FloatC VoH
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _fresnelOpaqueAtH(const Vec3C& albedo, FloatC metalness, FloatC ior, FloatC VoH) {
         FloatC F_h_diel = _fresnelDielectric(VoH, ior);
         Vec3C F_h_metal = _fresnelSchlick(VoH, albedo);
         return Vec3C(F_h_diel, F_h_diel, F_h_diel) * (FloatC(1) - metalness) +
@@ -4298,9 +4449,8 @@ class RS_VisionRayCompute {
      *        albedos of spec (Fresnel at NoV) and diffuse ((1 - metalness) ×
      *        albedo) under CIE Y luminance. Clamped so neither lobe starves.
      */
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC _specProbOpaque(
-        const Vec3C& albedo, FloatC metalness, FloatC ior, FloatC NoV
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC
+    _specProbOpaque(const Vec3C& albedo, FloatC metalness, FloatC ior, FloatC NoV) {
         FloatC F_NoV_diel = _fresnelDielectric(NoV, ior);
         Vec3C F_NoV_metal = _fresnelSchlick(NoV, albedo);
         Vec3C F_NoV = Vec3C(F_NoV_diel, F_NoV_diel, F_NoV_diel) * (FloatC(1) - metalness) +
@@ -4318,18 +4468,17 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Pack the per-pixel object-identity key for the denoiser edge stop.
-     *        Voxel: kind=0 with structure_gid and material_gid. Floor: kind=1 with zeros.
+     *        Voxel: the structure entity gid with its material gid. Floor: the reserved floor gid.
      */
     HOST_DEVICE_INLINE_QUALIFIER static RS_CameraPixelObjectKey _packObjectKey(
         const HitRecord& rec
     ) {
         RS_CameraPixelObjectKey key{};
         if (rec.state.hit_state.is_floor_hit) {
-            key.structure_and_kind = RS_CAMERA_PIXEL_OBJECT_KIND_FLOOR
-                                     << RS_CAMERA_PIXEL_OBJECT_KIND_SHIFT;
+            key.entity_gid = RS_WORLD_RSC_FLOOR_GID;
             key.material_gid = 0;
         } else {
-            key.structure_and_kind = rec.structure_gid & RS_CAMERA_PIXEL_OBJECT_GID_MASK;
+            key.entity_gid = rec.structure_gid;
             key.material_gid = rec.material_gid;
         }
         return key;
