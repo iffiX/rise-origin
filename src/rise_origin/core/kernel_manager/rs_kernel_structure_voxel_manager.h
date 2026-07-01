@@ -1106,9 +1106,14 @@ class RS_KernelStructureVoxelManager {
     void _colorConstraintJoints();
 
     /**
+     * @brief Check the counts that gate fixed-size kernel buffers before they are indexed.
+     */
+    void _precheckStructureLimits() const;
+
+    /**
      * @brief Check the structure stays within kernel size limits.
      */
-    void _checkStructureLimits() const;
+    void _postcheckStructureLimits() const;
 
     /**
      * @brief Check every rigid body has a valid inertia.

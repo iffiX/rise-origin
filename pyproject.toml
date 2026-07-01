@@ -78,6 +78,7 @@ target-version = ["py310"]
 
 [tool.pytest.ini_options]
 testpaths = ["test/python"]
+python_files = ["test_*.py", "*_test.py", "*_cases.py"]
 addopts = "--import-mode=importlib"
 markers = [
     "voxel: needs the libigl mesh voxelizer",

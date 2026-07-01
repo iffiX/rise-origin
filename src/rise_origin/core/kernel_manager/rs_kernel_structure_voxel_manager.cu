@@ -95,6 +95,8 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     );
     timer.reset();
 
+    _precheckStructureLimits();
+
     if (!_structure().is_fixed) {
         for (auto &constraint_rsc : _structure().constraints) {
             _addConstraint(constraint_rsc);
@@ -116,7 +118,7 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     );
 
     // Validate the characterization before the kernel context is touched at commit.
-    _checkStructureLimits();
+    _postcheckStructureLimits();
     _checkRigidBodyInertia();
 
     RS_LOG(
@@ -916,6 +918,14 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
                                   ref.phys_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED;
         if (is_mat_rigid) {
             RIndex rigid_body_sid = _rigid_body_num++;
+            if (_is_constrained &&
+                rigid_body_sid >= RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM)
+                RS_THROW(RS_InvalidCharacterizationException(
+                    "Constrained structure \"{}\" has more than {} rigid bodies, exceeding the "
+                    "constrained limit",
+                    _structure().name,
+                    RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM
+                ));
 
             auto rigid_body = RigidBodyData::preset();
             rigid_body.sid = rigid_body_sid;
@@ -1606,6 +1616,14 @@ void RS_KernelStructureVoxelManager::_addConstraint(
         _rigid_body_sid_map.at({constraint_rsc.a_body_sid, constraint_rsc.a_segment_bid});
     RIndex rb_b_sid =
         _rigid_body_sid_map.at({constraint_rsc.b_body_sid, constraint_rsc.b_segment_bid});
+    if (rb_a_sid >= RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM ||
+        rb_b_sid >= RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM)
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Constrained structure \"{}\" references rigid body {} beyond the constrained limit {}",
+            _structure().name,
+            RS_MAX(rb_a_sid, rb_b_sid),
+            RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM
+        ));
     if (!constraint_rsc.is_collision_enabled) {
         _rigid_bodies[rb_a_sid].connected_body_mask.setOn(rb_b_sid);
         _rigid_bodies[rb_b_sid].connected_body_mask.setOn(rb_a_sid);
@@ -1883,7 +1901,26 @@ RS_KernelStructureVoxelManager::_createBasicConstraintJoint(
     return constraint;
 }
 
-void RS_KernelStructureVoxelManager::_checkStructureLimits() const {
+void RS_KernelStructureVoxelManager::_precheckStructureLimits() const {
+    if (!_is_constrained &&
+        _rigid_body_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_UNCONSTRAINED_NUM)
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Unconstrained structure \"{}\" has {} rigid bodies, exceeding the unconstrained "
+            "limit {}",
+            _structure().name,
+            _rigid_body_num,
+            RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_UNCONSTRAINED_NUM
+        ));
+    if (_structure().constraints.size() > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM)
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Structure \"{}\" has {} constraints, exceeding limit {}",
+            _structure().name,
+            _structure().constraints.size(),
+            RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM
+        ));
+}
+
+void RS_KernelStructureVoxelManager::_postcheckStructureLimits() const {
     if (_body_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM)
         RS_THROW(RS_InvalidCharacterizationException(
             "Structure \"{}\" has {} bodies, exceeding limit {}",
@@ -1904,32 +1941,6 @@ void RS_KernelStructureVoxelManager::_checkStructureLimits() const {
             _structure().name,
             _link_num,
             RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_LINK_NUM
-        ));
-    if (_is_constrained) {
-        if (_rigid_body_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM)
-            RS_THROW(RS_InvalidCharacterizationException(
-                "Constrained structure \"{}\" has {} rigid bodies, exceeding the constrained limit "
-                "{}",
-                _structure().name,
-                _rigid_body_num,
-                RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM
-            ));
-    } else {
-        if (_rigid_body_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_UNCONSTRAINED_NUM)
-            RS_THROW(RS_InvalidCharacterizationException(
-                "Unconstrained structure \"{}\" has {} rigid bodies, exceeding the unconstrained "
-                "limit {}",
-                _structure().name,
-                _rigid_body_num,
-                RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_UNCONSTRAINED_NUM
-            ));
-    }
-    if (_joint_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM)
-        RS_THROW(RS_InvalidCharacterizationException(
-            "Structure \"{}\" has {} constraints, exceeding limit {}",
-            _structure().name,
-            _joint_num,
-            RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_CONSTRAINT_NUM
         ));
 }
 
