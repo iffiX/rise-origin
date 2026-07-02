@@ -139,9 +139,7 @@ bool RS_SimulationExecutor::step() {
         RSize purged = _runSentinel(is_hard_abort);
         if (is_hard_abort || purged == 0) {
             _simulation->postMessage(
-                RS_WORLD_MESSAGE_SYSTEM_ID,
-                RSE_WORLD_MESSAGE_ERROR,
-                "world aborted: unrecoverable degenerate time step"
+                RSE_WORLD_MESSAGE_ERROR, "world aborted: unrecoverable degenerate time step"
             );
             _kernel->terminate();
             return false;
@@ -184,9 +182,7 @@ bool RS_SimulationExecutor::step() {
         _runSentinel(is_hard_abort);
         if (is_hard_abort) {
             _simulation->postMessage(
-                RS_WORLD_MESSAGE_SYSTEM_ID,
-                RSE_WORLD_MESSAGE_ERROR,
-                "world aborted: sentinel purge ceiling exceeded"
+                RSE_WORLD_MESSAGE_ERROR, "world aborted: sentinel purge ceiling exceeded"
             );
             _kernel->terminate();
             return false;
@@ -544,9 +540,7 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
             );
             std::string name = _kernel_manager->purgeStructure(gid);
             _simulation->postMessage(
-                RS_WORLD_MESSAGE_SYSTEM_ID,
-                RSE_WORLD_MESSAGE_WARNING,
-                format("structure {} purged: {}", name, reason)
+                RSE_WORLD_MESSAGE_WARNING, format("structure {} purged: {}", name, reason)
             );
             if (++purged > 100) {
                 is_hard_abort = true;

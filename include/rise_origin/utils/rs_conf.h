@@ -78,14 +78,9 @@
 /*****************************************************************
  * World
  *****************************************************************/
-// Reserved id for messages the world emits internally.
-#ifndef RS_WORLD_MESSAGE_SYSTEM_ID
-#define RS_WORLD_MESSAGE_SYSTEM_ID (0xFFFFFFFEu)
-#endif
-
-// Message ids wrap back to 0 once they pass this threshold; stays below the system id.
-#ifndef RS_WORLD_MESSAGE_ID_ROTATE_THRESHOLD
-#define RS_WORLD_MESSAGE_ID_ROTATE_THRESHOLD (0xFFFFFFFDu)
+// Number of entries the world message log retains before evicting the oldest.
+#ifndef RS_WORLD_MESSAGE_BUFFER_DEFAULT_SIZE
+#define RS_WORLD_MESSAGE_BUFFER_DEFAULT_SIZE 4096
 #endif
 
 // World range in meters.

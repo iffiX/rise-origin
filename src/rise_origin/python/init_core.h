@@ -4,6 +4,7 @@
 #ifndef INIT_CORE_H
 #define INIT_CORE_H
 
+#include <pybind11/chrono.h>
 #include <pybind11/numpy.h>
 #include <pybind11/pybind11.h>
 
@@ -344,7 +345,9 @@ class RSPY_WorldCameraPerspectiveRecord {
             }
             const size_t w = record.width;
             const size_t h = record.height;
-            return py::array_t<float>({h, w}, {w * sizeof(float), sizeof(float)}, record.depth.pixel);
+            return py::array_t<float>(
+                {h, w}, {w * sizeof(float), sizeof(float)}, record.depth.pixel
+            );
         }
     };
 
@@ -845,9 +848,7 @@ class RSPY_WorldCameraStereoSignal {
     [[nodiscard]] Orientation right_orientation_signals() const {
         return Orientation(signal.right_orientation_signals);
     }
-    [[nodiscard]] Optics left_optics_signals() const {
-        return Optics(signal.left_optics_signals);
-    }
+    [[nodiscard]] Optics left_optics_signals() const { return Optics(signal.left_optics_signals); }
     [[nodiscard]] Optics right_optics_signals() const {
         return Optics(signal.right_optics_signals);
     }
@@ -1023,18 +1024,32 @@ class RSPY_WorldHandle {
         handle->waitForEnd();
     }
 
-    [[nodiscard]] bool has_message() const { return handle->hasMessage(); }
-
-    [[nodiscard]] std::vector<RS_WorldMessage> get_messages() const {
-        return handle->getMessages();
+    [[nodiscard]] RBigIndex get_newest_message_index() const {
+        return handle->getNewestMessageIndex();
     }
 
-    RS_WorldMessage wait_for_message(
-        RIndex message_id = RS_NULL_INDEX,
-        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_ANY_LEVEL
+    [[nodiscard]] RBigIndex get_oldest_message_index() const {
+        return handle->getOldestMessageIndex();
+    }
+
+    [[nodiscard]] std::vector<RS_WorldMessage> get_messages_matching(
+        RSize max_count = RS_MAX_SIZE,
+        RBigIndex oldest_index = 0,
+        RBigIndex newest_index = RS_NULL_BIG_INDEX,
+        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO
     ) const {
+        return handle->getMessagesMatching(max_count, oldest_index, newest_index, level);
+    }
+
+    RS_WorldMessage wait_for_message(RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO) const {
         py::gil_scoped_release release;
-        return handle->waitForMessage(message_id, level);
+        return handle->waitForMessage(level);
+    }
+
+    [[nodiscard]] RSize get_message_buffer_size() const { return handle->getMessageBufferSize(); }
+
+    void set_message_buffer_size(RSize max_messages) const {
+        handle->setMessageBufferSize(max_messages);
     }
 
     void begin_modification_transaction() const { handle->beginModificationTransaction(); }
@@ -1042,38 +1057,45 @@ class RSPY_WorldHandle {
 
     [[nodiscard]] rsc::RSC_World get_world() const { return handle->getWorld(); }
 
-    RIndex set_simulation(const rsc::RSC_Simulation &simulation) const {
+    RS_WorldTask set_simulation(const rsc::RSC_Simulation &simulation) const {
         return handle->setSimulation(simulation);
     }
 
     // Resource
-    RIndex add_resource(const rsc::RSC_ResourceVariant &resource) const {
+    RS_WorldTask add_resource(const rsc::RSC_ResourceVariant &resource) const {
         return handle->addResource(resource);
     }
-    RIndex remove_resource(const std::string &name) const { return handle->removeResource(name); }
+    RS_WorldTask remove_resource(const std::string &name) const {
+        return handle->removeResource(name);
+    }
     [[nodiscard]] rsc::RSC_ResourceVariant find_resource(const std::string &name) const {
         return handle->findResource(name);
     }
 
     // Essence
-    RIndex add_essence(const rsc::RSC_EssenceVariant &essence) const {
+    RS_WorldTask add_essence(const rsc::RSC_EssenceVariant &essence) const {
         return handle->addEssence(essence);
     }
-    RIndex update_essence(const std::string &name, const rsc::RSC_EssenceVariant &essence) const {
+    RS_WorldTask
+    update_essence(const std::string &name, const rsc::RSC_EssenceVariant &essence) const {
         return handle->updateEssence(name, essence);
     }
-    RIndex remove_essence(const std::string &name) const { return handle->removeEssence(name); }
+    RS_WorldTask remove_essence(const std::string &name) const {
+        return handle->removeEssence(name);
+    }
     [[nodiscard]] rsc::RSC_EssenceVariant find_essence(const std::string &name) const {
         return handle->findEssence(name);
     }
 
     // Entity
-    RIndex add_entity(const rsc::RSC_EntityVariant &entity) const {
+    RS_WorldTask add_entity(const rsc::RSC_EntityVariant &entity) const {
         return handle->addEntity(entity);
     }
-    RIndex remove_entity(const std::string &name) const { return handle->removeEntity(name); }
-    RIndex freeze_entity(const std::string &name) const { return handle->freezeEntity(name); }
-    RIndex unfreeze_entity(const std::string &name) const { return handle->unfreezeEntity(name); }
+    RS_WorldTask remove_entity(const std::string &name) const { return handle->removeEntity(name); }
+    RS_WorldTask freeze_entity(const std::string &name) const { return handle->freezeEntity(name); }
+    RS_WorldTask unfreeze_entity(const std::string &name) const {
+        return handle->unfreezeEntity(name);
+    }
     [[nodiscard]] rsc::RSC_EntityVariant find_entity(const std::string &name) const {
         return handle->findEntity(name);
     }
@@ -1082,37 +1104,39 @@ class RSPY_WorldHandle {
     }
 
     // Record
-    RIndex add_record(const rsc::RSC_RecordVariant &record) const {
+    RS_WorldTask add_record(const rsc::RSC_RecordVariant &record) const {
         return handle->addRecord(record);
     }
-    RIndex remove_record(const std::string &name) const { return handle->removeRecord(name); }
+    RS_WorldTask remove_record(const std::string &name) const { return handle->removeRecord(name); }
     [[nodiscard]] rsc::RSC_RecordVariant find_record(const std::string &name) const {
         return handle->findRecord(name);
     }
 
     // Signal
-    RIndex add_signal(const rsc::RSC_SignalVariant &signal) const {
+    RS_WorldTask add_signal(const rsc::RSC_SignalVariant &signal) const {
         return handle->addSignal(signal);
     }
-    RIndex remove_signal(const std::string &name) const { return handle->removeSignal(name); }
+    RS_WorldTask remove_signal(const std::string &name) const { return handle->removeSignal(name); }
     [[nodiscard]] rsc::RSC_SignalVariant find_signal(const std::string &name) const {
         return handle->findSignal(name);
     }
 
     // Recorder
-    RIndex add_recorder(const rsc::RSC_RecorderVariant &recorder) const {
+    RS_WorldTask add_recorder(const rsc::RSC_RecorderVariant &recorder) const {
         return handle->addRecorder(recorder);
     }
-    RIndex remove_recorder(const std::string &name) const { return handle->removeRecorder(name); }
+    RS_WorldTask remove_recorder(const std::string &name) const {
+        return handle->removeRecorder(name);
+    }
     [[nodiscard]] rsc::RSC_RecorderVariant find_recorder(const std::string &name) const {
         return handle->findRecorder(name);
     }
 
     // Controller
-    RIndex add_controller(const rsc::RSC_ControllerVariant &controller) const {
+    RS_WorldTask add_controller(const rsc::RSC_ControllerVariant &controller) const {
         return handle->addController(controller);
     }
-    RIndex remove_controller(const std::string &name) const {
+    RS_WorldTask remove_controller(const std::string &name) const {
         return handle->removeController(name);
     }
     [[nodiscard]] rsc::RSC_ControllerVariant find_controller(const std::string &name) const {
@@ -1134,11 +1158,10 @@ class RSPY_WorldCallback {
 
     void set_callback(py::function py_callback) {
         // The engine drops the last reference to the wrapping function on its own thread, so the
-        // captured Python object must be released under the GIL; a custom deleter does that. The same
-        // holder backs get_callback, so it stays the function Python set.
+        // captured Python object must be released under the GIL; a custom deleter does that. The
+        // same holder backs get_callback, so it stays the function Python set.
         _py_callback = std::shared_ptr<py::object>(
-            new py::object(std::move(py_callback)),
-            [](py::object *object) {
+            new py::object(std::move(py_callback)), [](py::object *object) {
                 py::gil_scoped_acquire gil;
                 delete object;
             }
@@ -1152,7 +1175,7 @@ class RSPY_WorldCallback {
                     controllers_list.append(RSPY_WorldController(controller));
                 }
                 try {
-                    py::cast<py::function>(*py_object)(time, controllers_list);
+                    py::cast<py::function> (*py_object)(time, controllers_list);
                 } catch (const py::error_already_set &error) {
                     py::print("Exception in world callback:", error.what());
                 }
@@ -1217,45 +1240,71 @@ inline void initRSPYCore(py::module &m) {
      * World messages
      *****************************************************************/
     py::enum_<RSE_WorldMessageLevel>(m, "RSE_WorldMessageLevel")
-        .value("RSE_WORLD_MESSAGE_ANY_LEVEL", RSE_WORLD_MESSAGE_ANY_LEVEL)
         .value("RSE_WORLD_MESSAGE_INFO", RSE_WORLD_MESSAGE_INFO)
         .value("RSE_WORLD_MESSAGE_WARNING", RSE_WORLD_MESSAGE_WARNING)
         .value("RSE_WORLD_MESSAGE_ERROR", RSE_WORLD_MESSAGE_ERROR)
         .export_values();
 
-    py::enum_<RSE_WorldMessageCreatedType>(m, "RSE_WorldMessageCreatedType")
-        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_NONE", RSE_WORLD_MESSAGE_CREATED_TYPE_NONE)
-        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY", RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY)
-        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE", RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE)
-        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE", RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE)
-        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD", RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD)
-        .value("RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL", RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL)
+    py::class_<RS_WorldMessage>(m, "RS_WorldMessage")
+        .def(py::init<>())
+        .def_readonly("index", &RS_WorldMessage::index)
+        .def_readonly("time", &RS_WorldMessage::time)
+        .def_readonly("level", &RS_WorldMessage::level)
+        .def_readonly("text", &RS_WorldMessage::text);
+
+    /*****************************************************************
+     * World tasks
+     *****************************************************************/
+    py::enum_<RSE_WorldTaskState>(m, "RSE_WorldTaskState")
+        .value("RSE_WORLD_TASK_PENDING", RSE_WORLD_TASK_PENDING)
+        .value("RSE_WORLD_TASK_SUCCESS", RSE_WORLD_TASK_SUCCESS)
+        .value("RSE_WORLD_TASK_FAIL", RSE_WORLD_TASK_FAIL)
         .export_values();
 
-    py::class_<RS_WorldMessageText>(m, "RS_WorldMessageText")
+    py::class_<RS_WorldTaskDataCreated>(m, "RS_WorldTaskDataCreated")
         .def(py::init<>())
-        .def_readwrite("text", &RS_WorldMessageText::text);
+        .def_readwrite("gid", &RS_WorldTaskDataCreated::gid)
+        .def_readwrite("name", &RS_WorldTaskDataCreated::name);
 
-    py::class_<RS_WorldMessageCreated>(m, "RS_WorldMessageCreated")
-        .def(py::init<>())
-        .def_readwrite("type", &RS_WorldMessageCreated::type)
-        .def_readwrite("gid", &RS_WorldMessageCreated::gid)
-        .def_readwrite("name", &RS_WorldMessageCreated::name);
+    py::class_<RS_WorldTaskDataSuccess>(m, "RS_WorldTaskDataSuccess").def(py::init<>());
 
-    py::class_<RS_WorldMessageData>(m, "RS_WorldMessageData")
+    py::class_<RS_WorldTaskDataFailed>(m, "RS_WorldTaskDataFailed")
         .def(py::init<>())
-        .def_property_readonly("value", [](const RS_WorldMessageData &self) -> py::object {
+        .def_readwrite("error", &RS_WorldTaskDataFailed::error);
+
+    py::class_<RS_WorldTaskData>(m, "RS_WorldTaskData")
+        .def(py::init<>())
+        .def_property_readonly("value", [](const RS_WorldTaskData &self) -> py::object {
             if (self.index() == RS_NULL_INDEX) return py::none();
             py::object result = py::none();
             self.visit([&](auto &held) { result = py::cast(held); });
             return result;
         });
 
-    py::class_<RS_WorldMessage>(m, "RS_WorldMessage")
+    py::class_<RS_WorldTask>(m, "RS_WorldTask")
         .def(py::init<>())
-        .def_readonly("id", &RS_WorldMessage::id)
-        .def_readonly("level", &RS_WorldMessage::level)
-        .def_readonly("data", &RS_WorldMessage::data);
+        .def("state", &RS_WorldTask::state)
+        .def("is_finished", &RS_WorldTask::isFinished)
+        .def("is_valid", &RS_WorldTask::isValid)
+        .def(
+            "wait",
+            [](const RS_WorldTask &self) {
+                py::gil_scoped_release release;
+                self.wait();
+            }
+        )
+        .def(
+            "wait_for",
+            [](const RS_WorldTask &self, double timeout_seconds) {
+                py::gil_scoped_release release;
+                return self.waitFor(std::chrono::duration<double>(timeout_seconds));
+            },
+            py::arg("timeout_seconds")
+        )
+        .def("get", [](const RS_WorldTask &self) {
+            py::gil_scoped_release release;
+            return self.get();
+        });
 
     /*****************************************************************
      * Records
@@ -1366,7 +1415,9 @@ inline void initRSPYCore(py::module &m) {
         .def("height", &RSPY_WorldCameraPerspectiveRecord::Motion::height)
         .def("pixel", &RSPY_WorldCameraPerspectiveRecord::Motion::pixel);
 
-    py::class_<RSPY_WorldCameraPerspectiveRecord::EntityInfo>(camera_perspective_record, "EntityInfo")
+    py::class_<RSPY_WorldCameraPerspectiveRecord::EntityInfo>(
+        camera_perspective_record, "EntityInfo"
+    )
         .def("width", &RSPY_WorldCameraPerspectiveRecord::EntityInfo::width)
         .def("height", &RSPY_WorldCameraPerspectiveRecord::EntityInfo::height)
         .def("entity_type", &RSPY_WorldCameraPerspectiveRecord::EntityInfo::entity_type)
@@ -1651,48 +1702,55 @@ inline void initRSPYCore(py::module &m) {
         )doc"
         )
         .def(
-            "has_message",
-            &RSPY_WorldHandle::has_message,
+            "get_newest_message_index",
+            &RSPY_WorldHandle::get_newest_message_index,
             R"doc(
-            Reports whether one or more world messages are waiting to be drained.
-
-            Returns:
-                True when get_messages() would return at least one message.
+            Index of the newest message in the log, or RS_NULL_BIG_INDEX when empty.
         )doc"
         )
         .def(
-            "get_messages",
-            &RSPY_WorldHandle::get_messages,
+            "get_oldest_message_index",
+            &RSPY_WorldHandle::get_oldest_message_index,
             R"doc(
-            Drains all currently queued world messages.
+            Index of the oldest retained message; a cursor below it has missed entries.
+        )doc"
+        )
+        .def(
+            "get_messages_matching",
+            &RSPY_WorldHandle::get_messages_matching,
+            py::arg("max_count") = RS_MAX_SIZE,
+            py::arg("oldest_index") = 0,
+            py::arg("newest_index") = RS_NULL_BIG_INDEX,
+            py::arg("level") = RSE_WORLD_MESSAGE_INFO,
+            R"doc(
+            Returns up to max_count messages in [oldest_index, newest_index) at severity >= level.
 
-            Messages are returned in posting order and removed from the queue atomically.
-            Once drained, a message cannot satisfy a later wait_for_message() call.
-
-            Returns:
-                The queued RS_WorldMessage objects.
+            Reads never remove. Results run oldest to newest; when capped, the newest are kept.
         )doc"
         )
         .def(
             "wait_for_message",
             &RSPY_WorldHandle::wait_for_message,
-            py::arg("message_id") = RS_NULL_INDEX,
-            py::arg("level") = RSE_WORLD_MESSAGE_ANY_LEVEL,
+            py::arg("level") = RSE_WORLD_MESSAGE_INFO,
             R"doc(
-            Blocks until a matching world message arrives.
+            Blocks until the next message at severity >= level, then returns it.
 
             Releases the GIL while waiting.
-            Messages drained by get_messages() are no longer available to this call.
-
-            Args:
-                message_id: The id returned by a mutator to wait on its outcome. Defaults to
-                            RS_NULL_INDEX, which waits for the next message posted after this
-                            call regardless of id.
-                level: The minimum severity to match. Defaults to RSE_WORLD_MESSAGE_ANY_LEVEL,
-                       which matches any severity.
-
-            Returns:
-                The matching RS_WorldMessage.
+        )doc"
+        )
+        .def(
+            "get_message_buffer_size",
+            &RSPY_WorldHandle::get_message_buffer_size,
+            R"doc(
+            Number of entries the message log retains.
+        )doc"
+        )
+        .def(
+            "set_message_buffer_size",
+            &RSPY_WorldHandle::set_message_buffer_size,
+            py::arg("max_messages"),
+            R"doc(
+            Sets the number of entries the message log retains; shrinking evicts the oldest.
         )doc"
         )
         .def(
@@ -2192,11 +2250,10 @@ inline void initRSPYCore(py::module &m) {
         .def(
             "set_callback",
             [](RS_WorldSessionComponentGeneric &component, py::function py_callback) {
-                // The callback fires from a pool thread, so its Python object is held under a deleter
-                // that takes the GIL, and each call acquires the GIL before invoking it.
+                // The callback fires from a pool thread, so its Python object is held under a
+                // deleter that takes the GIL, and each call acquires the GIL before invoking it.
                 std::shared_ptr<py::object> py_object(
-                    new py::object(std::move(py_callback)),
-                    [](py::object *object) {
+                    new py::object(std::move(py_callback)), [](py::object *object) {
                         py::gil_scoped_acquire gil;
                         delete object;
                     }
@@ -2212,7 +2269,7 @@ inline void initRSPYCore(py::module &m) {
                             controllers_list.append(RSPY_WorldController(controller.get()));
                         }
                         try {
-                            py::cast<py::function>(*py_object)(time, controllers_list);
+                            py::cast<py::function> (*py_object)(time, controllers_list);
                         } catch (const py::error_already_set &error) {
                             py::print("Exception in session callback:", error.what());
                         }
@@ -2244,8 +2301,7 @@ inline void initRSPYCore(py::module &m) {
                 RS_WorldSessionComponentCamera::Callback cpp_callback;
                 if (!callback.is_none()) {
                     std::shared_ptr<py::object> py_object(
-                        new py::object(std::move(callback)),
-                        [](py::object *object) {
+                        new py::object(std::move(callback)), [](py::object *object) {
                             py::gil_scoped_acquire gil;
                             delete object;
                         }
@@ -2253,7 +2309,7 @@ inline void initRSPYCore(py::module &m) {
                     cpp_callback = [py_object](RBigFloat time) {
                         py::gil_scoped_acquire gil;
                         try {
-                            py::cast<py::function>(*py_object)(time);
+                            py::cast<py::function> (*py_object)(time);
                         } catch (const py::error_already_set &error) {
                             py::print("Exception in camera callback:", error.what());
                         }

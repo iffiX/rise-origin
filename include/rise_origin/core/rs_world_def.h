@@ -8,6 +8,11 @@
 
 namespace rise {
 
+/**
+ * @brief Lifecycle status of a world.
+ * @details Values at or above RSE_WORLD_MAX_NORMAL_STATE, plus RSE_WORLD_END_SUCCESS and
+ * RSE_WORLD_END_TERMINATED, are terminal ends as reported by isWorldEnd.
+ */
 RS_ENUM(
     RSE_WorldStatus,
     unsigned int,
@@ -24,12 +29,28 @@ RS_ENUM(
     (RSE_WORLD_MAX_NORMAL_STATE, 99)
 )
 
+/**
+ * @brief Kind of a world entity.
+ */
 RS_ENUM(
     RSE_WorldEntityType,
     unsigned int,
     (RSE_WORLD_ENTITY_TYPE_COSMIC_BACKGROUND, 0),
     (RSE_WORLD_ENTITY_TYPE_FLOOR, 1),
     (RSE_WORLD_ENTITY_TYPE_STRUCTURE_VOXEL, 2)
+)
+
+/**
+ * @brief Completion state of a world command task.
+ * @details A task is PENDING until its command finishes, then terminal SUCCESS or FAIL. A failure
+ * is carried as data on the task result, never thrown.
+ */
+RS_ENUM(
+    RSE_WorldTaskState,
+    unsigned int,
+    (RSE_WORLD_TASK_PENDING, 0),
+    (RSE_WORLD_TASK_SUCCESS, 1),
+    (RSE_WORLD_TASK_FAIL, 2)
 )
 
 inline bool isWorldEnd(const RSE_WorldStatus &status) {

@@ -5,7 +5,9 @@
 #define RS_SIMULATION_H
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -16,8 +18,8 @@
 #include <vector>
 
 #include "rise_origin/core/recorder/rs_simulation_recorder.h"
-#include "rise_origin/core/rs_world_handle.h"
 #include "rise_origin/core/rs_world_def.h"
+#include "rise_origin/core/rs_world_handle.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rise_origin/rsc/rsc_world.h"
 #include "rise_origin/utils/math/rs_float.h"
@@ -39,9 +41,9 @@ class RS_Simulation {
     std::shared_ptr<RS_KernelManager> kernel_manager;
     std::future<void> recorder_sync_future{};
 
-    /// Serializes handle mutations (validate + allocateMessageId + enqueue) and is held across a
-    /// begin/endModificationTransaction span so its commands stay contiguous. Recursive so a mutator
-    /// nests inside an open transaction. Reads and blocking waits skip it, so terminate never blocks.
+    /// Serializes handle mutations and spans a begin/endModificationTransaction so its commands
+    /// stay contiguous. Recursive so a mutator nests in an open transaction; reads and waits skip
+    /// it.
     std::recursive_mutex api_mutex;
 
     /// Active recorders, keyed by name.
@@ -55,11 +57,13 @@ class RS_Simulation {
     std::unordered_map<std::string, rsc::RSC_ControllerVariant> controllers;
     std::mutex controllers_mutex;
 
-    /// Async message channel.
+    /// Bounded append-only message log; reads never remove and oldest entries evict past capacity.
+    /// Guarded by message_mutex.
     std::mutex message_mutex;
     std::condition_variable message_cv;
-    std::vector<RS_WorldMessage> messages;
-    std::atomic<RIndex> message_id_counter{0};
+    std::deque<RS_WorldMessage> messages;
+    RBigIndex message_next_index = 0;
+    RSize message_capacity = RS_WORLD_MESSAGE_BUFFER_DEFAULT_SIZE;
 
     RS_Simulation() = default;
 
@@ -77,10 +81,8 @@ class RS_Simulation {
     /**
      * @brief Set the status and status info and wake all status waiters.
      */
-    void setStatusAndStatusInfo(
-        const RSE_WorldStatus new_status,
-        const std::string &new_status_info
-    ) {
+    void
+    setStatusAndStatusInfo(const RSE_WorldStatus new_status, const std::string &new_status_info) {
         std::lock_guard lock(status_mutex);
         status = new_status;
         status_info = new_status_info;
@@ -111,86 +113,94 @@ class RS_Simulation {
      *****************************************************************/
 
     /**
-     * @brief Report whether one or more world messages are waiting to be drained.
-     * @return True when getMessages() would return at least one message.
+     * @brief Index of the newest message in the log, or RS_NULL_BIG_INDEX when empty.
      */
-    bool hasMessage() {
+    RBigIndex getNewestMessageIndex() {
         std::lock_guard lock(message_mutex);
-        return !messages.empty();
+        if (messages.empty()) return RS_NULL_BIG_INDEX;
+        return messages.back().index;
     }
 
     /**
-     * @brief Drain and return all currently queued world messages.
-     * @details Messages are returned in posting order and removed from the queue atomically. Once
-     * drained, a message cannot satisfy a later waitForMessage() call.
-     * @return The queued messages.
+     * @brief Index of the oldest retained message, or RS_NULL_BIG_INDEX when empty.
+     * @details A reader whose cursor is below this index has missed evicted entries.
      */
-    std::vector<RS_WorldMessage> getMessages() {
+    RBigIndex getOldestMessageIndex() {
+        std::lock_guard lock(message_mutex);
+        if (messages.empty()) return RS_NULL_BIG_INDEX;
+        return messages.front().index;
+    }
+
+    /**
+     * @brief Return up to max_count messages in [oldest_index, newest_index) at severity >= level.
+     * @details Reads never remove. Results run oldest to newest; when capped, the newest are kept.
+     */
+    std::vector<RS_WorldMessage> getMessagesMatching(
+        RSize max_count = RS_MAX_SIZE,
+        RBigIndex oldest_index = 0,
+        RBigIndex newest_index = RS_NULL_BIG_INDEX,
+        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO
+    ) {
         std::lock_guard lock(message_mutex);
         std::vector<RS_WorldMessage> result;
-        result.swap(messages);
+        for (const auto &message : messages) {
+            if (message.index < oldest_index) continue;
+            if (message.index >= newest_index) break;
+            if (message.level < level) continue;
+            result.push_back(message);
+        }
+        if (result.size() > max_count)
+            result.erase(result.begin(), result.end() - static_cast<std::ptrdiff_t>(max_count));
         return result;
     }
 
     /**
-     * @brief Allocate a fresh message id for a mutator about to issue work.
+     * @brief Block until the next message at severity >= level posted after this call, then return
+     * it.
      */
-    RIndex allocateMessageId() {
-        RIndex issued = message_id_counter.load(std::memory_order_relaxed);
-        RIndex next;
-        do {
-            next = (issued >= RS_WORLD_MESSAGE_ID_ROTATE_THRESHOLD) ? 0 : issued + 1;
-        } while (!message_id_counter.compare_exchange_weak(issued, next, std::memory_order_relaxed));
-        return issued;
+    RS_WorldMessage waitForMessage(RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO) {
+        std::unique_lock lock(message_mutex);
+        RBigIndex since = message_next_index;
+        while (true) {
+            for (const auto &message : messages) {
+                if (message.index < since) continue;
+                if (message.level >= level) return message;
+            }
+            message_cv.wait(lock);
+        }
     }
 
     /**
-     * @brief Append a message and wake all message waiters.
+     * @brief Number of entries the message log retains.
      */
-    void postMessage(const RS_WorldMessage &message) {
+    RSize getMessageBufferSize() {
+        std::lock_guard lock(message_mutex);
+        return message_capacity;
+    }
+
+    /**
+     * @brief Set the number of entries the message log retains; shrinking evicts the oldest.
+     */
+    void setMessageBufferSize(RSize max_messages) {
+        std::lock_guard lock(message_mutex);
+        message_capacity = max_messages;
+        while (messages.size() > message_capacity) messages.pop_front();
+    }
+
+    /**
+     * @brief Append a message at the given level and wake all message waiters.
+     */
+    void postMessage(RSE_WorldMessageLevel level, std::string text) {
         {
             std::lock_guard lock(message_mutex);
-            messages.push_back(message);
+            if (message_next_index == RS_NULL_BIG_INDEX)
+                RS_THROW(RS_BaseException("World message log index space exhausted"));
+            messages.push_back(
+                {message_next_index++, std::chrono::system_clock::now(), level, std::move(text)}
+            );
+            while (messages.size() > message_capacity) messages.pop_front();
         }
         message_cv.notify_all();
-    }
-
-    /**
-     * @brief Append a plain-text message and wake all message waiters.
-     */
-    void postMessage(RIndex id, RSE_WorldMessageLevel level, std::string text) {
-        postMessage({id, level, RS_WorldMessageData{RS_WorldMessageText{std::move(text)}}});
-    }
-
-    /**
-     * @brief Block until a matching message arrives.
-     * @details An id-specific wait scans messages already posted (the outcome may have arrived
-     * first); an any-message wait (message_id == RS_NULL_INDEX) only considers messages posted after
-     * this call. RSE_WORLD_MESSAGE_ANY_LEVEL matches any severity; a specific level matches
-     * severity >= level. Messages drained by getMessages() are no longer available to this call.
-     */
-    RS_WorldMessage waitForMessage(
-        RIndex message_id = RS_NULL_INDEX,
-        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_ANY_LEVEL
-    ) {
-        std::unique_lock lock(message_mutex);
-        auto matches = [&](const RS_WorldMessage &m) {
-            if (message_id != RS_NULL_INDEX && m.id != message_id) return false;
-            if (level != RSE_WORLD_MESSAGE_ANY_LEVEL && m.level < level) return false;
-            return true;
-        };
-        RSize next = (message_id == RS_NULL_INDEX) ? messages.size() : 0;
-        RS_WorldMessage result;
-        message_cv.wait(lock, [&] {
-            for (; next < messages.size(); ++next) {
-                if (matches(messages[next])) {
-                    result = messages[next];
-                    return true;
-                }
-            }
-            return false;
-        });
-        return result;
     }
 
     /*****************************************************************

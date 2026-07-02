@@ -23,80 +23,59 @@ namespace rise {
 RS_KernelManager::RS_KernelManager() {
     // Initialize the method lookup table
     _methods = {
-        {"pauseKernel", [this](RS_Any arg, RIndex message_id) { _pauseKernel(); }},
-        {"resumeKernel", [this](RS_Any arg, RIndex message_id) { _resumeKernel(); }},
-        {"terminateKernel", [this](RS_Any arg, RIndex message_id) { _terminateKernel(); }},
+        {"pauseKernel", [this](RS_Any arg, TaskPromise task) { _pauseKernel(); }},
+        {"resumeKernel", [this](RS_Any arg, TaskPromise task) { _resumeKernel(); }},
+        {"terminateKernel", [this](RS_Any arg, TaskPromise task) { _terminateKernel(); }},
         {"beginModificationTransaction",
-         [this](RS_Any arg, RIndex message_id) { _beginModificationTransaction(); }},
+         [this](RS_Any arg, TaskPromise task) { _beginModificationTransaction(); }},
         {"endModificationTransaction",
-         [this](RS_Any arg, RIndex message_id) { _endModificationTransaction(); }},
+         [this](RS_Any arg, TaskPromise task) { _endModificationTransaction(); }},
 
         {"setSimulationRSC",
-         [this](RS_Any arg, RIndex message_id) {
-             _setSimulationRSC(arg.as<RSC_Simulation>(), message_id);
+         [this](RS_Any arg, TaskPromise task) {
+             _setSimulationRSC(arg.as<RSC_Simulation>(), task);
          }},
 
         {"addResource",
-         [this](RS_Any arg, RIndex message_id) {
-             _addResource(arg.as<RSC_ResourceVariant>(), message_id);
+         [this](RS_Any arg, TaskPromise task) {
+             _addResource(arg.as<RSC_ResourceVariant>(), task);
          }},
         {"updateResource",
-         [this](RS_Any arg, RIndex message_id) {
+         [this](RS_Any arg, TaskPromise task) {
              auto& p = arg.as<std::pair<std::string, RSC_ResourceVariant>>();
-             _updateResource(p.first, p.second, message_id);
+             _updateResource(p.first, p.second, task);
          }},
         {"removeResource",
-         [this](RS_Any arg, RIndex message_id) {
-             _removeResource(arg.as<std::string>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _removeResource(arg.as<std::string>(), task); }},
 
         {"addEssence",
-         [this](RS_Any arg, RIndex message_id) {
-             _addEssence(arg.as<RSC_EssenceVariant>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _addEssence(arg.as<RSC_EssenceVariant>(), task); }},
         {"updateEssence",
-         [this](RS_Any arg, RIndex message_id) {
+         [this](RS_Any arg, TaskPromise task) {
              auto& p = arg.as<std::pair<std::string, RSC_EssenceVariant>>();
-             _updateEssence(p.first, p.second, message_id);
+             _updateEssence(p.first, p.second, task);
          }},
         {"removeEssence",
-         [this](RS_Any arg, RIndex message_id) {
-             _removeEssence(arg.as<std::string>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _removeEssence(arg.as<std::string>(), task); }},
 
         {"addEntity",
-         [this](RS_Any arg, RIndex message_id) {
-             _addEntity(arg.as<RSC_EntityVariant>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _addEntity(arg.as<RSC_EntityVariant>(), task); }},
         {"removeEntity",
-         [this](RS_Any arg, RIndex message_id) {
-             _removeEntity(arg.as<std::string>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _removeEntity(arg.as<std::string>(), task); }},
         {"freezeEntity",
-         [this](RS_Any arg, RIndex message_id) {
-             _freezeEntity(arg.as<std::string>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _freezeEntity(arg.as<std::string>(), task); }},
         {"unfreezeEntity",
-         [this](RS_Any arg, RIndex message_id) {
-             _unfreezeEntity(arg.as<std::string>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _unfreezeEntity(arg.as<std::string>(), task); }},
 
         {"addRecord",
-         [this](RS_Any arg, RIndex message_id) {
-             _addRecord(arg.as<RSC_RecordVariant>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _addRecord(arg.as<RSC_RecordVariant>(), task); }},
         {"removeRecord",
-         [this](RS_Any arg, RIndex message_id) {
-             _removeRecord(arg.as<std::string>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _removeRecord(arg.as<std::string>(), task); }},
 
         {"addSignal",
-         [this](RS_Any arg, RIndex message_id) {
-             _addSignal(arg.as<RSC_SignalVariant>(), message_id);
-         }},
-        {"removeSignal", [this](RS_Any arg, RIndex message_id) {
-             _removeSignal(arg.as<std::string>(), message_id);
-         }},
+         [this](RS_Any arg, TaskPromise task) { _addSignal(arg.as<RSC_SignalVariant>(), task); }},
+        {"removeSignal",
+         [this](RS_Any arg, TaskPromise task) { _removeSignal(arg.as<std::string>(), task); }},
     };
 }
 
@@ -104,7 +83,7 @@ void RS_KernelManager::init(
     RS_MemoryProvider* host_provider,
     RS_MemoryProvider* device_provider,
     RSize record_buffer_frame_num,
-    std::function<void(const RS_WorldMessage&)> message_sink
+    std::function<void(RSE_WorldMessageLevel, const std::string&)> message_sink
 ) {
     if (logging::get("root")) _logger = logging::get("root")->clone("kernel manager");
     _thread_pool = make_shared<RS_ThreadPool>(RS_MIN(std::thread::hardware_concurrency(), 32));
@@ -873,18 +852,18 @@ std::string RS_KernelManager::purgeStructure(RIndex structure_gid) {
 
     // Tear down the dependents, then the structure itself.
     for (auto& signal_name : dependent_signals) {
-        _removeSignal(signal_name, RS_NULL_INDEX);
+        _removeSignal(signal_name, nullptr);
         RS_LOG(_logger, warn, "Removed signal: {}", signal_name);
     }
     for (auto& camera_name : dependent_cameras) {
-        _removeEntity(camera_name, RS_NULL_INDEX);
+        _removeEntity(camera_name, nullptr);
         RS_LOG(_logger, warn, "Removed camera: {}", camera_name);
     }
     for (auto& record_name : dependent_records) {
-        _removeRecord(record_name, RS_NULL_INDEX);
+        _removeRecord(record_name, nullptr);
         RS_LOG(_logger, warn, "Removed record: {}", record_name);
     }
-    _removeEntity(name, RS_NULL_INDEX);
+    _removeEntity(name, nullptr);
     RS_LOG(_logger, warn, "Removed structure: {}", name);
 
     // Flush the pending changes to the kernel data.
@@ -953,8 +932,10 @@ std::string RS_KernelManager::getInfo(const std::string& info_name) {
         if (!_device_provider) return "";
         RS_DeviceLocation location = _device_provider->device;
         const char* type_name = "unknown";
-        if (location.type == RSE_DEVICE_TYPE_CUDA) type_name = "cuda";
-        else if (location.type == RSE_DEVICE_TYPE_CPU) type_name = "cpu";
+        if (location.type == RSE_DEVICE_TYPE_CUDA)
+            type_name = "cuda";
+        else if (location.type == RSE_DEVICE_TYPE_CPU)
+            type_name = "cpu";
         return std::string(type_name) + ":" + std::to_string(location.id);
     }
     return "";
@@ -964,7 +945,7 @@ void RS_KernelManager::pauseKernel(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(RS_NULL_INDEX, "pauseKernel", 0);
+        _command_queue.emplace(nullptr, "pauseKernel", 0);
         _command_queue_cv.notify_one();
     } else {
         RS_KernelManagerCommandExecutionGuard guard(this);
@@ -976,7 +957,7 @@ void RS_KernelManager::resumeKernel(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(RS_NULL_INDEX, "resumeKernel", 0);
+        _command_queue.emplace(nullptr, "resumeKernel", 0);
         _command_queue_cv.notify_one();
     } else {
         RS_KernelManagerCommandExecutionGuard guard(this);
@@ -988,7 +969,7 @@ void RS_KernelManager::terminateKernel(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(RS_NULL_INDEX, "terminateKernel", 0);
+        _command_queue.emplace(nullptr, "terminateKernel", 0);
         _command_queue_cv.notify_one();
     } else {
         RS_KernelManagerCommandExecutionGuard guard(this);
@@ -1000,7 +981,7 @@ void RS_KernelManager::beginModificationTransaction(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(RS_NULL_INDEX, "beginModificationTransaction", 0);
+        _command_queue.emplace(nullptr, "beginModificationTransaction", 0);
         _command_queue_cv.notify_one();
     } else {
         RS_KernelManagerCommandExecutionGuard guard(this);
@@ -1012,7 +993,7 @@ void RS_KernelManager::endModificationTransaction(bool sync) {
     if (kernel.isTerminated()) return;
     if (!sync) {
         lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(RS_NULL_INDEX, "endModificationTransaction", 0);
+        _command_queue.emplace(nullptr, "endModificationTransaction", 0);
         _command_queue_cv.notify_one();
     } else {
         RS_KernelManagerCommandExecutionGuard guard(this);
@@ -1020,68 +1001,54 @@ void RS_KernelManager::endModificationTransaction(bool sync) {
     }
 }
 
-void RS_KernelManager::setSimulationRSC(
-    const RSC_Simulation& simulation,
-    RIndex message_id,
-    bool sync
-) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "setSimulationRSC", simulation);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::setSimulationRSC(const RSC_Simulation& simulation, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _setSimulationRSC(simulation, message_id);
+        _setSimulationRSC(simulation, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("setSimulationRSC", simulation);
 }
 
 const RSC_Simulation& RS_KernelManager::getSimulationRSC() const { return _simulation_rsc; }
 
-void RS_KernelManager::addResource(
-    const RSC_ResourceVariant& resource,
-    RIndex message_id,
-    bool sync
-) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "addResource", resource);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::addResource(const RSC_ResourceVariant& resource, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _addResource(resource, message_id);
+        _addResource(resource, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("addResource", resource);
 }
 
-void RS_KernelManager::updateResource(
+RS_WorldTask RS_KernelManager::updateResource(
     const std::string& name,
     const RSC_ResourceVariant& resource,
-    RIndex message_id,
     bool sync
 ) {
-    if (kernel.isTerminated()) return;
-    auto payload = std::make_pair(name, resource);
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "updateResource", payload);
-        _command_queue_cv.notify_one();
-    } else {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _updateResource(name, resource, message_id);
+        _updateResource(name, resource, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("updateResource", std::make_pair(name, resource));
 }
 
-void RS_KernelManager::removeResource(const std::string& name, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "removeResource", name);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::removeResource(const std::string& name, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _removeResource(name, message_id);
+        _removeResource(name, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("removeResource", name);
 }
 
 RSC_ResourceVariant RS_KernelManager::findResource(const std::string& name) {
@@ -1090,46 +1057,41 @@ RSC_ResourceVariant RS_KernelManager::findResource(const std::string& name) {
     return cfg.visit([](auto& c) { return RSC_ResourceVariant(c); });
 }
 
-void RS_KernelManager::addEssence(const RSC_EssenceVariant& essence, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "addEssence", essence);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::addEssence(const RSC_EssenceVariant& essence, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _addEssence(essence, message_id);
+        _addEssence(essence, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("addEssence", essence);
 }
 
-void RS_KernelManager::updateEssence(
+RS_WorldTask RS_KernelManager::updateEssence(
     const std::string& name,
     const RSC_EssenceVariant& essence,
-    RIndex message_id,
     bool sync
 ) {
-    if (kernel.isTerminated()) return;
-    auto payload = std::make_pair(name, essence);
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "updateEssence", payload);
-        _command_queue_cv.notify_one();
-    } else {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _updateEssence(name, essence, message_id);
+        _updateEssence(name, essence, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("updateEssence", std::make_pair(name, essence));
 }
 
-void RS_KernelManager::removeEssence(const std::string& name, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "removeEssence", name);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::removeEssence(const std::string& name, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _removeEssence(name, message_id);
+        _removeEssence(name, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("removeEssence", name);
 }
 
 RSC_EssenceVariant RS_KernelManager::findEssence(const std::string& name) {
@@ -1143,52 +1105,48 @@ RSC_EssenceVariant RS_KernelManager::findEssence(const std::string& name) {
     RS_THROW(RS_NotFoundException("Essence '{}' not found", name));
 }
 
-void RS_KernelManager::addEntity(const RSC_EntityVariant& entity, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "addEntity", entity);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::addEntity(const RSC_EntityVariant& entity, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _addEntity(entity, message_id);
+        _addEntity(entity, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("addEntity", entity);
 }
 
-void RS_KernelManager::removeEntity(const std::string& name, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "removeEntity", name);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::removeEntity(const std::string& name, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _removeEntity(name, message_id);
+        _removeEntity(name, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("removeEntity", name);
 }
 
-void RS_KernelManager::freezeEntity(const std::string& name, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "freezeEntity", name);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::freezeEntity(const std::string& name, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _freezeEntity(name, message_id);
+        _freezeEntity(name, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("freezeEntity", name);
 }
 
-void RS_KernelManager::unfreezeEntity(const std::string& name, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "unfreezeEntity", name);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::unfreezeEntity(const std::string& name, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _unfreezeEntity(name, message_id);
+        _unfreezeEntity(name, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("unfreezeEntity", name);
 }
 
 bool RS_KernelManager::isEntityFrozen(const std::string& name) {
@@ -1293,28 +1251,26 @@ std::string RS_KernelManager::findEntityName(RIndex gid) {
     return "";
 }
 
-void RS_KernelManager::addRecord(const RSC_RecordVariant& record, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "addRecord", record);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::addRecord(const RSC_RecordVariant& record, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _addRecord(record, message_id);
+        _addRecord(record, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("addRecord", record);
 }
 
-void RS_KernelManager::removeRecord(const std::string& name, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "removeRecord", name);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::removeRecord(const std::string& name, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _removeRecord(name, message_id);
+        _removeRecord(name, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("removeRecord", name);
 }
 
 RSC_RecordVariant RS_KernelManager::findRecord(const std::string& name) {
@@ -1327,28 +1283,26 @@ RSC_RecordVariant RS_KernelManager::findRecord(const std::string& name) {
     RS_THROW(RS_NotFoundException("Record '{}' not found", name));
 }
 
-void RS_KernelManager::addSignal(const RSC_SignalVariant& signal, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "addSignal", signal);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::addSignal(const RSC_SignalVariant& signal, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _addSignal(signal, message_id);
+        _addSignal(signal, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("addSignal", signal);
 }
 
-void RS_KernelManager::removeSignal(const std::string& name, RIndex message_id, bool sync) {
-    if (kernel.isTerminated()) return;
-    if (!sync) {
-        lock_guard lock(_command_queue_mutex);
-        _command_queue.emplace(message_id, "removeSignal", name);
-        _command_queue_cv.notify_one();
-    } else {
+RS_WorldTask RS_KernelManager::removeSignal(const std::string& name, bool sync) {
+    if (kernel.isTerminated())
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataFailed{"world has terminated"});
+    if (sync) {
         RS_KernelManagerCommandExecutionGuard guard(this);
-        _removeSignal(name, message_id);
+        _removeSignal(name, nullptr);
+        return RS_WorldTask::makeFinished(RS_WorldTaskDataSuccess{});
     }
+    return _enqueueCommand("removeSignal", name);
 }
 
 RSC_SignalVariant RS_KernelManager::findSignal(const std::string& name) {
@@ -1499,7 +1453,8 @@ RIndex RS_KernelManager::registerSignal(const string& name) {
 }
 
 void RS_KernelManager::deregisterEntity(const string& name) {
-    if (auto it = _entity_gids.find(name); it != _entity_gids.end()) _entity_names.erase(it->second);
+    if (auto it = _entity_gids.find(name); it != _entity_gids.end())
+        _entity_names.erase(it->second);
     deregisterByName(_entity_gids, name, "entity");
 }
 void RS_KernelManager::deregisterEssence(const string& name) {
@@ -1609,7 +1564,7 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
         }
 
         RS_LOG(_logger, debug, "Kernel manager sync thread start fetch command.");
-        auto [message_id, function_name, arg] = _command_queue.front();
+        auto [task, function_name, arg] = _command_queue.front();
         _command_queue.pop();
 
         lock.unlock();
@@ -1636,31 +1591,22 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
             RS_LOG(_logger, warn, "Unknown command in queue: {}.", function_name);
         } else {
             try {
-                it->second(arg, message_id);
+                it->second(arg, task);
                 if (!_is_transaction_open) {
-                    for (auto& message : _pending_messages)
-                        if (message.id != RS_NULL_INDEX && _message_sink) _message_sink(message);
-                    _pending_messages.clear();
+                    for (auto& [promise, result] : _pending_results)
+                        if (promise) promise->set_value(result);
+                    _pending_results.clear();
                 }
             } catch (const std::exception& e) {
                 RS_LOG(_logger, error, "While executing command {}: {}.", function_name, e.what());
-                if (message_id != RS_NULL_INDEX && _message_sink) {
-                    _message_sink(
-                        {message_id,
-                         RSE_WORLD_MESSAGE_ERROR,
-                         RS_WorldMessageData{RS_WorldMessageText{e.what()}}}
-                    );
-                }
-                for (auto& message : _pending_messages)
-                    if (message.id != RS_NULL_INDEX && _message_sink)
-                        _message_sink(
-                            {message.id,
-                             RSE_WORLD_MESSAGE_ERROR,
-                             RS_WorldMessageData{RS_WorldMessageText{
-                                 "Aborted because of previous unsuccessful task"
-                             }}}
+                if (_message_sink) _message_sink(RSE_WORLD_MESSAGE_ERROR, e.what());
+                if (task) task->set_value(RS_WorldTaskDataFailed{e.what()});
+                for (auto& [promise, result] : _pending_results)
+                    if (promise)
+                        promise->set_value(
+                            RS_WorldTaskDataFailed{"aborted because of previous unsuccessful task"}
                         );
-                _pending_messages.clear();
+                _pending_results.clear();
                 // A failure before the kernel-data critical zone is a recoverable characterization
                 // error. A failure inside it leaves the context half-mutated and tainted; unwind
                 // the zone, mark the kernel terminated, and return so freeKernel does the coarse
@@ -1689,6 +1635,17 @@ void RS_KernelManager::_kernelSynchronizationThreadFunc() {
             break;
         }
     }
+}
+
+RS_WorldTask RS_KernelManager::_enqueueCommand(std::string command, RS_Any arg) {
+    auto promise = std::make_shared<std::promise<RS_WorldTaskData>>();
+    RS_WorldTask task(promise->get_future().share());
+    {
+        lock_guard lock(_command_queue_mutex);
+        _command_queue.emplace(std::move(promise), std::move(command), std::move(arg));
+        _command_queue_cv.notify_one();
+    }
+    return task;
 }
 
 void RS_KernelManager::_acquireCommandExecution() {
@@ -1819,7 +1776,7 @@ void RS_KernelManager::_configureLayoutGrowthPolicies(RS_ContextHostData* host_d
     );
 }
 
-void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, RIndex message_id) {
+void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, TaskPromise task) {
     RS_KernelManagerCriticalDataAccessGuard guard(this);
     RS_Timer timer;
 
@@ -1939,13 +1896,13 @@ void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, RInde
     kernel.host_data->stop_condition = simulation.stop_condition;
 
     RS_LOG(_logger, debug, "setSimulationRSC takes {}.", timer.elapsedTimeString());
-    _queueInfo(message_id, RS_WorldMessageText{"setSimulationRSC succeeded"});
+    _queueResult(task, RS_WorldTaskDataSuccess{});
 }
 
 /*****************************************************************
  * Resource
  *****************************************************************/
-void RS_KernelManager::_addResource(const RSC_ResourceVariant& resource, RIndex message_id) {
+void RS_KernelManager::_addResource(const RSC_ResourceVariant& resource, TaskPromise task) {
     std::string name;
     resource.visit([&](auto& r) {
         using T = std::decay_t<decltype(r)>;
@@ -1957,30 +1914,28 @@ void RS_KernelManager::_addResource(const RSC_ResourceVariant& resource, RIndex 
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _resource_gids.find(name); it != _resource_gids.end()) gid = it->second;
-    _queueInfo(
-        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE, gid, name}
-    );
+    _queueResult(task, RS_WorldTaskDataCreated{gid, name});
 }
 
 void RS_KernelManager::_updateResource(
     const std::string& name,
     const RSC_ResourceVariant& resource,
-    RIndex message_id
+    TaskPromise task
 ) {
-    _removeResource(name, RS_NULL_INDEX);
-    _addResource(resource, message_id);
+    _removeResource(name, nullptr);
+    _addResource(resource, task);
 }
 
-void RS_KernelManager::_removeResource(const std::string& name, RIndex message_id) {
+void RS_KernelManager::_removeResource(const std::string& name, TaskPromise task) {
     // Texture is the only resource kind today; new kinds get added here.
     _kernel_texture_manager.removeTexture(name);
-    _queueInfo(message_id, RS_WorldMessageText{format("removeResource {} succeeded", name)});
+    _queueResult(task, RS_WorldTaskDataSuccess{});
 }
 
 /*****************************************************************
  * Essence
  *****************************************************************/
-void RS_KernelManager::_addEssence(const RSC_EssenceVariant& essence, RIndex message_id) {
+void RS_KernelManager::_addEssence(const RSC_EssenceVariant& essence, TaskPromise task) {
     std::string name;
     essence.visit([&](auto& c) {
         using T = std::decay_t<decltype(c)>;
@@ -2000,29 +1955,27 @@ void RS_KernelManager::_addEssence(const RSC_EssenceVariant& essence, RIndex mes
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _essence_gids.find(name); it != _essence_gids.end()) gid = it->second;
-    _queueInfo(
-        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE, gid, name}
-    );
+    _queueResult(task, RS_WorldTaskDataCreated{gid, name});
 }
 
 void RS_KernelManager::_updateEssence(
     const std::string& name,
     const RSC_EssenceVariant& essence,
-    RIndex message_id
+    TaskPromise task
 ) {
-    _removeEssence(name, RS_NULL_INDEX);
-    _addEssence(essence, message_id);
+    _removeEssence(name, nullptr);
+    _addEssence(essence, task);
 }
 
-void RS_KernelManager::_removeEssence(const std::string& name, RIndex message_id) {
+void RS_KernelManager::_removeEssence(const std::string& name, TaskPromise task) {
     if (_kernel_material_manager.findMaterial(name) != RS_NULL_INDEX) {
         _kernel_material_manager.removeMaterial(name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeEssence {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (_kernel_material_manager.hasMaterialProperty(name)) {
         _kernel_material_manager.removeMaterialProperty(name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeEssence {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     RS_THROW(RS_NotFoundException("Essence '{}' not found", name));
@@ -2031,7 +1984,7 @@ void RS_KernelManager::_removeEssence(const std::string& name, RIndex message_id
 /*****************************************************************
  * Entity
  *****************************************************************/
-void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, RIndex message_id) {
+void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, TaskPromise task) {
     std::string name;
     entity.visit([&](auto& c) {
         using T = std::decay_t<decltype(c)>;
@@ -2070,12 +2023,10 @@ void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, RIndex messag
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _entity_gids.find(name); it != _entity_gids.end()) gid = it->second;
-    _queueInfo(
-        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY, gid, name}
-    );
+    _queueResult(task, RS_WorldTaskDataCreated{gid, name});
 }
 
-void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id) {
+void RS_KernelManager::_removeEntity(const std::string& name, TaskPromise task) {
     if (auto it = _kernel_structure_voxel_managers.find(name);
         it != _kernel_structure_voxel_managers.end()) {
         if (it->second->getUseCount() > 0) {
@@ -2088,7 +2039,7 @@ void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id)
         it->second->decommit();
         _kernel_structure_voxel_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_STRUCTURE_VOXEL, name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_camera_perspective_managers.find(name);
@@ -2103,7 +2054,7 @@ void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id)
         it->second->decommit();
         _kernel_camera_perspective_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE, name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_camera_stereo_managers.find(name);
@@ -2118,7 +2069,7 @@ void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id)
         it->second->decommit();
         _kernel_camera_stereo_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_CAMERA_STEREO, name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (_kernel_floor_manager) {
@@ -2137,7 +2088,7 @@ void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id)
             _kernel_floor_manager->decommit();
             _kernel_floor_manager.reset();
             _retractPendingCommit(RSE_KERNEL_MANAGER_FLOOR, name);
-            _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+            _queueResult(task, RS_WorldTaskDataSuccess{});
             return;
         }
     }
@@ -2157,30 +2108,30 @@ void RS_KernelManager::_removeEntity(const std::string& name, RIndex message_id)
             _kernel_cosmic_background_manager->decommit();
             _kernel_cosmic_background_manager.reset();
             _retractPendingCommit(RSE_KERNEL_MANAGER_COSMIC_BACKGROUND, name);
-            _queueInfo(message_id, RS_WorldMessageText{format("removeEntity {} succeeded", name)});
+            _queueResult(task, RS_WorldTaskDataSuccess{});
             return;
         }
     }
     RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
 }
 
-void RS_KernelManager::_freezeEntity(const std::string& name, RIndex message_id) {
+void RS_KernelManager::_freezeEntity(const std::string& name, TaskPromise task) {
     if (auto it = _kernel_structure_voxel_managers.find(name);
         it != _kernel_structure_voxel_managers.end()) {
         it->second->freeze();
-        _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_camera_perspective_managers.find(name);
         it != _kernel_camera_perspective_managers.end()) {
         it->second->freeze();
-        _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_camera_stereo_managers.find(name);
         it != _kernel_camera_stereo_managers.end()) {
         it->second->freeze();
-        _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (_kernel_floor_manager) {
@@ -2190,7 +2141,7 @@ void RS_KernelManager::_freezeEntity(const std::string& name, RIndex message_id)
         });
         if (matched) {
             _kernel_floor_manager->freeze();
-            _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+            _queueResult(task, RS_WorldTaskDataSuccess{});
             return;
         }
     }
@@ -2201,30 +2152,30 @@ void RS_KernelManager::_freezeEntity(const std::string& name, RIndex message_id)
         });
         if (matched) {
             _kernel_cosmic_background_manager->freeze();
-            _queueInfo(message_id, RS_WorldMessageText{format("freezeEntity {} succeeded", name)});
+            _queueResult(task, RS_WorldTaskDataSuccess{});
             return;
         }
     }
     RS_THROW(RS_NotFoundException("Entity '{}' not found", name));
 }
 
-void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_id) {
+void RS_KernelManager::_unfreezeEntity(const std::string& name, TaskPromise task) {
     if (auto it = _kernel_structure_voxel_managers.find(name);
         it != _kernel_structure_voxel_managers.end()) {
         it->second->unfreeze();
-        _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_camera_perspective_managers.find(name);
         it != _kernel_camera_perspective_managers.end()) {
         it->second->unfreeze();
-        _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_camera_stereo_managers.find(name);
         it != _kernel_camera_stereo_managers.end()) {
         it->second->unfreeze();
-        _queueInfo(message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (_kernel_floor_manager) {
@@ -2234,9 +2185,7 @@ void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_i
         });
         if (matched) {
             _kernel_floor_manager->unfreeze();
-            _queueInfo(
-                message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)}
-            );
+            _queueResult(task, RS_WorldTaskDataSuccess{});
             return;
         }
     }
@@ -2247,9 +2196,7 @@ void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_i
         });
         if (matched) {
             _kernel_cosmic_background_manager->unfreeze();
-            _queueInfo(
-                message_id, RS_WorldMessageText{format("unfreezeEntity {} succeeded", name)}
-            );
+            _queueResult(task, RS_WorldTaskDataSuccess{});
             return;
         }
     }
@@ -2259,7 +2206,7 @@ void RS_KernelManager::_unfreezeEntity(const std::string& name, RIndex message_i
 /*****************************************************************
  * Record
  *****************************************************************/
-void RS_KernelManager::_addRecord(const RSC_RecordVariant& record, RIndex message_id) {
+void RS_KernelManager::_addRecord(const RSC_RecordVariant& record, TaskPromise task) {
     std::string name;
     record.visit([&](auto& r) {
         using T = std::decay_t<decltype(r)>;
@@ -2276,18 +2223,16 @@ void RS_KernelManager::_addRecord(const RSC_RecordVariant& record, RIndex messag
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _record_gids.find(name); it != _record_gids.end()) gid = it->second;
-    _queueInfo(
-        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD, gid, name}
-    );
+    _queueResult(task, RS_WorldTaskDataCreated{gid, name});
 }
 
-void RS_KernelManager::_removeRecord(const std::string& name, RIndex message_id) {
+void RS_KernelManager::_removeRecord(const std::string& name, TaskPromise task) {
     if (auto it = _kernel_intersect_region_managers.find(name);
         it != _kernel_intersect_region_managers.end()) {
         it->second->decommit();
         _kernel_intersect_region_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_INTERSECT_REGION, name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeRecord {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     RS_THROW(RS_NotFoundException("Record '{}' not found", name));
@@ -2296,7 +2241,7 @@ void RS_KernelManager::_removeRecord(const std::string& name, RIndex message_id)
 /*****************************************************************
  * Signal
  *****************************************************************/
-void RS_KernelManager::_addSignal(const RSC_SignalVariant& signal, RIndex message_id) {
+void RS_KernelManager::_addSignal(const RSC_SignalVariant& signal, TaskPromise task) {
     std::string name;
     signal.visit([&](auto& s) {
         using T = std::decay_t<decltype(s)>;
@@ -2317,31 +2262,29 @@ void RS_KernelManager::_addSignal(const RSC_SignalVariant& signal, RIndex messag
     });
     RIndex gid = RS_NULL_INDEX;
     if (auto it = _signal_gids.find(name); it != _signal_gids.end()) gid = it->second;
-    _queueInfo(
-        message_id, RS_WorldMessageCreated{RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL, gid, name}
-    );
+    _queueResult(task, RS_WorldTaskDataCreated{gid, name});
 }
 
-void RS_KernelManager::_removeSignal(const std::string& name, RIndex message_id) {
+void RS_KernelManager::_removeSignal(const std::string& name, TaskPromise task) {
     if (auto it = _kernel_force_managers.find(name); it != _kernel_force_managers.end()) {
         it->second->decommit();
         _kernel_force_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_FORCE, name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeSignal {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_torque_managers.find(name); it != _kernel_torque_managers.end()) {
         it->second->decommit();
         _kernel_torque_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_TORQUE, name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeSignal {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     if (auto it = _kernel_transform_managers.find(name); it != _kernel_transform_managers.end()) {
         it->second->decommit();
         _kernel_transform_managers.erase(it);
         _retractPendingCommit(RSE_KERNEL_MANAGER_TRANSFORM, name);
-        _queueInfo(message_id, RS_WorldMessageText{format("removeSignal {} succeeded", name)});
+        _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
     RS_THROW(RS_NotFoundException("Signal '{}' not found", name));
@@ -2421,9 +2364,9 @@ void RS_KernelManager::_flushOneCommit(RSE_KernelManagerType type, const std::st
     }
 }
 
-void RS_KernelManager::_queueInfo(RIndex message_id, RS_WorldMessageData data) {
-    if (message_id == RS_NULL_INDEX) return;
-    _pending_messages.push_back({message_id, RSE_WORLD_MESSAGE_INFO, std::move(data)});
+void RS_KernelManager::_queueResult(TaskPromise task, RS_WorldTaskData data) {
+    if (!task) return;
+    _pending_results.emplace_back(std::move(task), std::move(data));
 }
 
 /*****************************************************************

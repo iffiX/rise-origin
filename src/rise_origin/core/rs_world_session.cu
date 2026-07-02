@@ -14,7 +14,8 @@ namespace rise {
  * RS_WorldSessionHandle
  *****************************************************************************/
 void RS_WorldSessionHandle::_requireOwned(
-    const std::string &name, const std::unordered_set<std::string> &owned
+    const std::string &name,
+    const std::unordered_set<std::string> &owned
 ) {
     if (!owned.count(name)) {
         RS_THROW(RS_WorldSessionScopeException(
@@ -49,13 +50,27 @@ bool RS_WorldSessionHandle::waitForRunning() { return _raw->waitForRunning(); }
 
 void RS_WorldSessionHandle::waitForEnd() { _raw->waitForEnd(); }
 
-bool RS_WorldSessionHandle::hasMessage() { return _raw->hasMessage(); }
+RBigIndex RS_WorldSessionHandle::getNewestMessageIndex() { return _raw->getNewestMessageIndex(); }
 
-std::vector<RS_WorldMessage> RS_WorldSessionHandle::getMessages() { return _raw->getMessages(); }
-RS_WorldMessage
+RBigIndex RS_WorldSessionHandle::getOldestMessageIndex() { return _raw->getOldestMessageIndex(); }
 
-RS_WorldSessionHandle::waitForMessage(RIndex message_id, RSE_WorldMessageLevel level) {
-    return _raw->waitForMessage(message_id, level);
+std::vector<RS_WorldMessage> RS_WorldSessionHandle::getMessagesMatching(
+    RSize max_count,
+    RBigIndex oldest_index,
+    RBigIndex newest_index,
+    RSE_WorldMessageLevel level
+) {
+    return _raw->getMessagesMatching(max_count, oldest_index, newest_index, level);
+}
+
+RS_WorldMessage RS_WorldSessionHandle::waitForMessage(RSE_WorldMessageLevel level) {
+    return _raw->waitForMessage(level);
+}
+
+RSize RS_WorldSessionHandle::getMessageBufferSize() { return _raw->getMessageBufferSize(); }
+
+void RS_WorldSessionHandle::setMessageBufferSize(RSize max_messages) {
+    _raw->setMessageBufferSize(max_messages);
 }
 
 void RS_WorldSessionHandle::beginModificationTransaction() { _raw->beginModificationTransaction(); }
@@ -64,34 +79,34 @@ void RS_WorldSessionHandle::endModificationTransaction() { _raw->endModification
 
 rsc::RSC_World RS_WorldSessionHandle::getWorld() { return _raw->getWorld(); }
 
-RIndex RS_WorldSessionHandle::setSimulation(const rsc::RSC_Simulation &simulation) {
+RS_WorldTask RS_WorldSessionHandle::setSimulation(const rsc::RSC_Simulation &simulation) {
     return _raw->setSimulation(simulation);
 }
 
-RIndex RS_WorldSessionHandle::addResource(const rsc::RSC_ResourceVariant &resource) {
-    RIndex id = _raw->addResource(resource);
+RS_WorldTask RS_WorldSessionHandle::addResource(const rsc::RSC_ResourceVariant &resource) {
+    RS_WorldTask task = _raw->addResource(resource);
     _owned_resources.insert(_nameOf(resource));
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::removeResource(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::removeResource(const std::string &name) {
     _requireOwned(name, _owned_resources);
-    RIndex id = _raw->removeResource(name);
+    RS_WorldTask task = _raw->removeResource(name);
     _owned_resources.erase(name);
-    return id;
+    return task;
 }
 
 rsc::RSC_ResourceVariant RS_WorldSessionHandle::findResource(const std::string &name) {
     return _raw->findResource(name);
 }
 
-RIndex RS_WorldSessionHandle::addEssence(const rsc::RSC_EssenceVariant &essence) {
-    RIndex id = _raw->addEssence(essence);
+RS_WorldTask RS_WorldSessionHandle::addEssence(const rsc::RSC_EssenceVariant &essence) {
+    RS_WorldTask task = _raw->addEssence(essence);
     _owned_essences.insert(_nameOf(essence));
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::updateEssence(
+RS_WorldTask RS_WorldSessionHandle::updateEssence(
     const std::string &name,
     const rsc::RSC_EssenceVariant &essence
 ) {
@@ -99,36 +114,36 @@ RIndex RS_WorldSessionHandle::updateEssence(
     return _raw->updateEssence(name, essence);
 }
 
-RIndex RS_WorldSessionHandle::removeEssence(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::removeEssence(const std::string &name) {
     _requireOwned(name, _owned_essences);
-    RIndex id = _raw->removeEssence(name);
+    RS_WorldTask task = _raw->removeEssence(name);
     _owned_essences.erase(name);
-    return id;
+    return task;
 }
 
 rsc::RSC_EssenceVariant RS_WorldSessionHandle::findEssence(const std::string &name) {
     return _raw->findEssence(name);
 }
 
-RIndex RS_WorldSessionHandle::addEntity(const rsc::RSC_EntityVariant &entity) {
-    RIndex id = _raw->addEntity(entity);
+RS_WorldTask RS_WorldSessionHandle::addEntity(const rsc::RSC_EntityVariant &entity) {
+    RS_WorldTask task = _raw->addEntity(entity);
     _owned_entities.insert(_nameOf(entity));
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::removeEntity(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::removeEntity(const std::string &name) {
     _requireOwned(name, _owned_entities);
-    RIndex id = _raw->removeEntity(name);
+    RS_WorldTask task = _raw->removeEntity(name);
     _owned_entities.erase(name);
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::freezeEntity(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::freezeEntity(const std::string &name) {
     _requireOwned(name, _owned_entities);
     return _raw->freezeEntity(name);
 }
 
-RIndex RS_WorldSessionHandle::unfreezeEntity(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::unfreezeEntity(const std::string &name) {
     _requireOwned(name, _owned_entities);
     return _raw->unfreezeEntity(name);
 }
@@ -147,68 +162,68 @@ bool RS_WorldSessionHandle::isEntityFrozen(const std::string &name) {
     return _raw->isEntityFrozen(name);
 }
 
-RIndex RS_WorldSessionHandle::addRecord(const rsc::RSC_RecordVariant &record) {
-    RIndex id = _raw->addRecord(record);
+RS_WorldTask RS_WorldSessionHandle::addRecord(const rsc::RSC_RecordVariant &record) {
+    RS_WorldTask task = _raw->addRecord(record);
     _owned_records.insert(_nameOf(record));
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::removeRecord(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::removeRecord(const std::string &name) {
     _requireOwned(name, _owned_records);
-    RIndex id = _raw->removeRecord(name);
+    RS_WorldTask task = _raw->removeRecord(name);
     _owned_records.erase(name);
-    return id;
+    return task;
 }
 
 rsc::RSC_RecordVariant RS_WorldSessionHandle::findRecord(const std::string &name) {
     return _raw->findRecord(name);
 }
 
-RIndex RS_WorldSessionHandle::addSignal(const rsc::RSC_SignalVariant &signal) {
-    RIndex id = _raw->addSignal(signal);
+RS_WorldTask RS_WorldSessionHandle::addSignal(const rsc::RSC_SignalVariant &signal) {
+    RS_WorldTask task = _raw->addSignal(signal);
     _owned_signals.insert(_nameOf(signal));
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::removeSignal(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::removeSignal(const std::string &name) {
     _requireOwned(name, _owned_signals);
-    RIndex id = _raw->removeSignal(name);
+    RS_WorldTask task = _raw->removeSignal(name);
     _owned_signals.erase(name);
-    return id;
+    return task;
 }
 
 rsc::RSC_SignalVariant RS_WorldSessionHandle::findSignal(const std::string &name) {
     return _raw->findSignal(name);
 }
 
-RIndex RS_WorldSessionHandle::addRecorder(const rsc::RSC_RecorderVariant &recorder) {
-    RIndex id = _raw->addRecorder(recorder);
+RS_WorldTask RS_WorldSessionHandle::addRecorder(const rsc::RSC_RecorderVariant &recorder) {
+    RS_WorldTask task = _raw->addRecorder(recorder);
     _owned_recorders.insert(_nameOf(recorder));
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::removeRecorder(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::removeRecorder(const std::string &name) {
     _requireOwned(name, _owned_recorders);
-    RIndex id = _raw->removeRecorder(name);
+    RS_WorldTask task = _raw->removeRecorder(name);
     _owned_recorders.erase(name);
-    return id;
+    return task;
 }
 
 rsc::RSC_RecorderVariant RS_WorldSessionHandle::findRecorder(const std::string &name) {
     return _raw->findRecorder(name);
 }
 
-RIndex RS_WorldSessionHandle::addController(const rsc::RSC_ControllerVariant &controller) {
-    RIndex id = _raw->addController(controller);
+RS_WorldTask RS_WorldSessionHandle::addController(const rsc::RSC_ControllerVariant &controller) {
+    RS_WorldTask task = _raw->addController(controller);
     _owned_controllers.insert(_nameOf(controller));
-    return id;
+    return task;
 }
 
-RIndex RS_WorldSessionHandle::removeController(const std::string &name) {
+RS_WorldTask RS_WorldSessionHandle::removeController(const std::string &name) {
     _requireOwned(name, _owned_controllers);
-    RIndex id = _raw->removeController(name);
+    RS_WorldTask task = _raw->removeController(name);
     _owned_controllers.erase(name);
-    return id;
+    return task;
 }
 
 rsc::RSC_ControllerVariant RS_WorldSessionHandle::findController(const std::string &name) {
@@ -228,7 +243,8 @@ std::vector<std::reference_wrapper<RS_WorldController>> RS_WorldSessionAccess::c
 
 RS_WorldController &RS_WorldSessionAccess::controller(const std::string &name) {
     if (!_handle->_owned_controllers.count(name)) {
-        RS_THROW(RS_WorldSessionScopeException("controller '{}' is outside this component's scope", name)
+        RS_THROW(
+            RS_WorldSessionScopeException("controller '{}' is outside this component's scope", name)
         );
     }
     for (auto &controller : _controllers.get()) {
@@ -264,7 +280,8 @@ bool RS_WorldSession::hasComponent(const std::string &name) const {
 }
 
 void RS_WorldSession::addComponent(
-    const std::string &name, std::shared_ptr<RS_WorldSessionComponent> component
+    const std::string &name,
+    std::shared_ptr<RS_WorldSessionComponent> component
 ) {
     component->onAttach(_makeAccess());
     _components.emplace(name, std::move(component));

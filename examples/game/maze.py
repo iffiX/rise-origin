@@ -28,7 +28,7 @@ from rise_origin import (
     RS_NULL_INDEX,
     RS_WorldForceSignal,
     RS_WorldIntersectRegionRecord,
-    RS_WorldMessageCreated,
+    RS_WorldTaskDataCreated,
     RSC_EntityVariant,
     RSC_RecordVariant,
     RSC_SignalVariant,
@@ -316,15 +316,15 @@ def _populate(handle, seed):
     maze, ball, push, goal = _generate(seed)
     handle.begin_modification_transaction()
     handle.add_entity(RSC_EntityVariant(maze))
-    ball_message_id = handle.add_entity(RSC_EntityVariant(ball))
+    ball_task = handle.add_entity(RSC_EntityVariant(ball))
     handle.add_signal(RSC_SignalVariant(push))
     handle.add_record(RSC_RecordVariant(goal))
     handle.end_modification_transaction()
     # The world reports the gid it assigned the ball once the transaction commits.
     # The goal region lists that gid among its members exactly while the ball is inside.
-    created = handle.wait_for_message(ball_message_id).data.value
+    created = ball_task.get().value
     _state["ball_gid"] = (
-        created.gid if isinstance(created, RS_WorldMessageCreated) else RS_NULL_INDEX
+        created.gid if isinstance(created, RS_WorldTaskDataCreated) else RS_NULL_INDEX
     )
 
 

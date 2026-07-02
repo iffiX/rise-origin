@@ -28,7 +28,7 @@ namespace py = pybind11;
 
 inline void initRSPYDefinitions(py::module &m) {
     m.attr("RS_NULL_INDEX") = RS_NULL_INDEX;
-    m.attr("RS_WORLD_MESSAGE_SYSTEM_ID") = RS_WORLD_MESSAGE_SYSTEM_ID;
+    m.attr("RS_NULL_BIG_INDEX") = RS_NULL_BIG_INDEX;
 
     py::enum_<RSE_FloatType>(m, "RSE_FloatType")
         .value("RSE_FLOAT_32", RSE_FLOAT_32)

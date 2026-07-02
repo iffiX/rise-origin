@@ -4,7 +4,10 @@
 #ifndef RS_WORLD_HANDLE_H
 #define RS_WORLD_HANDLE_H
 
+#include <chrono>
+#include <future>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "rise_origin/rsc/rsc_world.h"
@@ -16,60 +19,121 @@ namespace rise {
 
 /**
  * @brief Severity of a world message.
- * @details RSE_WORLD_MESSAGE_ANY_LEVEL is a wait-filter wildcard only; it is never emitted.
  */
 RS_ENUM(
     RSE_WorldMessageLevel,
     RIndex,
-    (RSE_WORLD_MESSAGE_ANY_LEVEL, 0),
-    (RSE_WORLD_MESSAGE_INFO, 1),
-    (RSE_WORLD_MESSAGE_WARNING, 2),
-    (RSE_WORLD_MESSAGE_ERROR, 3)
+    (RSE_WORLD_MESSAGE_INFO, 0),
+    (RSE_WORLD_MESSAGE_WARNING, 1),
+    (RSE_WORLD_MESSAGE_ERROR, 2)
 );
 
 /**
- * @brief Category of object a create operation produced.
+ * @brief One entry in a world's message log.
+ * @details Entries live in a bounded ring keyed by a monotonic index and are never removed by
+ * reads.
  */
-RS_ENUM(
-    RSE_WorldMessageCreatedType,
-    RIndex,
-    (RSE_WORLD_MESSAGE_CREATED_TYPE_NONE, 0),
-    (RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY, 1),
-    (RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE, 2),
-    (RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE, 3),
-    (RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD, 4),
-    (RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL, 5)
-);
-
-/**
- * @brief Free-form text body of a world message.
- */
-struct RS_WorldMessageText {
+struct RS_WorldMessage {
+    RBigIndex index = RS_NULL_BIG_INDEX;
+    std::chrono::system_clock::time_point time;
+    RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO;
     std::string text;
 };
 
 /**
- * @brief Body reporting the gid a world add operation assigned.
+ * @brief Task result carrying the gid a world add operation assigned.
  */
-struct RS_WorldMessageCreated {
-    RSE_WorldMessageCreatedType type = RSE_WORLD_MESSAGE_CREATED_TYPE_NONE;
+struct RS_WorldTaskDataCreated {
     RIndex gid = RS_NULL_INDEX;
     std::string name;
 };
 
 /**
- * @brief Typed body of a world message.
+ * @brief Task result for a command that succeeded without producing an object.
  */
-using RS_WorldMessageData = RS_Variant<RS_WorldMessageText, RS_WorldMessageCreated>;
+struct RS_WorldTaskDataSuccess {};
 
 /**
- * @brief Asynchronous message emitted by a running world.
- * @details The id matches the RIndex returned by the mutator that originated the work.
+ * @brief Task result for a command that failed.
  */
-struct RS_WorldMessage {
-    RIndex id = RS_NULL_INDEX;
-    RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO;
-    RS_WorldMessageData data;
+struct RS_WorldTaskDataFailed {
+    std::string error;
+};
+
+/**
+ * @brief Result body carried by a world task.
+ */
+using RS_WorldTaskData =
+    RS_Variant<RS_WorldTaskDataCreated, RS_WorldTaskDataSuccess, RS_WorldTaskDataFailed>;
+
+/**
+ * @brief Completion of a single deferred world command.
+ * @details Copyable. The outcome is delivered as data, so get never throws for a finished command.
+ */
+class RS_WorldTask {
+    /**
+     * @brief Shared future over the command result.
+     */
+    std::shared_future<RS_WorldTaskData> _data;
+
+   public:
+    RS_WorldTask() = default;
+    explicit RS_WorldTask(std::shared_future<RS_WorldTaskData> data) : _data(std::move(data)) {}
+
+    /**
+     * @brief Completion state without blocking.
+     */
+    [[nodiscard]] RSE_WorldTaskState state() const {
+        if (!isFinished()) return RSE_WORLD_TASK_PENDING;
+        return _data.get().is<RS_WorldTaskDataFailed>() ? RSE_WORLD_TASK_FAIL
+                                                        : RSE_WORLD_TASK_SUCCESS;
+    }
+
+    /**
+     * @brief Whether the command has finished without blocking.
+     */
+    [[nodiscard]] bool isFinished() const {
+        return _data.valid() &&
+               _data.wait_for(std::chrono::seconds(0)) == std::future_status::ready;
+    }
+
+    /**
+     * @brief Whether this task refers to a command.
+     */
+    [[nodiscard]] bool isValid() const { return _data.valid(); }
+
+    /**
+     * @brief Block until the command finishes.
+     */
+    void wait() const {
+        if (_data.valid()) _data.wait();
+    }
+
+    /**
+     * @brief Block until the command finishes or the timeout elapses.
+     * @return The completion state, or RSE_WORLD_TASK_PENDING on timeout.
+     */
+    template <class Rep, class Period>
+    RSE_WorldTaskState waitFor(const std::chrono::duration<Rep, Period>& timeout) const {
+        if (!_data.valid() || _data.wait_for(timeout) != std::future_status::ready)
+            return RSE_WORLD_TASK_PENDING;
+        return _data.get().is<RS_WorldTaskDataFailed>() ? RSE_WORLD_TASK_FAIL
+                                                        : RSE_WORLD_TASK_SUCCESS;
+    }
+
+    /**
+     * @brief Block until the command finishes and return its result.
+     */
+    [[nodiscard]] RS_WorldTaskData get() const { return _data.get(); }
+
+    /**
+     * @brief Make a task already finished with the given result.
+     */
+    static RS_WorldTask makeFinished(RS_WorldTaskData data) {
+        std::promise<RS_WorldTaskData> promise;
+        promise.set_value(std::move(data));
+        return RS_WorldTask(promise.get_future().share());
+    }
 };
 
 /**
@@ -159,30 +223,42 @@ class RS_WorldHandle {
      * Messages
      *****************************************************************/
     /**
-     * @brief Report whether one or more world messages are waiting to be drained.
-     * @return True when getMessages() would return at least one message.
+     * @brief Index of the newest message in the log, or RS_NULL_BIG_INDEX when empty.
      */
-    virtual bool hasMessage() = 0;
+    virtual RBigIndex getNewestMessageIndex() = 0;
 
     /**
-     * @brief Drain and return all currently queued world messages.
-     * @details Messages are returned in posting order and removed from the queue atomically. Once
-     * drained, a message cannot satisfy a later waitForMessage() call.
-     * @return The queued messages.
+     * @brief Index of the oldest retained message; a cursor below it has missed entries.
      */
-    virtual std::vector<RS_WorldMessage> getMessages() = 0;
+    virtual RBigIndex getOldestMessageIndex() = 0;
 
     /**
-     * @brief Block until a world message arrives.
-     * @details message_id == RS_NULL_INDEX returns the next message matching the level filter;
-     * otherwise blocks for the message with that id. RSE_WORLD_MESSAGE_ANY_LEVEL matches any
-     * severity; a specific level matches severity >= level. Messages drained by getMessages() are
-     * no longer available to this call.
+     * @brief Return up to max_count messages in [oldest_index, newest_index) at severity >= level.
+     * @details Reads never remove. Results run oldest to newest; when capped, the newest are kept.
+     */
+    virtual std::vector<RS_WorldMessage> getMessagesMatching(
+        RSize max_count = RS_MAX_SIZE,
+        RBigIndex oldest_index = 0,
+        RBigIndex newest_index = RS_NULL_BIG_INDEX,
+        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO
+    ) = 0;
+
+    /**
+     * @brief Block until the next message at severity >= level, then return it.
      */
     virtual RS_WorldMessage waitForMessage(
-        RIndex message_id = RS_NULL_INDEX,
-        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_ANY_LEVEL
+        RSE_WorldMessageLevel level = RSE_WORLD_MESSAGE_INFO
     ) = 0;
+
+    /**
+     * @brief Number of entries the message log retains.
+     */
+    virtual RSize getMessageBufferSize() = 0;
+
+    /**
+     * @brief Set the number of entries the message log retains; shrinking evicts the oldest.
+     */
+    virtual void setMessageBufferSize(RSize max_messages) = 0;
 
     /*****************************************************************
      * Modification transactions
@@ -207,24 +283,24 @@ class RS_WorldHandle {
 
     /**
      * @brief Apply a new simulation sub-characterization.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex setSimulation(const rsc::RSC_Simulation& simulation) = 0;
+    virtual RS_WorldTask setSimulation(const rsc::RSC_Simulation& simulation) = 0;
 
     /*****************************************************************
      * Resource
      *****************************************************************/
     /**
      * @brief Add a resource.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex addResource(const rsc::RSC_ResourceVariant& resource) = 0;
+    virtual RS_WorldTask addResource(const rsc::RSC_ResourceVariant& resource) = 0;
 
     /**
      * @brief Remove the named resource.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex removeResource(const std::string& name) = 0;
+    virtual RS_WorldTask removeResource(const std::string& name) = 0;
 
     /**
      * @brief Re-emit the named resource's characterization.
@@ -236,21 +312,21 @@ class RS_WorldHandle {
      *****************************************************************/
     /**
      * @brief Add an essence.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex addEssence(const rsc::RSC_EssenceVariant& essence) = 0;
+    virtual RS_WorldTask addEssence(const rsc::RSC_EssenceVariant& essence) = 0;
     /**
      * @brief Update the named essence.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex
+    virtual RS_WorldTask
     updateEssence(const std::string& name, const rsc::RSC_EssenceVariant& essence) = 0;
 
     /**
      * @brief Remove the named essence.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex removeEssence(const std::string& name) = 0;
+    virtual RS_WorldTask removeEssence(const std::string& name) = 0;
 
     /**
      * @brief Re-emit the named essence's characterization.
@@ -262,26 +338,26 @@ class RS_WorldHandle {
      *****************************************************************/
     /**
      * @brief Add an entity.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex addEntity(const rsc::RSC_EntityVariant& entity) = 0;
+    virtual RS_WorldTask addEntity(const rsc::RSC_EntityVariant& entity) = 0;
     /**
      * @brief Remove the named entity.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex removeEntity(const std::string& name) = 0;
+    virtual RS_WorldTask removeEntity(const std::string& name) = 0;
 
     /**
      * @brief Freeze the named entity so it stops simulating or rendering while staying present.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex freezeEntity(const std::string& name) = 0;
+    virtual RS_WorldTask freezeEntity(const std::string& name) = 0;
 
     /**
      * @brief Unfreeze the named entity so it resumes simulating or rendering.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex unfreezeEntity(const std::string& name) = 0;
+    virtual RS_WorldTask unfreezeEntity(const std::string& name) = 0;
 
     /**
      * @brief Re-emit the named entity's characterization.
@@ -308,15 +384,15 @@ class RS_WorldHandle {
      *****************************************************************/
     /**
      * @brief Add a record.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex addRecord(const rsc::RSC_RecordVariant& record) = 0;
+    virtual RS_WorldTask addRecord(const rsc::RSC_RecordVariant& record) = 0;
 
     /**
      * @brief Remove the named record.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex removeRecord(const std::string& name) = 0;
+    virtual RS_WorldTask removeRecord(const std::string& name) = 0;
 
     /**
      * @brief Re-emit the named record's characterization.
@@ -328,15 +404,15 @@ class RS_WorldHandle {
      *****************************************************************/
     /**
      * @brief Add a signal.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex addSignal(const rsc::RSC_SignalVariant& signal) = 0;
+    virtual RS_WorldTask addSignal(const rsc::RSC_SignalVariant& signal) = 0;
 
     /**
      * @brief Remove the named signal.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex removeSignal(const std::string& name) = 0;
+    virtual RS_WorldTask removeSignal(const std::string& name) = 0;
 
     /**
      * @brief Re-emit the named signal's characterization.
@@ -348,15 +424,15 @@ class RS_WorldHandle {
      *****************************************************************/
     /**
      * @brief Add a recorder.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex addRecorder(const rsc::RSC_RecorderVariant& recorder) = 0;
+    virtual RS_WorldTask addRecorder(const rsc::RSC_RecorderVariant& recorder) = 0;
 
     /**
      * @brief Remove the named recorder.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex removeRecorder(const std::string& name) = 0;
+    virtual RS_WorldTask removeRecorder(const std::string& name) = 0;
 
     /**
      * @brief Re-emit the named recorder's characterization.
@@ -368,15 +444,15 @@ class RS_WorldHandle {
      *****************************************************************/
     /**
      * @brief Add a controller.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex addController(const rsc::RSC_ControllerVariant& controller) = 0;
+    virtual RS_WorldTask addController(const rsc::RSC_ControllerVariant& controller) = 0;
 
     /**
      * @brief Remove the named controller.
-     * @return Message id to wait on.
+     * @return Task tracking the command.
      */
-    virtual RIndex removeController(const std::string& name) = 0;
+    virtual RS_WorldTask removeController(const std::string& name) = 0;
 
     /**
      * @brief Re-emit the named controller's characterization.

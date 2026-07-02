@@ -43,8 +43,9 @@ void RS_SimulationManager::free() {
     }
 }
 
-std::pair<RS_WorldLocalHandle, std::shared_ptr<RS_WorldCallback>>
-RS_SimulationManager::run(RSC_World world) {
+std::pair<RS_WorldLocalHandle, std::shared_ptr<RS_WorldCallback>> RS_SimulationManager::run(
+    RSC_World world
+) {
     if (executor_thread)
         RS_THROW(
             RS_HostExecutionException("A simulation is already run by the simulation manager.")
@@ -86,13 +87,11 @@ RS_SimulationManager::run(RSC_World world) {
     RS_WorldLocalHandle handle(simulation);
     callback = make_shared<RS_WorldLocalCallback>(world.name);
 
-    executor_thread = make_unique<thread>(
-        [this, world = std::move(world), max_time]() {
-            auto exec =
-                RS_SimulationExecutor(device_provider.get(), host_provider.get(), callback.get());
-            _runSim(world, exec, max_time);
-        }
-    );
+    executor_thread = make_unique<thread>([this, world = std::move(world), max_time]() {
+        auto exec =
+            RS_SimulationExecutor(device_provider.get(), host_provider.get(), callback.get());
+        _runSim(world, exec, max_time);
+    });
 
     return {handle, callback};
 }
@@ -129,33 +128,35 @@ bool RS_SimulationManager::_initSim(
             host_provider.get(),
             device_provider.get(),
             this->record_buffer_size,
-            [sim_ptr = sim.get()](const RS_WorldMessage &message) { sim_ptr->postMessage(message); }
+            [sim_ptr = sim.get()](RSE_WorldMessageLevel level, const std::string &text) {
+                sim_ptr->postMessage(level, text);
+            }
         );
 
         // Pause command execution until we have fully pre-loaded with the world.
         sim->kernel_manager->pauseCommandExecution();
 
         sim->kernel_manager->initKernel(sim->simulation_memory_accuracy);
-        sim->kernel_manager->setSimulationRSC(world.simulation, RS_NULL_INDEX, true);
+        sim->kernel_manager->setSimulationRSC(world.simulation, true);
 
         // Order matters — providers before consumers:
         //   resources (textures) -> essences (materials reference textures)
         //   essences -> entities (structures/floor reference materials)
         //   entities -> records / controllers / signals (which reference entities)
         for (auto &resource : world.resources) {
-            sim->kernel_manager->addResource(resource, RS_NULL_INDEX, true);
+            sim->kernel_manager->addResource(resource, true);
         }
         for (auto &essence : world.essences) {
-            sim->kernel_manager->addEssence(essence, RS_NULL_INDEX, true);
+            sim->kernel_manager->addEssence(essence, true);
         }
         for (auto &entity : world.entities) {
-            sim->kernel_manager->addEntity(entity, RS_NULL_INDEX, true);
+            sim->kernel_manager->addEntity(entity, true);
         }
         for (auto &record : world.records) {
-            sim->kernel_manager->addRecord(record, RS_NULL_INDEX, true);
+            sim->kernel_manager->addRecord(record, true);
         }
         for (auto &signal : world.signals) {
-            sim->kernel_manager->addSignal(signal, RS_NULL_INDEX, true);
+            sim->kernel_manager->addSignal(signal, true);
         }
 
         sim->kernel_manager->resumeCommandExecution();

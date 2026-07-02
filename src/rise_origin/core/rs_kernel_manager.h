@@ -9,12 +9,15 @@
 #include <atomic>
 #include <condition_variable>
 #include <functional>
+#include <future>
+#include <memory>
 #include <queue>
 #include <string>
 #include <thread>
 #include <tuple>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "kernel_manager/rs_kernel_camera_perspective_manager.h"
@@ -116,7 +119,7 @@ class RS_KernelManager {
         RS_MemoryProvider *host_provider,
         RS_MemoryProvider *device_provider,
         RSize record_buffer_frame_num,
-        std::function<void(const RS_WorldMessage &)> message_sink = {}
+        std::function<void(RSE_WorldMessageLevel, const std::string &)> message_sink = {}
     );
     void free();
     void initKernel(RSE_FloatType context_mem_accuracy);
@@ -271,75 +274,42 @@ class RS_KernelManager {
     void beginModificationTransaction(bool sync = false);
     void endModificationTransaction(bool sync = false);
 
-    void setSimulationRSC(
-        const rsc::RSC_Simulation &simulation,
-        RIndex message_id = RS_NULL_INDEX,
-        bool sync = false
-    );
+    RS_WorldTask setSimulationRSC(const rsc::RSC_Simulation &simulation, bool sync = false);
     const rsc::RSC_Simulation &getSimulationRSC() const;
 
-    void addResource(
-        const rsc::RSC_ResourceVariant &resource,
-        RIndex message_id = RS_NULL_INDEX,
-        bool sync = false
-    );
-    void updateResource(
+    RS_WorldTask addResource(const rsc::RSC_ResourceVariant &resource, bool sync = false);
+    RS_WorldTask updateResource(
         const std::string &name,
         const rsc::RSC_ResourceVariant &resource,
-        RIndex message_id = RS_NULL_INDEX,
         bool sync = false
     );
-    void
-    removeResource(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
+    RS_WorldTask removeResource(const std::string &name, bool sync = false);
     rsc::RSC_ResourceVariant findResource(const std::string &name);
 
-    void addEssence(
-        const rsc::RSC_EssenceVariant &essence,
-        RIndex message_id = RS_NULL_INDEX,
-        bool sync = false
-    );
-    void updateEssence(
+    RS_WorldTask addEssence(const rsc::RSC_EssenceVariant &essence, bool sync = false);
+    RS_WorldTask updateEssence(
         const std::string &name,
         const rsc::RSC_EssenceVariant &essence,
-        RIndex message_id = RS_NULL_INDEX,
         bool sync = false
     );
-    void
-    removeEssence(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
+    RS_WorldTask removeEssence(const std::string &name, bool sync = false);
     rsc::RSC_EssenceVariant findEssence(const std::string &name);
 
-    void addEntity(
-        const rsc::RSC_EntityVariant &entity,
-        RIndex message_id = RS_NULL_INDEX,
-        bool sync = false
-    );
-    void
-    removeEntity(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
-    void
-    freezeEntity(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
-    void
-    unfreezeEntity(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
+    RS_WorldTask addEntity(const rsc::RSC_EntityVariant &entity, bool sync = false);
+    RS_WorldTask removeEntity(const std::string &name, bool sync = false);
+    RS_WorldTask freezeEntity(const std::string &name, bool sync = false);
+    RS_WorldTask unfreezeEntity(const std::string &name, bool sync = false);
     bool isEntityFrozen(const std::string &name);
     rsc::RSC_EntityVariant findEntity(const std::string &name);
     RIndex findEntityGID(const std::string &name);
     std::string findEntityName(RIndex gid);
 
-    void addRecord(
-        const rsc::RSC_RecordVariant &record,
-        RIndex message_id = RS_NULL_INDEX,
-        bool sync = false
-    );
-    void
-    removeRecord(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
+    RS_WorldTask addRecord(const rsc::RSC_RecordVariant &record, bool sync = false);
+    RS_WorldTask removeRecord(const std::string &name, bool sync = false);
     rsc::RSC_RecordVariant findRecord(const std::string &name);
 
-    void addSignal(
-        const rsc::RSC_SignalVariant &signal,
-        RIndex message_id = RS_NULL_INDEX,
-        bool sync = false
-    );
-    void
-    removeSignal(const std::string &name, RIndex message_id = RS_NULL_INDEX, bool sync = false);
+    RS_WorldTask addSignal(const rsc::RSC_SignalVariant &signal, bool sync = false);
+    RS_WorldTask removeSignal(const std::string &name, bool sync = false);
     rsc::RSC_SignalVariant findSignal(const std::string &name);
 
     rsc::RSC_World getWorld();
@@ -415,6 +385,8 @@ class RS_KernelManager {
     void exitKernelDataCriticalZone();
 
    private:
+    using TaskPromise = std::shared_ptr<std::promise<RS_WorldTaskData>>;
+
     // RAII scope raising the command execution depth for one command, released on every exit path.
     struct CommandExecutionScope {
         RS_KernelManager *manager;
@@ -429,7 +401,7 @@ class RS_KernelManager {
     std::shared_ptr<logging::logger> _logger;
     std::shared_ptr<RS_ThreadPool> _thread_pool;
     std::unique_ptr<std::thread> _kernel_synchronization_thread;
-    std::queue<std::tuple<RIndex, std::string, RS_Any>> _command_queue;
+    std::queue<std::tuple<TaskPromise, std::string, RS_Any>> _command_queue;
     std::mutex _command_queue_mutex;
     std::condition_variable _command_queue_cv;
 
@@ -445,12 +417,14 @@ class RS_KernelManager {
     bool _is_transaction_open = false;
     std::vector<RS_KernelPendingCommit> _pending_commits;
 
-    std::unordered_map<std::string, std::function<void(RS_Any, RIndex)>> _methods;
+    std::unordered_map<std::string, std::function<void(RS_Any, TaskPromise)>> _methods;
 
-    std::function<void(const RS_WorldMessage &)> _message_sink;
+    /// Message sink where output are given to
+    std::function<void(RSE_WorldMessageLevel, const std::string &)> _message_sink;
 
-    /// Messages queued by the running command, drained to the sink once its commit is done.
-    std::vector<RS_WorldMessage> _pending_messages;
+    /// Task results built by the running command, delivered to their promises once its commit is
+    /// done.
+    std::vector<std::pair<TaskPromise, RS_WorldTaskData>> _pending_results;
 
     // Whether the host kernel has been modified since the last syncKernelIfNeeded().
     bool _is_kernel_modified = false;
@@ -500,6 +474,8 @@ class RS_KernelManager {
 
     void _kernelSynchronizationThreadFunc();
 
+    RS_WorldTask _enqueueCommand(std::string command, RS_Any arg);
+
     void _acquireCommandExecution();
     void _releaseCommandExecution();
 
@@ -512,34 +488,34 @@ class RS_KernelManager {
 
     void _configureLayoutGrowthPolicies(RS_ContextHostData *host_data);
 
-    void _setSimulationRSC(const rsc::RSC_Simulation &simulation, RIndex message_id);
+    void _setSimulationRSC(const rsc::RSC_Simulation &simulation, TaskPromise task);
 
-    void _addResource(const rsc::RSC_ResourceVariant &resource, RIndex message_id);
+    void _addResource(const rsc::RSC_ResourceVariant &resource, TaskPromise task);
     void _updateResource(
         const std::string &name,
         const rsc::RSC_ResourceVariant &resource,
-        RIndex message_id
+        TaskPromise task
     );
-    void _removeResource(const std::string &name, RIndex message_id);
+    void _removeResource(const std::string &name, TaskPromise task);
 
-    void _addEssence(const rsc::RSC_EssenceVariant &essence, RIndex message_id);
+    void _addEssence(const rsc::RSC_EssenceVariant &essence, TaskPromise task);
     void _updateEssence(
         const std::string &name,
         const rsc::RSC_EssenceVariant &essence,
-        RIndex message_id
+        TaskPromise task
     );
-    void _removeEssence(const std::string &name, RIndex message_id);
+    void _removeEssence(const std::string &name, TaskPromise task);
 
-    void _addEntity(const rsc::RSC_EntityVariant &entity, RIndex message_id);
-    void _removeEntity(const std::string &name, RIndex message_id);
-    void _freezeEntity(const std::string &name, RIndex message_id);
-    void _unfreezeEntity(const std::string &name, RIndex message_id);
+    void _addEntity(const rsc::RSC_EntityVariant &entity, TaskPromise task);
+    void _removeEntity(const std::string &name, TaskPromise task);
+    void _freezeEntity(const std::string &name, TaskPromise task);
+    void _unfreezeEntity(const std::string &name, TaskPromise task);
 
-    void _addRecord(const rsc::RSC_RecordVariant &record, RIndex message_id);
-    void _removeRecord(const std::string &name, RIndex message_id);
+    void _addRecord(const rsc::RSC_RecordVariant &record, TaskPromise task);
+    void _removeRecord(const std::string &name, TaskPromise task);
 
-    void _addSignal(const rsc::RSC_SignalVariant &signal, RIndex message_id);
-    void _removeSignal(const std::string &name, RIndex message_id);
+    void _addSignal(const rsc::RSC_SignalVariant &signal, TaskPromise task);
+    void _removeSignal(const std::string &name, TaskPromise task);
 
     /**
      * @brief Stage a built manager for commit; commits immediately when no transaction is open.
@@ -563,9 +539,10 @@ class RS_KernelManager {
     void _flushOneCommit(RSE_KernelManagerType type, const std::string &name);
 
     /**
-     * @brief Queue an info message for the running command; skipped when message_id is null.
+     * @brief Stage the running command's task result, delivered once its commit is done; skipped
+     * when task is null.
      */
-    void _queueInfo(RIndex message_id, RS_WorldMessageData data);
+    void _queueResult(TaskPromise task, RS_WorldTaskData data);
 };
 
 /**

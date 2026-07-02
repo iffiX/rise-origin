@@ -2,10 +2,11 @@
 # Copyright 2026 Muhan Li (iffi/iffiX)
 
 from typing import Any, Callable, Iterable, List, Optional, Tuple, Union, overload
+import datetime
 import numpy as np
 
 RS_NULL_INDEX: int
-RS_WORLD_MESSAGE_SYSTEM_ID: int
+RS_NULL_BIG_INDEX: int
 __version__: str
 
 
@@ -1309,43 +1310,63 @@ class RS_DeviceLocation:
 ################################################################################
 
 class RSE_WorldMessageLevel:
-    RSE_WORLD_MESSAGE_ANY_LEVEL: int
     RSE_WORLD_MESSAGE_INFO: int
     RSE_WORLD_MESSAGE_WARNING: int
     RSE_WORLD_MESSAGE_ERROR: int
 
-class RSE_WorldMessageCreatedType:
-    RSE_WORLD_MESSAGE_CREATED_TYPE_NONE: int
-    RSE_WORLD_MESSAGE_CREATED_TYPE_ENTITY: int
-    RSE_WORLD_MESSAGE_CREATED_TYPE_RESOURCE: int
-    RSE_WORLD_MESSAGE_CREATED_TYPE_ESSENCE: int
-    RSE_WORLD_MESSAGE_CREATED_TYPE_RECORD: int
-    RSE_WORLD_MESSAGE_CREATED_TYPE_SIGNAL: int
-
-class RS_WorldMessageText:
+class RS_WorldMessage:
+    index: int
+    time: datetime.datetime
+    level: RSE_WorldMessageLevel
     text: str
 
     def __init__(self) -> None: ...
 
-class RS_WorldMessageCreated:
-    type: RSE_WorldMessageCreatedType
+################################################################################
+# World Tasks
+################################################################################
+
+class RSE_WorldTaskState:
+    RSE_WORLD_TASK_PENDING: int
+    RSE_WORLD_TASK_SUCCESS: int
+    RSE_WORLD_TASK_FAIL: int
+
+class RS_WorldTaskDataCreated:
     gid: int
     name: str
 
     def __init__(self) -> None: ...
 
-class RS_WorldMessageData:
+class RS_WorldTaskDataSuccess:
+    def __init__(self) -> None: ...
+
+class RS_WorldTaskDataFailed:
+    error: str
+
+    def __init__(self) -> None: ...
+
+class RS_WorldTaskData:
     def __init__(self) -> None: ...
 
     @property
-    def value(self) -> Optional[Union[RS_WorldMessageText, RS_WorldMessageCreated]]: ...
+    def value(
+        self,
+    ) -> Optional[Union[RS_WorldTaskDataCreated, RS_WorldTaskDataSuccess, RS_WorldTaskDataFailed]]: ...
 
-class RS_WorldMessage:
-    id: int
-    level: RSE_WorldMessageLevel
-    data: RS_WorldMessageData
-
+class RS_WorldTask:
     def __init__(self) -> None: ...
+
+    def state(self) -> RSE_WorldTaskState: ...
+
+    def is_finished(self) -> bool: ...
+
+    def is_valid(self) -> bool: ...
+
+    def wait(self) -> None: ...
+
+    def wait_for(self, timeout_seconds: float) -> RSE_WorldTaskState: ...
+
+    def get(self) -> RS_WorldTaskData: ...
 
 
 ################################################################################
@@ -1963,44 +1984,40 @@ class RS_WorldHandle:
         """Block until the world ends."""
         ...
 
-    def has_message(self) -> bool:
-        """Report whether one or more world messages are waiting to be drained.
-
-        Returns:
-            True when get_messages() would return at least one message.
-        """
+    def get_newest_message_index(self) -> int:
+        """Index of the newest message in the log, or RS_NULL_BIG_INDEX when empty."""
         ...
 
-    def get_messages(self) -> List[RS_WorldMessage]:
-        """Drain all currently queued world messages.
-
-        Messages are returned in posting order and removed from the queue atomically.
-        Once drained, a message cannot satisfy a later wait_for_message() call.
-
-        Returns:
-            The queued RS_WorldMessage objects.
-        """
+    def get_oldest_message_index(self) -> int:
+        """Index of the oldest retained message; a cursor below it has missed entries."""
         ...
 
-    def wait_for_message(
+    def get_messages_matching(
         self,
-        message_id: int = ...,
+        max_count: int = ...,
+        oldest_index: int = ...,
+        newest_index: int = ...,
         level: RSE_WorldMessageLevel = ...,
-    ) -> RS_WorldMessage:
-        """Block until a matching world message arrives.
+    ) -> List[RS_WorldMessage]:
+        """Return up to max_count messages in [oldest_index, newest_index) at severity >= level.
 
-        Messages drained by get_messages() are no longer available to this call.
-
-        Args:
-            message_id: The id returned by a mutator to wait on its outcome. Defaults to
-                RS_NULL_INDEX, which waits for the next message posted after this call
-                regardless of id.
-            level: The minimum severity to match. Defaults to RSE_WORLD_MESSAGE_ANY_LEVEL,
-                which matches any severity.
+        Reads never remove. Results run oldest to newest; when capped, the newest are kept.
 
         Returns:
-            The matching RS_WorldMessage.
+            The matching RS_WorldMessage objects.
         """
+        ...
+
+    def wait_for_message(self, level: RSE_WorldMessageLevel = ...) -> RS_WorldMessage:
+        """Block until the next message at severity >= level, then return it."""
+        ...
+
+    def get_message_buffer_size(self) -> int:
+        """Number of entries the message log retains."""
+        ...
+
+    def set_message_buffer_size(self, max_messages: int) -> None:
+        """Set the number of entries the message log retains; shrinking evicts the oldest."""
         ...
 
     def begin_modification_transaction(self) -> None:
@@ -2030,39 +2047,39 @@ class RS_WorldHandle:
         """
         ...
 
-    def set_simulation(self, simulation: RSC_Simulation) -> int:
+    def set_simulation(self, simulation: RSC_Simulation) -> RS_WorldTask:
         """Replace the simulation parameters of the running world.
 
         Args:
             simulation: The RSC_Simulation to apply.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
-    def add_resource(self, resource: RSC_ResourceVariant) -> int:
+    def add_resource(self, resource: RSC_ResourceVariant) -> RS_WorldTask:
         """Validate and add a resource to the running world.
 
         Args:
             resource: The RSC_ResourceVariant to add.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the resource fails validation.
         """
         ...
 
-    def remove_resource(self, name: str) -> int:
+    def remove_resource(self, name: str) -> RS_WorldTask:
         """Remove the named resource from the running world.
 
         Args:
             name: The name of the resource to remove.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
@@ -2077,21 +2094,21 @@ class RS_WorldHandle:
         """
         ...
 
-    def add_essence(self, essence: RSC_EssenceVariant) -> int:
+    def add_essence(self, essence: RSC_EssenceVariant) -> RS_WorldTask:
         """Validate and add an essence to the running world.
 
         Args:
             essence: The RSC_EssenceVariant to add.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the essence fails validation.
         """
         ...
 
-    def update_essence(self, name: str, essence: RSC_EssenceVariant) -> int:
+    def update_essence(self, name: str, essence: RSC_EssenceVariant) -> RS_WorldTask:
         """Validate and update the named essence in the running world.
 
         Args:
@@ -2099,21 +2116,21 @@ class RS_WorldHandle:
             essence: The RSC_EssenceVariant holding the new values.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the essence fails validation.
         """
         ...
 
-    def remove_essence(self, name: str) -> int:
+    def remove_essence(self, name: str) -> RS_WorldTask:
         """Remove the named essence from the running world.
 
         Args:
             name: The name of the essence to remove.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
@@ -2128,50 +2145,50 @@ class RS_WorldHandle:
         """
         ...
 
-    def add_entity(self, entity: RSC_EntityVariant) -> int:
+    def add_entity(self, entity: RSC_EntityVariant) -> RS_WorldTask:
         """Validate and add an entity to the running world.
 
         Args:
             entity: The RSC_EntityVariant to add.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the entity fails validation.
         """
         ...
 
-    def remove_entity(self, name: str) -> int:
+    def remove_entity(self, name: str) -> RS_WorldTask:
         """Remove the named entity from the running world.
 
         Args:
             name: The name of the entity to remove.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
-    def freeze_entity(self, name: str) -> int:
+    def freeze_entity(self, name: str) -> RS_WorldTask:
         """Freeze the named entity so it stops advancing.
 
         Args:
             name: The name of the entity to freeze.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
-    def unfreeze_entity(self, name: str) -> int:
+    def unfreeze_entity(self, name: str) -> RS_WorldTask:
         """Unfreeze the named entity so it resumes advancing.
 
         Args:
             name: The name of the entity to unfreeze.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
@@ -2197,28 +2214,28 @@ class RS_WorldHandle:
         """
         ...
 
-    def add_record(self, record: RSC_RecordVariant) -> int:
+    def add_record(self, record: RSC_RecordVariant) -> RS_WorldTask:
         """Validate and add a record to the running world.
 
         Args:
             record: The RSC_RecordVariant to add.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the record fails validation.
         """
         ...
 
-    def remove_record(self, name: str) -> int:
+    def remove_record(self, name: str) -> RS_WorldTask:
         """Remove the named record from the running world.
 
         Args:
             name: The name of the record to remove.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
@@ -2233,28 +2250,28 @@ class RS_WorldHandle:
         """
         ...
 
-    def add_signal(self, signal: RSC_SignalVariant) -> int:
+    def add_signal(self, signal: RSC_SignalVariant) -> RS_WorldTask:
         """Validate and add a signal to the running world.
 
         Args:
             signal: The RSC_SignalVariant to add.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the signal fails validation.
         """
         ...
 
-    def remove_signal(self, name: str) -> int:
+    def remove_signal(self, name: str) -> RS_WorldTask:
         """Remove the named signal from the running world.
 
         Args:
             name: The name of the signal to remove.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
@@ -2269,28 +2286,28 @@ class RS_WorldHandle:
         """
         ...
 
-    def add_recorder(self, recorder: RSC_RecorderVariant) -> int:
+    def add_recorder(self, recorder: RSC_RecorderVariant) -> RS_WorldTask:
         """Validate and add a recorder to the running world.
 
         Args:
             recorder: The RSC_RecorderVariant to add.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the recorder fails validation.
         """
         ...
 
-    def remove_recorder(self, name: str) -> int:
+    def remove_recorder(self, name: str) -> RS_WorldTask:
         """Remove the named recorder from the running world.
 
         Args:
             name: The name of the recorder to remove.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
@@ -2305,28 +2322,28 @@ class RS_WorldHandle:
         """
         ...
 
-    def add_controller(self, controller: RSC_ControllerVariant) -> int:
+    def add_controller(self, controller: RSC_ControllerVariant) -> RS_WorldTask:
         """Validate and add a controller to the running world.
 
         Args:
             controller: The RSC_ControllerVariant to add.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
 
         Raises:
             RS_InvalidCharacterizationException: When the controller fails validation.
         """
         ...
 
-    def remove_controller(self, name: str) -> int:
+    def remove_controller(self, name: str) -> RS_WorldTask:
         """Remove the named controller from the running world.
 
         Args:
             name: The name of the controller to remove.
 
         Returns:
-            The message id for this mutation, or RS_NULL_INDEX if the world is not running.
+            A task tracking the command; already finished and failed if the world is not running.
         """
         ...
 
