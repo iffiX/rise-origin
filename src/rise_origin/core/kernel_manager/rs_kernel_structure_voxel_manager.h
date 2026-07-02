@@ -890,6 +890,9 @@ class RS_KernelStructureVoxelManager {
     };
 
     struct BuildCachedBody {
+        // Weak handle to the source body, so a hit on a reused key address is rejected as stale
+        std::weak_ptr<const rsc::RSC_StructureVoxelBody> source_body_rsc;
+
         // Pre-filter temporary voxels as built, with body-local sids and a stale pose
         std::vector<VoxelData> all_voxels;
 
@@ -1074,7 +1077,7 @@ class RS_KernelStructureVoxelManager {
     /**
      * @brief Build one body's voxels, links and rigid bodies.
      */
-    void _addBody(const rsc::RSC_StructureVoxelBody &body_rsc);
+    void _addBody(const std::shared_ptr<rsc::RSC_StructureVoxelBody> &body_ref);
 
     /**
      * @brief Add one constraint joint between two rigid bodies.

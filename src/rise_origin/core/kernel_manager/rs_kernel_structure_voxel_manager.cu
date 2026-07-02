@@ -83,8 +83,8 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
 
     _resolveMaterials();
 
-    for (auto &body_rsc : _structure().bodies) {
-        _addBody(body_rsc);
+    for (RSize i = 0; i < _structure().bodies.size(); i++) {
+        _addBody(_structure().bodies.ref(i).shared());
     }
     RS_LOG(
         _kernel_manager->getLogger(),
@@ -542,7 +542,10 @@ bool RS_KernelStructureVoxelManager::_isMaterialCoherent(
     return true;
 }
 
-void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody &body_rsc) {
+void RS_KernelStructureVoxelManager::_addBody(
+    const std::shared_ptr<rsc::RSC_StructureVoxelBody> &body_ref
+) {
+    const rsc::RSC_StructureVoxelBody &body_rsc = *body_ref;
     RS_Timer timer;
 
     RIndex body_sid = _body_num++;
@@ -1564,6 +1567,7 @@ void RS_KernelStructureVoxelManager::_addBody(const rsc::RSC_StructureVoxelBody 
     // On a miss, move this freshly built body into the cache so structures sharing it can reuse it.
     if (!cached) {
         BuildCachedBody entry;
+        entry.source_body_rsc = body_ref;
         entry.all_voxels = std::move(all_voxels);
         entry.links.assign(_links.begin() + added_link_start, _links.end());
         entry.segment_material_flags = std::move(built_segment_material_flags);
@@ -3343,6 +3347,14 @@ RS_KernelStructureVoxelManager::_tryGetCachedBody(const rsc::RSC_StructureVoxelB
     std::lock_guard<std::mutex> lock(_build_cache_mutex);
     auto it = _build_cache.map.find(key);
     if (it == _build_cache.map.end()) return nullptr;
+    // The key is a raw body pointer the allocator can reuse for a new body once the original is
+    // freed. An expired handle means this build belongs to a freed body, so drop it and miss.
+    if (it->second.first->source_body_rsc.expired()) {
+        _build_cache.total -= it->second.first->byte_size;
+        _build_cache.lru.erase(it->second.second);
+        _build_cache.map.erase(it);
+        return nullptr;
+    }
     // Move the hit to the most-recently-used front, and pin it with a shared_ptr so an eviction by
     // another manager defers the free until this build finishes reading.
     _build_cache.lru.splice(_build_cache.lru.begin(), _build_cache.lru, it->second.second);
