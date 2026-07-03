@@ -84,9 +84,68 @@ class RSCF_SetRigidBodyStaticOverSegment
         auto &ctx = k->ctx;
         RHandle rigid_body = index1D() + rigid_body_segment_offset;
         RS_RigidBodyStateUnion state_union{RB_G(state)};
-        state_union.rigid_body_state.is_static =
-            freeze ? true : state_union.rigid_body_state.is_fixed;
+        state_union.rigid_body_state.is_static = freeze ? true
+                                                        : state_union.rigid_body_state.is_fixed;
         RB_S(state, state_union.rigid_body_state_packed);
+    }
+};
+
+/**
+ * @brief Classify one rigid body into the dynamic subset.
+ * @details A body is dynamic when it is not static, so the per-step dynamics launches iterate only
+ * the moving bodies while the full set still serves the transform and contact anchors. Static and
+ * frozen bodies are simply excluded, exactly as the dynamics kernels already early-return on them.
+ *
+ * @param k             simulation kernel.
+ * @param rigid_body    handle of the body to classify.
+ * @param flag_index    index of this body within the flag array.
+ * @param dynamic_flags per-body output, 1 when mobile.
+ */
+class RSCF_GetRigidBodyMobilityFlags
+    : public device::RS_ComputeFunction<RSCF_GetRigidBodyMobilityFlags> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void run(
+        const Kernel *k,
+        RHandle rigid_body,
+        RIndex flag_index,
+        device::RS_Vector<RIndex> dynamic_flags
+    ) {
+        if (k == nullptr || rigid_body == RS_NULL_HANDLE) return;
+        auto &ctx = k->ctx;
+        bool is_static = RS_RigidBodyStateUnion{RB_G(state)}.rigid_body_state.is_static;
+        dynamic_flags[flag_index] = is_static ? 0 : 1;
+    }
+};
+
+/**
+ * @brief Scatter the flagged rigid body handles into a packed list using the prefix sum.
+ * @details A body whose flag is set writes its handle into out_handles at
+ * prefix_sums[flag_index]-1.
+ *
+ * @param k           simulation kernel.
+ * @param rigid_body  handle of this body.
+ * @param flag_index  index of this body within the flag and prefix arrays.
+ * @param flags       per-body 0/1 membership flags for the subset being compacted.
+ * @param prefix_sums inclusive prefix sum of flags giving each flagged body its output slot.
+ * @param out_handles packed output list of the flagged body handles.
+ */
+class RSCF_CompactRigidBodyHandles
+    : public device::RS_ComputeFunction<RSCF_CompactRigidBodyHandles> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void run(
+        const Kernel *k,
+        RHandle rigid_body,
+        RIndex flag_index,
+        device::RS_Vector<RIndex> flags,
+        device::RS_Vector<RIndex> prefix_sums,
+        device::RS_Vector<RHandle> out_handles
+    ) {
+        if (k == nullptr || rigid_body == RS_NULL_HANDLE) return;
+        if (flags[flag_index]) {
+            out_handles[prefix_sums[flag_index] - 1] = rigid_body;
+        }
     }
 };
 

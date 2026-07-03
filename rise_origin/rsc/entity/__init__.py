@@ -16,6 +16,7 @@ from rise_origin import (
     RSC_CosmicBackgroundBase,
     RSC_EntityBase,
     RSC_FloorBase,
+    RSC_RaySensorBase,
     RSC_StructureBase,
 )
 
@@ -28,6 +29,12 @@ from rise_origin.rsc.entity.camera import (
     CameraStereoRecord,
     CameraStereoRigidBodyLinked,
     CameraStereoSignal,
+)
+from rise_origin.rsc.entity.ray_sensor import (
+    RaySensorFree,
+    RaySensorRecord,
+    RaySensorRigidBodyLinked,
+    RaySensorSignal,
 )
 from rise_origin.rsc.entity.cosmic_background import (
     CosmicBackgroundGradient,
@@ -59,6 +66,9 @@ CameraPerspectiveBase = RSC_CameraPerspectiveBase
 #: Abstract base of the stereo cameras.
 CameraStereoBase = RSC_CameraStereoBase
 
+#: Abstract base of the ray sensors.
+RaySensorBase = RSC_RaySensorBase
+
 #: Abstract base of the floor entities.
 FloorBase = RSC_FloorBase
 
@@ -87,6 +97,11 @@ __all__ = [
     "CameraStereoRigidBodyLinked",
     "CameraStereoRecord",
     "CameraStereoSignal",
+    "RaySensorBase",
+    "RaySensorFree",
+    "RaySensorRigidBodyLinked",
+    "RaySensorRecord",
+    "RaySensorSignal",
     "FloorFlat",
     "FloorArray",
     "CosmicBackgroundUniform",

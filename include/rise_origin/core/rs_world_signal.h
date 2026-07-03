@@ -338,17 +338,17 @@ class RS_WorldCameraSignalBase : public RS_WorldRootSignal {
 
         Optics() = default;
 
-        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
-            RBigSize focus_distance_num = 1,
-            RBigSize field_of_view_num = 1
-        ) {
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize
+        getRequiredMemorySize(RBigSize focus_distance_num = 1, RBigSize field_of_view_num = 1) {
             using namespace world_signal_helper;
             return align(focus_distance_num * sizeof(RFloat)) +  // focus_distance
                    align(field_of_view_num * sizeof(RFloat));    // field_of_view
         }
 
         HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
-            void* memory, RBigSize focus_distance_num = 1, RBigSize field_of_view_num = 1
+            void* memory,
+            RBigSize focus_distance_num = 1,
+            RBigSize field_of_view_num = 1
         ) {
             using namespace world_signal_helper;
 
@@ -510,6 +510,91 @@ class RS_WorldCameraStereoSignal : public RS_WorldCameraSignalBase {
         memory = left_optics_signals.initFromMemory(memory, 0, field_of_view_num);
         memory = right_optics_signals.initFromMemory(memory, 0, field_of_view_num);
 
+        return memory;
+    }
+};
+
+class RS_WorldRaySensorSignalBase : public RS_WorldRootSignal {
+   public:
+    /**
+     * Ray sensor position signals (3D vector position).
+     */
+    struct Position : public RS_WorldObjectSignal {
+        /// Sensor position per signal entry
+        RVec3rf* position = nullptr;
+
+        Position() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num = 1
+        ) {
+            using namespace world_signal_helper;
+            return align(object_num * sizeof(RVec3rf));  // position
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num = 1) {
+            using namespace world_signal_helper;
+            RS_WorldObjectSignal::initFromMemory(memory, object_num);
+            setPtr(position, memory, 0);
+            void* end;
+            setPtr(end, position, object_num * sizeof(RVec3rf));
+            return end;
+        }
+    };
+
+    /**
+     * Ray sensor orientation signals (4D quaternion).
+     */
+    struct Orientation : public RS_WorldObjectSignal {
+        /// Sensor orientation per signal entry
+        RQuat3rf* orientation = nullptr;
+
+        Orientation() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num = 1
+        ) {
+            using namespace world_signal_helper;
+            return align(object_num * sizeof(RQuat3rf));  // orientation
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num = 1) {
+            using namespace world_signal_helper;
+            RS_WorldObjectSignal::initFromMemory(memory, object_num);
+            setPtr(orientation, memory, 0);
+            void* end;
+            setPtr(end, orientation, object_num * sizeof(RQuat3rf));
+            return end;
+        }
+    };
+};
+
+class RS_WorldRaySensorSignal : public RS_WorldRaySensorSignalBase {
+   public:
+    /// Ray sensor global id
+    RIndex sensor_gid = RS_NULL_INDEX;
+
+    /// Sensor position signals
+    Position position_signals;
+
+    /// Sensor orientation signals
+    Orientation orientation_signals;
+
+    RS_WorldRaySensorSignal() = default;
+
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize
+    getRequiredMemorySize(RBigSize position_num = 1, RBigSize orientation_num = 1) {
+        return RS_WorldRootSignal::getRequiredMemorySize() +
+               Position::getRequiredMemorySize(position_num) +
+               Orientation::getRequiredMemorySize(orientation_num);
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER void*
+    initFromMemory(void* memory, RBigSize position_num = 1, RBigSize orientation_num = 1) {
+        is_valid = true;
+        memory = RS_WorldRootSignal::initFromMemory(memory);
+        memory = position_signals.initFromMemory(memory, position_num);
+        memory = orientation_signals.initFromMemory(memory, orientation_num);
         return memory;
     }
 };
@@ -756,7 +841,7 @@ class RS_WorldTransformSignalBase : public RS_WorldRootSignal {
         ) {
             using namespace world_signal_helper;
             return align(object_num * sizeof(RQuat3rf)) +  // rotation
-                   align(object_num * sizeof(RVec3rf));     // pivot
+                   align(object_num * sizeof(RVec3rf));    // pivot
         }
 
         HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num = 1) {
@@ -787,10 +872,8 @@ class RS_WorldTransformSignal : public RS_WorldTransformSignalBase {
 
     RS_WorldTransformSignal() = default;
 
-    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
-        RBigSize translation_num = 1,
-        RBigSize rotation_num = 1
-    ) {
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize
+    getRequiredMemorySize(RBigSize translation_num = 1, RBigSize rotation_num = 1) {
         RBigSize base_size = RS_WorldRootSignal::getRequiredMemorySize();
         RBigSize translation_size = Translation::getRequiredMemorySize(translation_num);
         RBigSize rotation_size = Rotation::getRequiredMemorySize(rotation_num);
@@ -810,11 +893,8 @@ class RS_WorldTransformSignal : public RS_WorldTransformSignalBase {
         return total_size;
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
-        void* memory,
-        RBigSize translation_num = 1,
-        RBigSize rotation_num = 1
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER void*
+    initFromMemory(void* memory, RBigSize translation_num = 1, RBigSize rotation_num = 1) {
         is_valid = true;
 
 #ifdef RS_DEBUG_ENABLE_WORLD_SIGNAL

@@ -54,6 +54,8 @@ void RS_RSCRegistry::_registerAll() {
     _register<RSC_CameraPerspectiveRigidBodyLinked>("RSC_CameraPerspectiveRigidBodyLinked");
     _register<RSC_CameraStereoFree>("RSC_CameraStereoFree");
     _register<RSC_CameraStereoRigidBodyLinked>("RSC_CameraStereoRigidBodyLinked");
+    _register<RSC_RaySensorFree>("RSC_RaySensorFree");
+    _register<RSC_RaySensorRigidBodyLinked>("RSC_RaySensorRigidBodyLinked");
 
     // Record
     _register<RSC_IntersectRegionCuboid>("RSC_IntersectRegionCuboid");

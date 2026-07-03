@@ -3133,17 +3133,16 @@ void RS_KernelStructureVoxelManager::_freezeKernelData(bool is_freeze) {
             );
         });
 
-        // Pause the compute, signal and record layouts while frozen; the voxel and voxel
-        // material layouts stay active so the structure remains collidable and rendered.
+        // Pause the compute, signal and record layouts while frozen; the voxel, voxel material and
+        // rigid body layouts stay active so the structure remains collidable, rendered and reachable
+        // by the transform, while the per-body static flag keeps the frozen bodies out of the
+        // dynamic subset that the integration launches iterate.
         bool is_active = !is_freeze;
         ctx.host_data->structure_link_material_layout.setSegmentIsActive(
             ctx.host_data->structure_link_material_layout.find(_structure_gid), is_active
         );
         ctx.host_data->structure_link_layout.setSegmentIsActive(
             ctx.host_data->structure_link_layout.find(_structure_gid), is_active
-        );
-        ctx.host_data->structure_rigid_body_layout.setSegmentIsActive(
-            ctx.host_data->structure_rigid_body_layout.find(_structure_gid), is_active
         );
         ctx.host_data->structure_rigid_body_surface_voxel_layout.setSegmentIsActive(
             ctx.host_data->structure_rigid_body_surface_voxel_layout.find(_structure_gid), is_active
@@ -3174,9 +3173,6 @@ void RS_KernelStructureVoxelManager::_freezeKernelData(bool is_freeze) {
             ctx.structure_link_material_layout
         );
         ctx.host_data->structure_link_layout.syncDeviceLayout(ctx.structure_link_layout);
-        ctx.host_data->structure_rigid_body_layout.syncDeviceLayout(
-            ctx.structure_rigid_body_layout
-        );
         ctx.host_data->structure_rigid_body_surface_voxel_layout.syncDeviceLayout(
             ctx.structure_rigid_body_surface_voxel_layout
         );
@@ -3206,6 +3202,7 @@ void RS_KernelStructureVoxelManager::_freezeKernelData(bool is_freeze) {
 
     // Voxels and rigid bodies moved between the dynamic and static subsets.
     _kernel_manager->getKernelSpatialManager().markVoxelPartitionModified();
+    _kernel_manager->getKernelSpatialManager().markRigidBodyPartitionModified();
 }
 
 logic::RSE_ConstraintJointHingeControlMode

@@ -30,6 +30,11 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         const std::vector<RS_WorldCameraPerspectiveRecord>& records
     ) override;
 
+    void syncRaySensorRecords(
+        const std::string& name,
+        const std::vector<RS_WorldRaySensorRecord>& records
+    ) override;
+
     void finish() override;
 
    private:
@@ -62,6 +67,20 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         std::shared_ptr<HighFive::Group> camera_state_group;
     };
 
+    struct RaySensorRecordData {
+        RSize ray_num = 0;
+
+        std::shared_ptr<HighFive::Group> root_group;
+        std::shared_ptr<HighFive::Group> time_group;
+        std::shared_ptr<HighFive::Group> hit_group;
+        std::shared_ptr<HighFive::Group> entity_info_group;
+        std::shared_ptr<HighFive::Group> entity_detail_group;
+        std::shared_ptr<HighFive::Group> material_group;
+        std::shared_ptr<HighFive::Group> normal_group;
+        std::shared_ptr<HighFive::Group> velocity_group;
+        std::shared_ptr<HighFive::Group> sensor_state_group;
+    };
+
     const int chunk_size = 1024;
     std::string _name;
     RS_ThreadPool _pool{1};
@@ -75,6 +94,7 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
     /// Entity records.
     std::unordered_map<std::string, StructureRecordData> _structure_record_data;
     std::unordered_map<std::string, CameraRecordData> _camera_record_data;
+    std::unordered_map<std::string, RaySensorRecordData> _ray_sensor_record_data;
 
     StructureRecordData& _createOrGetStructureRecordData(
         const std::string& structure_name,
@@ -94,6 +114,17 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         bool has_motion,
         bool has_entity_info,
         bool has_camera_state
+    );
+
+    RaySensorRecordData& _createOrGetRaySensorRecordData(
+        const std::string& sensor_name,
+        RSize ray_num,
+        bool has_hit,
+        bool has_entity_info,
+        bool has_entity_detail,
+        bool has_material,
+        bool has_normal,
+        bool has_velocity
     );
 
     void
@@ -128,6 +159,38 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
     void _writeCameraStateFrame(
         CameraRecordData& d,
         const RS_WorldCameraRecordBase::State& camera_state
+    );
+
+    void _writeRaySensorHitFrame(RaySensorRecordData& d, const RS_WorldRaySensorRecordBase::Hit& hit);
+
+    void _writeRaySensorEntityInfoFrame(
+        RaySensorRecordData& d,
+        const RS_WorldRaySensorRecordBase::EntityInfo& entity_info
+    );
+
+    void _writeRaySensorEntityDetailFrame(
+        RaySensorRecordData& d,
+        const RS_WorldRaySensorRecordBase::EntityDetail& entity_detail
+    );
+
+    void _writeRaySensorMaterialFrame(
+        RaySensorRecordData& d,
+        const RS_WorldRaySensorRecordBase::Material& material
+    );
+
+    void _writeRaySensorNormalFrame(
+        RaySensorRecordData& d,
+        const RS_WorldRaySensorRecordBase::Normal& normal
+    );
+
+    void _writeRaySensorVelocityFrame(
+        RaySensorRecordData& d,
+        const RS_WorldRaySensorRecordBase::Velocity& velocity
+    );
+
+    void _writeRaySensorStateFrame(
+        RaySensorRecordData& d,
+        const RS_WorldRaySensorRecordBase::State& sensor_state
     );
 
     template <typename T>

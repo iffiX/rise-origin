@@ -86,6 +86,44 @@ void RS_SimulationHDF5Recorder::syncCameraPerspectiveRecords(
     }
 }
 
+void RS_SimulationHDF5Recorder::syncRaySensorRecords(
+    const std::string &name,
+    const std::vector<RS_WorldRaySensorRecord> &records
+) {
+    if (records.empty()) return;
+
+    // A disabled subrecord carries object_num 0, so its presence is read from the first frame.
+    bool has_hit = records[0].hit.object_num > 0;
+    bool has_entity_info = records[0].entity_info.object_num > 0;
+    bool has_entity_detail = records[0].entity_detail.object_num > 0;
+    bool has_material = records[0].material.object_num > 0;
+    bool has_normal = records[0].normal.object_num > 0;
+    bool has_velocity = records[0].velocity.object_num > 0;
+
+    RaySensorRecordData &d = _createOrGetRaySensorRecordData(
+        name,
+        records[0].ray_num,
+        has_hit,
+        has_entity_info,
+        has_entity_detail,
+        has_material,
+        has_normal,
+        has_velocity
+    );
+
+    for (auto &record : records) {
+        _appendToGroupNd(d.time_group, "step", record.step, 1, 1);
+        _appendToGroupNd(d.time_group, "time_point", record.time, 1, 1);
+        if (has_hit) _writeRaySensorHitFrame(d, record.hit);
+        if (has_entity_info) _writeRaySensorEntityInfoFrame(d, record.entity_info);
+        if (has_entity_detail) _writeRaySensorEntityDetailFrame(d, record.entity_detail);
+        if (has_material) _writeRaySensorMaterialFrame(d, record.material);
+        if (has_normal) _writeRaySensorNormalFrame(d, record.normal);
+        if (has_velocity) _writeRaySensorVelocityFrame(d, record.velocity);
+        _writeRaySensorStateFrame(d, record.sensor_state);
+    }
+}
+
 void RS_SimulationHDF5Recorder::finish() {
     _hdf5_file->flush();
     H5Fclose(_hdf5_file->getId());
@@ -297,6 +335,97 @@ RS_SimulationHDF5Recorder::_createOrGetCameraRecordData(
 
     _camera_record_data[camera_name] = d;
     return _camera_record_data[camera_name];
+}
+
+RS_SimulationHDF5Recorder::RaySensorRecordData &
+RS_SimulationHDF5Recorder::_createOrGetRaySensorRecordData(
+    const std::string &sensor_name,
+    RSize ray_num,
+    bool has_hit,
+    bool has_entity_info,
+    bool has_entity_detail,
+    bool has_material,
+    bool has_normal,
+    bool has_velocity
+) {
+    if (_ray_sensor_record_data.find(sensor_name) != _ray_sensor_record_data.end()) {
+        return _ray_sensor_record_data[sensor_name];
+    }
+    RaySensorRecordData d;
+    d.ray_num = ray_num;
+    d.root_group = make_shared<HF::Group>(_entity_root_group->createGroup(sensor_name));
+    auto &root_group = d.root_group;
+
+    // Frames are stored flat: each frame appends ray_num rows. ray_num is constant, so it is
+    // written once as a root attribute to reshape the flat data back to per-frame.
+    root_group->createAttribute<RSize>("ray_num", HF::DataSpace::From(ray_num)).write(ray_num);
+
+    d.time_group = make_shared<HF::Group>(root_group->createGroup("frames/time"));
+    if (has_hit) {
+        d.hit_group = make_shared<HF::Group>(root_group->createGroup("frames/hit"));
+    }
+    if (has_entity_info) {
+        d.entity_info_group =
+            make_shared<HF::Group>(root_group->createGroup("frames/entity_info"));
+    }
+    if (has_entity_detail) {
+        d.entity_detail_group =
+            make_shared<HF::Group>(root_group->createGroup("frames/entity_detail"));
+    }
+    if (has_material) {
+        d.material_group = make_shared<HF::Group>(root_group->createGroup("frames/material"));
+    }
+    if (has_normal) {
+        d.normal_group = make_shared<HF::Group>(root_group->createGroup("frames/normal"));
+    }
+    if (has_velocity) {
+        d.velocity_group = make_shared<HF::Group>(root_group->createGroup("frames/velocity"));
+    }
+    d.sensor_state_group =
+        make_shared<HF::Group>(root_group->createGroup("frames/sensor_state"));
+
+    HF::DataSpace space_1d({0}, {HF::DataSpace::UNLIMITED});
+    HF::DataSpace space_3d({0, 3}, {HF::DataSpace::UNLIMITED, 3});
+    HF::DataSpace space_4d({0, 4}, {HF::DataSpace::UNLIMITED, 4});
+    HF::DataSetCreateProps create_props_1d, create_props_3d, create_props_4d;
+    create_props_1d.add(HF::Chunking(chunk_size));
+    create_props_3d.add(HF::Chunking(chunk_size, 3));
+    create_props_4d.add(HF::Chunking(chunk_size, 4));
+
+    d.time_group->createDataSet<RBigIndex>("step", space_1d, create_props_1d);
+    d.time_group->createDataSet<RBigFloat>("time_point", space_1d, create_props_1d);
+
+    if (has_hit) {
+        d.hit_group->createDataSet<uint8_t>("is_hit", space_1d, create_props_1d);
+        d.hit_group->createDataSet<RFloat>("distance", space_1d, create_props_1d);
+        d.hit_group->createDataSet<RFloat>("hit_position", space_3d, create_props_3d);
+    }
+    if (has_entity_info) {
+        d.entity_info_group->createDataSet<RIndex>("entity_gid", space_1d, create_props_1d);
+        d.entity_info_group->createDataSet<RIndex>("entity_type", space_1d, create_props_1d);
+    }
+    if (has_entity_detail) {
+        d.entity_detail_group->createDataSet<RIndex>("body_sid", space_1d, create_props_1d);
+        d.entity_detail_group->createDataSet<RIndex>("segment_bid", space_1d, create_props_1d);
+        d.entity_detail_group->createDataSet<RIndex>("voxel_sid", space_1d, create_props_1d);
+    }
+    if (has_material) {
+        d.material_group->createDataSet<RIndex>("material_id", space_1d, create_props_1d);
+        d.material_group->createDataSet<RFloat>("emission", space_1d, create_props_1d);
+    }
+    if (has_normal) {
+        d.normal_group->createDataSet<RFloat>("normal", space_3d, create_props_3d);
+    }
+    if (has_velocity) {
+        d.velocity_group->createDataSet<RFloat>("v_hit", space_3d, create_props_3d);
+        d.velocity_group->createDataSet<RFloat>("v_rel", space_3d, create_props_3d);
+        d.velocity_group->createDataSet<RFloat>("v_radial", space_1d, create_props_1d);
+    }
+    d.sensor_state_group->createDataSet<RFloat>("position", space_3d, create_props_3d);
+    d.sensor_state_group->createDataSet<RFloat>("orientation", space_4d, create_props_4d);
+
+    _ray_sensor_record_data[sensor_name] = d;
+    return _ray_sensor_record_data[sensor_name];
 }
 
 void RS_SimulationHDF5Recorder::_writeStructureVoxelFrame(
@@ -720,6 +849,81 @@ void RS_SimulationHDF5Recorder::_writeCameraStateFrame(
     fov_dimensions[0] += 1;
     fov_dataset.resize(fov_dimensions);
     fov_dataset.select({offset}, {1}).write_raw(camera_state.field_of_view);
+}
+
+void RS_SimulationHDF5Recorder::_writeRaySensorHitFrame(
+    RaySensorRecordData &d,
+    const RS_WorldRaySensorRecordBase::Hit &hit
+) {
+    RBigSize rn = d.ray_num;
+    _appendToGroupNd(d.hit_group, "is_hit", hit.is_hit, rn, 1);
+    _appendToGroupNd(d.hit_group, "distance", hit.distance, rn, 1);
+    _appendToGroupNd(d.hit_group, "hit_position", reinterpret_cast<RFloat *>(hit.hit_position), rn, 3);
+}
+
+void RS_SimulationHDF5Recorder::_writeRaySensorEntityInfoFrame(
+    RaySensorRecordData &d,
+    const RS_WorldRaySensorRecordBase::EntityInfo &entity_info
+) {
+    RBigSize rn = d.ray_num;
+    _appendToGroupNd(d.entity_info_group, "entity_gid", entity_info.entity_gid, rn, 1);
+    _appendToGroupNd(
+        d.entity_info_group, "entity_type", reinterpret_cast<RIndex *>(entity_info.entity_type),
+        rn, 1
+    );
+}
+
+void RS_SimulationHDF5Recorder::_writeRaySensorEntityDetailFrame(
+    RaySensorRecordData &d,
+    const RS_WorldRaySensorRecordBase::EntityDetail &entity_detail
+) {
+    RBigSize rn = d.ray_num;
+    _appendToGroupNd(d.entity_detail_group, "body_sid", entity_detail.body_sid, rn, 1);
+    _appendToGroupNd(d.entity_detail_group, "segment_bid", entity_detail.segment_bid, rn, 1);
+    _appendToGroupNd(d.entity_detail_group, "voxel_sid", entity_detail.voxel_sid, rn, 1);
+}
+
+void RS_SimulationHDF5Recorder::_writeRaySensorMaterialFrame(
+    RaySensorRecordData &d,
+    const RS_WorldRaySensorRecordBase::Material &material
+) {
+    RBigSize rn = d.ray_num;
+    _appendToGroupNd(d.material_group, "material_id", material.material_id, rn, 1);
+    _appendToGroupNd(d.material_group, "emission", material.emission, rn, 1);
+}
+
+void RS_SimulationHDF5Recorder::_writeRaySensorNormalFrame(
+    RaySensorRecordData &d,
+    const RS_WorldRaySensorRecordBase::Normal &normal
+) {
+    _appendToGroupNd(d.normal_group, "normal", reinterpret_cast<RFloat *>(normal.normal), d.ray_num, 3);
+}
+
+void RS_SimulationHDF5Recorder::_writeRaySensorVelocityFrame(
+    RaySensorRecordData &d,
+    const RS_WorldRaySensorRecordBase::Velocity &velocity
+) {
+    RBigSize rn = d.ray_num;
+    _appendToGroupNd(d.velocity_group, "v_hit", reinterpret_cast<RFloat *>(velocity.v_hit), rn, 3);
+    _appendToGroupNd(d.velocity_group, "v_rel", reinterpret_cast<RFloat *>(velocity.v_rel), rn, 3);
+    _appendToGroupNd(d.velocity_group, "v_radial", velocity.v_radial, rn, 1);
+}
+
+void RS_SimulationHDF5Recorder::_writeRaySensorStateFrame(
+    RaySensorRecordData &d,
+    const RS_WorldRaySensorRecordBase::State &sensor_state
+) {
+    RFloat position_buf[3] = {
+        sensor_state.position->x, sensor_state.position->y, sensor_state.position->z
+    };
+    _appendToGroupNd(d.sensor_state_group, "position", position_buf, 1, 3);
+    RFloat orientation_buf[4] = {
+        sensor_state.orientation->x,
+        sensor_state.orientation->y,
+        sensor_state.orientation->z,
+        sensor_state.orientation->w
+    };
+    _appendToGroupNd(d.sensor_state_group, "orientation", orientation_buf, 1, 4);
 }
 
 template <typename T>

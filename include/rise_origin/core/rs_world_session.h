@@ -35,6 +35,18 @@ namespace rise {
 RS_MAKE_EXCEPTION(RS_WorldSessionScopeException, RS_InvalidAccessException);
 
 /**
+ * @brief Capability scope for a session handle.
+ * @details OWNED is the default sandbox: read anything, modify only what this handle created. FULL
+ * grants read and write over the whole world, including objects others create at any time.
+ */
+RS_ENUM(
+    RSE_WorldSessionScope,
+    unsigned int,
+    (RSE_WORLD_SESSION_SCOPE_OWNED, 0),
+    (RSE_WORLD_SESSION_SCOPE_FULL, 1)
+)
+
+/**
  * @brief Channel name for a broker message; the empty string is the broadcast channel.
  */
 inline const std::string RS_WORLD_SESSION_BROADCAST{};
@@ -209,13 +221,15 @@ class RS_WorldSessionMessageBroker {
 /**
  * @brief A scoped world handle that limits which objects a component may change.
  * @details It owns the set of object names for this scope, seeded at construction. A component may
- * read any object in the world. It may only modify or delete the objects it owns. Changing anything
- * else throws RS_WorldSessionScopeException.
+ * read any object in the world. Under the OWNED scope it may only modify or delete the objects it
+ * owns; changing anything else throws RS_WorldSessionScopeException. Under the FULL scope it may
+ * modify anything in the world.
  */
 class RS_WorldSessionHandle : public RS_WorldHandle {
    public:
     explicit RS_WorldSessionHandle(
         std::shared_ptr<RS_WorldHandle> raw,
+        RSE_WorldSessionScope scope = RSE_WORLD_SESSION_SCOPE_OWNED,
         std::unordered_set<std::string> owned_resources = {},
         std::unordered_set<std::string> owned_essences = {},
         std::unordered_set<std::string> owned_entities = {},
@@ -225,6 +239,7 @@ class RS_WorldSessionHandle : public RS_WorldHandle {
         std::unordered_set<std::string> owned_controllers = {}
     )
         : _raw(std::move(raw)),
+          _scope(scope),
           _owned_resources(std::move(owned_resources)),
           _owned_essences(std::move(owned_essences)),
           _owned_entities(std::move(owned_entities)),
@@ -232,6 +247,11 @@ class RS_WorldSessionHandle : public RS_WorldHandle {
           _owned_signals(std::move(owned_signals)),
           _owned_recorders(std::move(owned_recorders)),
           _owned_controllers(std::move(owned_controllers)) {}
+
+    /**
+     * @brief This handle's capability scope over the world.
+     */
+    [[nodiscard]] RSE_WorldSessionScope scope() const { return _scope; }
 
     // Identity / state / messages / lifecycle (global reads, forwarded).
     std::string name() override;
@@ -318,6 +338,7 @@ class RS_WorldSessionHandle : public RS_WorldHandle {
     struct HasName<T, std::void_t<decltype(std::declval<const T &>().name)>> : std::true_type {};
 
     std::shared_ptr<RS_WorldHandle> _raw;
+    RSE_WorldSessionScope _scope;
     std::unordered_set<std::string> _owned_resources;
     std::unordered_set<std::string> _owned_essences;
     std::unordered_set<std::string> _owned_entities;
@@ -326,8 +347,7 @@ class RS_WorldSessionHandle : public RS_WorldHandle {
     std::unordered_set<std::string> _owned_recorders;
     std::unordered_set<std::string> _owned_controllers;
 
-    static void
-    _requireOwned(const std::string &name, const std::unordered_set<std::string> &owned);
+    void _checkScope(const std::string &name, const std::unordered_set<std::string> &owned) const;
 
     template <typename Variant>
     static std::string _nameOf(const Variant &variant) {
@@ -446,8 +466,15 @@ class RS_WorldSession {
 
     /**
      * @brief Attach a component under a name, giving it its own scoped access. Called sequentially.
+     * @details The scope decides the component's power over the world. OWNED is the default
+     * sandbox; FULL grants read and write over the whole world. Choosing it here is the permission
+     * decision.
      */
-    void addComponent(const std::string &name, std::shared_ptr<RS_WorldSessionComponent> component);
+    void addComponent(
+        const std::string &name,
+        std::shared_ptr<RS_WorldSessionComponent> component,
+        RSE_WorldSessionScope scope = RSE_WORLD_SESSION_SCOPE_OWNED
+    );
 
     /**
      * @brief Detach and remove the named component; throws RS_NotFoundException if absent.
@@ -485,7 +512,7 @@ class RS_WorldSession {
     std::unordered_map<std::string, std::shared_ptr<RS_WorldSessionComponent>> _components;
     bool _is_detached = false;
 
-    RS_WorldSessionAccess _makeAccess();
+    RS_WorldSessionAccess _makeAccess(RSE_WorldSessionScope scope = RSE_WORLD_SESSION_SCOPE_OWNED);
     std::shared_ptr<RS_WorldSessionComponentGeneric> _makeCoreComponent();
     void _detachComponents();
     void _onCallback(RBigFloat time, std::vector<RS_WorldController> controllers);

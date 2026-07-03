@@ -17,14 +17,17 @@
 #include "rise_origin/device/data/rs_sparse.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/logic/mesh/rs_mesh_triangle_m.h"
+#include "rise_origin/logic/ray/rs_ray_sensor_m.h"
 #include "rise_origin/logic/record/rs_camera_record_m.h"
 #include "rise_origin/logic/record/rs_intersect_region_m.h"
-#include "rise_origin/logic/signal/rs_camera_signal_m.h"
+#include "rise_origin/logic/record/rs_ray_sensor_record_m.h"
 #include "rise_origin/logic/rigid/rs_constraint_m.h"
 #include "rise_origin/logic/rigid/rs_contact_m.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_m.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_m.h"
+#include "rise_origin/logic/signal/rs_camera_signal_m.h"
 #include "rise_origin/logic/signal/rs_force_m.h"
+#include "rise_origin/logic/signal/rs_ray_sensor_signal_m.h"
 #include "rise_origin/logic/signal/rs_torque_m.h"
 #include "rise_origin/logic/signal/rs_transform_m.h"
 #include "rise_origin/logic/soft/rs_link_m.h"
@@ -114,6 +117,21 @@ struct RS_ContextHostData {
 
     RS_PooledLayout vision_material_layout;
 
+    // Ray sensor layouts
+    RS_CompactLayout ray_sensor_layout;
+    RS_CompactLayout ray_sensor_ray_layout;
+    RS_CompactLayout ray_sensor_record_layout;
+    RS_CompactLayout ray_sensor_hit_record_layout;
+    RS_CompactLayout ray_sensor_entity_info_record_layout;
+    RS_CompactLayout ray_sensor_entity_detail_record_layout;
+    RS_CompactLayout ray_sensor_material_record_layout;
+    RS_CompactLayout ray_sensor_normal_record_layout;
+    RS_CompactLayout ray_sensor_velocity_record_layout;
+    RS_CompactLayout ray_sensor_state_record_layout;
+
+    // Ray sensor signal layout
+    RS_PooledLayout ray_sensor_signal_layout;
+
     // Intersect region layout
     RS_CompactLayout intersect_region_record_layout;
 
@@ -150,6 +168,8 @@ struct RS_Context {
 
     using CameraMemType = logic::RS_CameraMem<FloatMemAccuracy_>;
     using VisionMaterialMemType = logic::RS_VisionMaterialMem<FloatMemAccuracy_>;
+
+    using RaySensorMemType = logic::RS_RaySensorMem<FloatMemAccuracy_>;
 
     // Spatial data.
     logic::RS_VoxelBVH static_voxel_bvh;
@@ -209,6 +229,9 @@ struct RS_Context {
     device::RS_Vector<RIndex> structure_voxel_bvh_dynamic_prefix_sums;
     device::RS_Vector<RIndex> structure_voxel_static_flags;
     device::RS_Vector<RIndex> structure_voxel_static_prefix_sums;
+
+    device::RS_Vector<RIndex> structure_rigid_body_dynamic_flags;
+    device::RS_Vector<RIndex> structure_rigid_body_dynamic_prefix_sums;
 
     device::RS_Array<RS_WorldStructureVoxelSignal, 1> structure_signals;
 
@@ -313,6 +336,26 @@ struct RS_Context {
     device::RS_Vector<float> light_weight;
     device::RS_Vector<float> light_cdf;
 
+    // Ray sensor data.
+    device::RS_Vector<RaySensorMemType> ray_sensors;
+    device::RS_Vector<logic::RS_RaySensorRecordMem> ray_sensor_records;
+    device::RS_Vector<device::RS_DoubleBuffer> ray_sensor_recorder_buffers;
+    device::RS_Vector<device::RS_DirectBuffer> ray_sensor_controller_buffers;
+    device::RS_Vector<device::RS_Array<RVec3rf, 1>> ray_sensor_directions;
+    device::RS_Array<logic::RS_RaySensorSignalMem, 1> ray_sensor_signals;
+
+    device::RS_DeviceLayout ray_sensor_layout;
+    device::RS_DeviceLayout ray_sensor_ray_layout;
+    device::RS_DeviceLayout ray_sensor_record_layout;
+    device::RS_DeviceLayout ray_sensor_hit_record_layout;
+    device::RS_DeviceLayout ray_sensor_entity_info_record_layout;
+    device::RS_DeviceLayout ray_sensor_entity_detail_record_layout;
+    device::RS_DeviceLayout ray_sensor_material_record_layout;
+    device::RS_DeviceLayout ray_sensor_normal_record_layout;
+    device::RS_DeviceLayout ray_sensor_velocity_record_layout;
+    device::RS_DeviceLayout ray_sensor_state_record_layout;
+    device::RS_DeviceLayout ray_sensor_signal_layout;
+
     // Intersect region data.
     device::RS_StructOfVectors<logic::RS_IntersectRegionMem> intersect_regions;
     device::RS_Vector<RSize> intersect_region_counts;
@@ -346,7 +389,7 @@ struct RS_Context {
 };
 
 struct RS_AnyContext {
-    char data[16384];
+    char data[20480];
 };
 
 }  // namespace rise
@@ -700,6 +743,36 @@ struct RS_AnyContext {
         VSM_S_2(__VA_ARGS__), \
         VSM_S_1(__VA_ARGS__), \
         VSM_S_0(__VA_ARGS__)  \
+    )
+
+// ray sensor get
+#define RAY_SENSOR_G_0()
+#define RAY_SENSOR_G_1(property) ctx.ray_sensors[ray_sensor].property
+#define RAY_SENSOR_G_2(ray_sensor_idx, property) ctx.ray_sensors[ray_sensor_idx].property
+#define RAY_SENSOR_G_X(x, A, B, FUNC, ...) FUNC
+#define RAY_SENSOR_G(...)            \
+    RAY_SENSOR_G_X(                  \
+        ,                            \
+        ##__VA_ARGS__,               \
+        RAY_SENSOR_G_2(__VA_ARGS__), \
+        RAY_SENSOR_G_1(__VA_ARGS__), \
+        RAY_SENSOR_G_0(__VA_ARGS__)  \
+    )
+
+#define RAY_SENSOR_S_0()
+#define RAY_SENSOR_S_1()
+#define RAY_SENSOR_S_2(property, value) ctx.ray_sensors[ray_sensor].property = value
+#define RAY_SENSOR_S_3(ray_sensor_idx, property, value) \
+    ctx.ray_sensors[ray_sensor_idx].property = value
+#define RAY_SENSOR_S_X(x, A, B, C, FUNC, ...) FUNC
+#define RAY_SENSOR_S(...)            \
+    RAY_SENSOR_S_X(                  \
+        ,                            \
+        ##__VA_ARGS__,               \
+        RAY_SENSOR_S_3(__VA_ARGS__), \
+        RAY_SENSOR_S_2(__VA_ARGS__), \
+        RAY_SENSOR_S_1(__VA_ARGS__), \
+        RAY_SENSOR_S_0(__VA_ARGS__)  \
     )
 
 #define IR_G_0()

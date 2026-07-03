@@ -344,6 +344,21 @@ void RS_SimulationManager::_syncSimRecorders(const std::shared_ptr<RS_Simulation
             )
             .wait();
 
+        auto ray_sensor_records = sim->kernel_manager->getRecorderRaySensorRecords();
+        thread_pool
+            .submitLoop(
+                0,
+                recorders.size(),
+                [&](RIndex i) {
+                    const auto &recorder = recorders[i];
+                    auto it = ray_sensor_records.find(recorder->getName());
+                    if (it == ray_sensor_records.end()) return;
+                    for (auto &&[sensor_name, records] : it->second.ray_sensor_records)
+                        recorder->syncRaySensorRecords(sensor_name, records);
+                }
+            )
+            .wait();
+
         auto intersect_region_records = sim->kernel_manager->getRecorderIntersectRegionRecords();
         thread_pool
             .submitLoop(

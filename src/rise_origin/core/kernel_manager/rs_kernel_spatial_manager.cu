@@ -37,6 +37,18 @@ void RS_KernelSpatialManager::clearVoxelPartitionModified() {
     _is_voxel_partition_modified = false;
 }
 
+void RS_KernelSpatialManager::markRigidBodyPartitionModified() {
+    _is_rigid_body_partition_modified = true;
+}
+
+bool RS_KernelSpatialManager::isRigidBodyPartitionModified() const {
+    return _is_rigid_body_partition_modified;
+}
+
+void RS_KernelSpatialManager::clearRigidBodyPartitionModified() {
+    _is_rigid_body_partition_modified = false;
+}
+
 void RS_KernelSpatialManager::markStaticVoxelMoved() { _is_static_voxel_moved = true; }
 
 bool RS_KernelSpatialManager::isStaticVoxelMoved() const { return _is_static_voxel_moved; }

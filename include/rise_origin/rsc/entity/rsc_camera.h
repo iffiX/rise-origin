@@ -179,9 +179,9 @@ class RSC_CameraPerspectiveBase : public RSC_CameraBase {
     }
 
    protected:
-    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
-    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
 };
 
 /**
@@ -401,9 +401,9 @@ class RSC_CameraStereoBase : public RSC_CameraBase {
     }
 
    protected:
-    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
-    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
 };
 
 /**

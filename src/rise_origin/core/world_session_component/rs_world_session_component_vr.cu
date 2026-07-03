@@ -15,6 +15,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -31,6 +32,7 @@
 #include "rise_origin/core/rs_world_signal.h"
 #include "rise_origin/rsc/controller/rsc_controller.h"
 #include "rise_origin/rsc/entity/rsc_camera.h"
+#include "rise_origin/rsc/entity/rsc_ray_sensor.h"
 #include "rise_origin/rsc/signal/rsc_mechanical.h"
 #include "rise_origin/utils/math/rs_mat.h"
 #include "rise_origin/utils/rs_def.h"
@@ -79,6 +81,9 @@ constexpr float RS_VR_HUD_REFERENCE_HEIGHT = 448.0f;
 // compositor has stalled; the present thread then recovers the session instead of hanging forever.
 constexpr XrDuration RS_VR_SWAPCHAIN_WAIT_TIMEOUT = 1'000'000'000;
 
+// The aim ray atlas is three square cells side by side: beam strip, miss reticle, hit reticle.
+constexpr int32_t RS_VR_RAY_CELL = 64;
+
 /*****************************************************************
  * RS_VRImpl
  *****************************************************************/
@@ -86,14 +91,19 @@ constexpr XrDuration RS_VR_SWAPCHAIN_WAIT_TIMEOUT = 1'000'000'000;
  * @brief OpenXR and Vulkan state for the stereo VR component, hidden behind the component's pimpl.
  * @details A single present thread owns the whole OpenXR lifecycle: it brings up the instance,
  * waits for a headset to connect at any time, runs the frame loop, and recovers to the waiting
- * state on disconnect or loss. The component hands it one converted stereo frame each control step
- * through syncFrame and reads back the latest per-eye pose and frustum through getEyes.
+ * state on disconnect or loss. The component fills the eye staging buffers directly each control
+ * step and commits through commitFrame, and reads back the latest per-eye pose through getEyes.
  */
 class RS_VRImpl {
    public:
     /****************************************************************
      * Types
      ****************************************************************/
+    /**
+     * @brief Which manipulation gesture colors a hand's beam and reticle.
+     */
+    enum class RayMode { NEUTRAL, GRAB, PUSH };
+
     /**
      * @brief One eye's head pose and asymmetric frustum, in rise-origin coordinates.
      */
@@ -142,8 +152,9 @@ class RS_VRImpl {
         RVec3rf position;
         RQuat3rf orientation;
         RVec3rf aim_origin;
-        RVec3rf aim_direction;
+        RQuat3rf aim_orientation;
         RFloat push_amount = 0;
+        bool is_aim_valid = false;
         bool is_grab = false;
         bool is_push = false;
     };
@@ -171,7 +182,13 @@ class RS_VRImpl {
         RFloat turn_speed_degrees,
         RFloat stick_dead_zone,
         RFloat boost,
-        RFloat hud_follow_tau
+        RFloat hud_follow_tau,
+        RFloat ctrl_ray_beam_width = 0.01,
+        RFloat ctrl_ray_beam_length = 0.4,
+        RFloat ctrl_ray_reticle_fraction = 0.03,
+        RFloat ctrl_ray_reticle_min = 0.02,
+        RFloat ctrl_ray_reach = 8.0,
+        RFloat ctrl_marker_size = 0.09
     )
         : _near_depth(near_depth),
           _far_depth(far_depth),
@@ -180,7 +197,13 @@ class RS_VRImpl {
           _turn_speed(turn_speed_degrees * RFloat(RS_PI) / RFloat(180.0)),
           _stick_dead_zone(stick_dead_zone),
           _boost(boost),
-          _hud_follow_tau(hud_follow_tau) {
+          _hud_follow_tau(hud_follow_tau),
+          _ctrl_ray_beam_width(ctrl_ray_beam_width),
+          _ctrl_ray_beam_length(ctrl_ray_beam_length),
+          _ctrl_ray_reticle_fraction(ctrl_ray_reticle_fraction),
+          _ctrl_ray_reticle_min(ctrl_ray_reticle_min),
+          _ctrl_ray_reach(ctrl_ray_reach),
+          _ctrl_marker_size(ctrl_marker_size) {
         if (logging::get("root")) _logger = logging::get("root")->clone("vr service");
         _basis = _makeBasisChange();
         _is_alive = true;
@@ -197,8 +220,9 @@ class RS_VRImpl {
 
     /**
      * @brief Prompt the present thread to stop so a caller can join it promptly.
-     * @details xrRequestExitSession unblocks a present thread parked in xrWaitFrame so the loop sees
-     * the cleared alive flag and returns before the runtime library is torn down at process exit.
+     * @details xrRequestExitSession unblocks a present thread parked in xrWaitFrame so the loop
+     * sees the cleared alive flag and returns before the runtime library is torn down at process
+     * exit.
      */
     void stop() {
         _is_alive = false;
@@ -227,15 +251,51 @@ class RS_VRImpl {
      * Frame
      ****************************************************************/
     /**
-     * @brief Publish one stereo frame to the present thread and return at once.
-     * @details The buffers stay owned by the component; the present thread reads them on its own
-     * cycle, so the component must check isFrameSynced before overwriting them.
+     * @brief The mapped color staging buffer for one eye, valid only while a staging write is held.
      */
-    void syncFrame(
-        std::shared_ptr<const RColor4b[]> left_rgba,
-        std::shared_ptr<const RColor4b[]> right_rgba,
-        std::shared_ptr<const float[]> left_depth,
-        std::shared_ptr<const float[]> right_depth,
+    [[nodiscard]] RColor4b* getColorStagingBuffer(uint32_t eye) {
+        return static_cast<RColor4b*>(_eye_upload[eye].color_mapped);
+    }
+
+    /**
+     * @brief The mapped depth staging buffer for one eye, or null when the runtime lacks depth.
+     */
+    [[nodiscard]] float* getDepthStagingBuffer(uint32_t eye) {
+        return _has_depth_extension ? static_cast<float*>(_eye_upload[eye].depth_mapped) : nullptr;
+    }
+
+    /**
+     * @brief Claim the staging buffers for a direct component write, non-blocking.
+     * @details Succeeds only when the staging is alive, the present thread has consumed the last
+     * frame, and both eye copies have finished, so the component never overwrites a buffer the GPU
+     * still reads. A held claim keeps the present thread from freeing the staging on a disconnect.
+     * @return False when the staging is unavailable this step, so the caller skips the frame.
+     */
+    [[nodiscard]] bool beginStagingWrite() {
+        std::scoped_lock lock(_staging_mutex);
+        if (!_is_staging_alive || _has_pending.load(std::memory_order_acquire)) return false;
+        for (uint32_t eye = 0; eye < 2; ++eye) {
+            if (vkGetFenceStatus(_vk_device, _eye_upload[eye].fence) != VK_SUCCESS) return false;
+        }
+        _is_staging_borrowed = true;
+        return true;
+    }
+
+    /**
+     * @brief Release the staging claim so a pending teardown can proceed.
+     */
+    void endStagingWrite() {
+        {
+            std::scoped_lock lock(_staging_mutex);
+            _is_staging_borrowed = false;
+        }
+        _staging_cv.notify_all();
+    }
+
+    /**
+     * @brief Commit the staged stereo frame to the present thread and return at once.
+     */
+    void commitFrame(
         const FramePose& left_frame_pose,
         const FramePose& right_frame_pose,
         RSize width,
@@ -243,22 +303,10 @@ class RS_VRImpl {
     ) {
         if (width != _eye_width || height != _eye_height) return;
         std::scoped_lock lock(_frame_mutex);
-        _pending_rgba[0] = std::move(left_rgba);
-        _pending_rgba[1] = std::move(right_rgba);
-        _pending_depth[0] = std::move(left_depth);
-        _pending_depth[1] = std::move(right_depth);
         _pending_frame_pose[0] = left_frame_pose;
         _pending_frame_pose[1] = right_frame_pose;
         _has_frame_pose = true;
         _has_pending.store(true, std::memory_order_release);
-    }
-
-    /**
-     * @brief Whether the present thread has taken the last published frame, so its buffers are
-     * free.
-     */
-    [[nodiscard]] bool isFrameSynced() const {
-        return !_has_pending.load(std::memory_order_acquire);
     }
 
     /**
@@ -298,6 +346,20 @@ class RS_VRImpl {
         _hud_info = info;
     }
 
+    /**
+     * @brief Set one hand's aim ray for the present thread to draw.
+     * @details The present thread builds the beam from that live hand each frame; only the reach
+     * and the hit state come from the component, so the beam origin never lags the hand.
+     */
+    void setRay(bool is_left_hand, bool is_active, RFloat length, bool is_hit, RayMode mode) {
+        uint32_t hand = is_left_hand ? 0 : 1;
+        std::scoped_lock lock(_ctrl_ray_mutex);
+        _is_ctrl_ray_active[hand] = is_active;
+        _ctrl_ray_length[hand] = length;
+        _is_ctrl_ray_hit[hand] = is_hit;
+        _ctrl_ray_mode[hand] = mode;
+    }
+
    private:
     /****************************************************************
      * Types
@@ -329,6 +391,14 @@ class RS_VRImpl {
     RFloat _boost;
     // Seconds for the body-locked HUD to catch up to the head heading.
     RFloat _hud_follow_tau;
+    // Controller tuning: beam width, reticle half-size as a fraction of the reach with a floor, the
+    // beam reach on a miss, and the controller marker diameter, all in meters.
+    RFloat _ctrl_ray_beam_width;
+    RFloat _ctrl_ray_beam_length;
+    RFloat _ctrl_ray_reticle_fraction;
+    RFloat _ctrl_ray_reticle_min;
+    RFloat _ctrl_ray_reach;
+    RFloat _ctrl_marker_size;
     // Logging.
     std::shared_ptr<logging::logger> _logger;
 
@@ -410,14 +480,36 @@ class RS_VRImpl {
     HudInfo _hud_info;
 
     /**** Frame handoff ****/
-    // Frame hand-off from the component to the present thread. The buffers are guarded by the
-    // mutex; the pending flag is atomic so the component can poll isFrameSynced without locking.
+    // Frame pose hand-off to the present thread; the pending flag is atomic for a lock-free poll.
     std::mutex _frame_mutex;
-    std::shared_ptr<const RColor4b[]> _pending_rgba[2];
-    std::shared_ptr<const float[]> _pending_depth[2];
     FramePose _pending_frame_pose[2];
     bool _has_frame_pose = false;
     std::atomic<bool> _has_pending{false};
+
+    /**** Staging borrow ****/
+    // Guards the component's direct staging fill against the present thread freeing it on
+    // disconnect.
+    std::mutex _staging_mutex;
+    std::condition_variable _staging_cv;
+    bool _is_staging_borrowed = false;
+    bool _is_staging_alive = false;
+
+    /**** Controller ****/
+    // Per-hand aim ray drawn as re-posed quad layers; reach and hit from setRay, aim and grip from
+    // the live physical hand captured in _syncInput.
+    std::mutex _ctrl_ray_mutex;
+    bool _is_ctrl_ray_active[2] = {false, false};
+    bool _is_ctrl_ray_hit[2] = {false, false};
+    bool _has_ctrl_ray_aim[2] = {false, false};
+    bool _is_ctrl_ray_ready = false;
+    bool _has_ctrl_grip_room[2] = {false, false};
+    RFloat _ctrl_ray_length[2] = {0, 0};
+    RVec3rf _ctrl_ray_origin_room[2];
+    RVec3rf _ctrl_ray_dir_room[2];
+    RVec3rf _ctrl_grip_origin_room[2];
+    RayMode _ctrl_ray_mode[2] = {RayMode::NEUTRAL, RayMode::NEUTRAL};
+    XrSwapchain _ctrl_xr_ray_swapchain = XR_NULL_HANDLE;
+    std::vector<XrSwapchainImageVulkanKHR> _ctrl_ray_images;
 
     /**** Eyes ****/
     // Latest located eyes from the present thread to the component, guarded.
@@ -496,7 +588,8 @@ class RS_VRImpl {
      ****************************************************************/
     bool _makeInstance() {
         uint32_t extension_count = 0;
-        if (XR_FAILED(xrEnumerateInstanceExtensionProperties(nullptr, 0, &extension_count, nullptr)
+        if (XR_FAILED(
+                xrEnumerateInstanceExtensionProperties(nullptr, 0, &extension_count, nullptr)
             )) {
             return false;
         }
@@ -638,7 +731,8 @@ class RS_VRImpl {
         );
         RS_VK_CHECK(vk_result);
 
-        XrVulkanGraphicsDeviceGetInfoKHR device_get_info{XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR
+        XrVulkanGraphicsDeviceGetInfoKHR device_get_info{
+            XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR
         };
         device_get_info.systemId = _xr_system;
         device_get_info.vulkanInstance = _vk_instance;
@@ -661,7 +755,8 @@ class RS_VRImpl {
         xr_device_info.pfnGetInstanceProcAddr = &vkGetInstanceProcAddr;
         xr_device_info.vulkanPhysicalDevice = _vk_physical_device;
         xr_device_info.vulkanCreateInfo = &vk_device_info;
-        RS_XR_CHECK(_xr_create_vulkan_device(_xr_instance, &xr_device_info, &_vk_device, &vk_result)
+        RS_XR_CHECK(
+            _xr_create_vulkan_device(_xr_instance, &xr_device_info, &_vk_device, &vk_result)
         );
         RS_VK_CHECK(vk_result);
 
@@ -742,6 +837,13 @@ class RS_VRImpl {
         view_space_info.poseInReferenceSpace.orientation.w = 1.0f;
         RS_XR_CHECK(xrCreateReferenceSpace(_xr_session, &view_space_info, &_xr_view_space));
         _initHud();
+        _initController();
+
+        // The staging buffers now exist; let the component fill them directly until teardown.
+        {
+            std::scoped_lock lock(_staging_mutex);
+            _is_staging_alive = true;
+        }
     }
 
     XrSwapchain _makeSwapchain(
@@ -839,6 +941,13 @@ class RS_VRImpl {
     }
 
     void _freeSession() {
+        // Mark the staging dead and wait out any in-flight component fill before destroying the
+        // buffers, so a raw staging pointer the component holds never dangles.
+        {
+            std::unique_lock lock(_staging_mutex);
+            _is_staging_alive = false;
+            _staging_cv.wait(lock, [this] { return !_is_staging_borrowed; });
+        }
         if (_vk_device != VK_NULL_HANDLE) vkDeviceWaitIdle(_vk_device);
 
         if (_is_hud_ready) {
@@ -880,6 +989,12 @@ class RS_VRImpl {
             _xr_hud_swapchain = XR_NULL_HANDLE;
         }
         _hud_images.clear();
+        if (_ctrl_xr_ray_swapchain != XR_NULL_HANDLE) {
+            xrDestroySwapchain(_ctrl_xr_ray_swapchain);
+            _ctrl_xr_ray_swapchain = XR_NULL_HANDLE;
+        }
+        _ctrl_ray_images.clear();
+        _is_ctrl_ray_ready = false;
         if (_xr_view_space != XR_NULL_HANDLE) {
             xrDestroySpace(_xr_view_space);
             _xr_view_space = XR_NULL_HANDLE;
@@ -1009,18 +1124,12 @@ class RS_VRImpl {
 
         _syncInput(frame_state.predictedDisplayTime);
 
-        std::shared_ptr<const RColor4b[]> rgba[2];
-        std::shared_ptr<const float[]> depth[2];
         FramePose frame_pose[2];
         bool has_frame_pose = false;
         bool is_new_content = false;
         {
             std::scoped_lock lock(_frame_mutex);
-            for (uint32_t eye = 0; eye < 2; ++eye) {
-                rgba[eye] = _pending_rgba[eye];
-                depth[eye] = _pending_depth[eye];
-                frame_pose[eye] = _pending_frame_pose[eye];
-            }
+            for (uint32_t eye = 0; eye < 2; ++eye) frame_pose[eye] = _pending_frame_pose[eye];
             has_frame_pose = _has_frame_pose;
             is_new_content = _has_pending.load(std::memory_order_acquire);
         }
@@ -1032,8 +1141,6 @@ class RS_VRImpl {
         if (frame_state.shouldRender == XR_TRUE) {
             has_views = _getViews(
                 frame_state.predictedDisplayTime,
-                rgba,
-                depth,
                 frame_pose,
                 has_frame_pose,
                 is_new_content,
@@ -1043,8 +1150,8 @@ class RS_VRImpl {
             );
         }
 
-        // Once the pixels are copied into staging, release the pending frame so the component can
-        // refill its buffers; only when this frame actually consumed new content.
+        // Once the component-filled staging is copied into the swapchain, release the pending frame
+        // so the component can refill it; only when this frame actually consumed new content.
         if (is_new_content && frame_state.shouldRender == XR_TRUE) {
             _has_pending.store(false, std::memory_order_release);
         }
@@ -1052,7 +1159,7 @@ class RS_VRImpl {
         XrFrameEndInfo end_info{XR_TYPE_FRAME_END_INFO};
         end_info.displayTime = frame_state.predictedDisplayTime;
         end_info.environmentBlendMode = XR_ENVIRONMENT_BLEND_MODE_OPAQUE;
-        const XrCompositionLayerBaseHeader* layers[2];
+        const XrCompositionLayerBaseHeader* layers[8];
         uint32_t layer_count = 0;
         if (has_views) {
             layers[layer_count++] =
@@ -1089,6 +1196,30 @@ class RS_VRImpl {
             layers[layer_count++] =
                 reinterpret_cast<const XrCompositionLayerBaseHeader*>(&hud_quad);
         }
+        // Each hand's aim ray composites as a beam plus a reticle quad, re-posed every present
+        // frame from the live physical hand, so a beam tracks its controller between the slower
+        // world frames. Declared before the branch so they outlive it through xrEndFrame.
+        // Each hand contributes a beam, a reticle, and a controller marker ball.
+        XrCompositionLayerQuad ray_quads[4];
+        XrCompositionLayerQuad marker_quads[2];
+        for (XrCompositionLayerQuad& quad : ray_quads) quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+        for (XrCompositionLayerQuad& quad : marker_quads) quad = {XR_TYPE_COMPOSITION_LAYER_QUAD};
+        if (_is_ctrl_ray_ready && has_head) {
+            for (uint32_t hand = 0; hand < 2; ++hand) {
+                XrCompositionLayerQuad& beam = ray_quads[hand * 2];
+                XrCompositionLayerQuad& reticle = ray_quads[hand * 2 + 1];
+                if (_getControllerRayQuads(hand, head.pose, beam, reticle)) {
+                    layers[layer_count++] =
+                        reinterpret_cast<const XrCompositionLayerBaseHeader*>(&beam);
+                    layers[layer_count++] =
+                        reinterpret_cast<const XrCompositionLayerBaseHeader*>(&reticle);
+                }
+                if (_getControllerMarkerQuad(hand, head.pose, marker_quads[hand])) {
+                    layers[layer_count++] =
+                        reinterpret_cast<const XrCompositionLayerBaseHeader*>(&marker_quads[hand]);
+                }
+            }
+        }
         end_info.layerCount = layer_count;
         end_info.layers = layer_count > 0 ? layers : nullptr;
         RS_XR_CHECK(xrEndFrame(_xr_session, &end_info));
@@ -1096,8 +1227,6 @@ class RS_VRImpl {
 
     bool _getViews(
         XrTime display_time,
-        const std::shared_ptr<const RColor4b[]>* rgba,
-        const std::shared_ptr<const float[]>* depth,
         const FramePose* frame_pose,
         bool has_frame_pose,
         bool is_new_content,
@@ -1119,7 +1248,7 @@ class RS_VRImpl {
         if (is_pose_valid) {
             std::scoped_lock lock(_eye_mutex);
             for (uint32_t eye = 0; eye < 2; ++eye) {
-                _eyes[eye].position = _getRisePosition(views[eye].pose.position);
+                _eyes[eye].position = _getRiseVector(views[eye].pose.position);
                 _eyes[eye].orientation = _getRiseOrientation(views[eye].pose.orientation);
                 _eyes[eye].angle_left = views[eye].fov.angleLeft;
                 _eyes[eye].angle_right = views[eye].fov.angleRight;
@@ -1135,7 +1264,7 @@ class RS_VRImpl {
         // copy every tick, which is both cheaper and steadier.
         if (is_new_content) _has_image = true;
         for (uint32_t eye = 0; eye < 2; ++eye) {
-            if (is_new_content) _uploadEye(eye, rgba[eye].get(), depth[eye].get());
+            if (is_new_content) _uploadEye(eye);
 
             projection_views[eye] = {XR_TYPE_COMPOSITION_LAYER_PROJECTION_VIEW};
             // Label the layer with the pose this eye's pixels were actually rendered from,
@@ -1186,11 +1315,13 @@ class RS_VRImpl {
         RS_XR_CHECK(result);
     }
 
-    void _uploadEye(uint32_t eye, const RColor4b* color, const float* depth) {
+    // Upload one eye's already-filled staging buffer to the swapchain; the component wrote the
+    // staging directly, so this only issues the GPU copy.
+    void _uploadEye(uint32_t eye) {
         EyeUpload& upload = _eye_upload[eye];
 
-        // Wait on the previous frame's copy before refilling the staging buffers; it finished long
-        // ago at frame rate, so this does not stall the present thread inside the frame.
+        // Wait on the previous frame's copy; it finished long ago at frame rate, so this does not
+        // stall the present thread inside the frame.
         vkWaitForFences(_vk_device, 1, &upload.fence, VK_TRUE, UINT64_MAX);
 
         uint32_t color_index = 0;
@@ -1205,12 +1336,6 @@ class RS_VRImpl {
                 xrAcquireSwapchainImage(_xr_depth_swapchain[eye], &depth_acquire, &depth_index)
             );
             _waitSwapchainImage(_xr_depth_swapchain[eye]);
-        }
-
-        const RBigSize pixel_num = static_cast<RBigSize>(_eye_width) * _eye_height;
-        if (color) std::memcpy(upload.color_mapped, color, pixel_num * sizeof(RColor4b));
-        if (_has_depth_extension && depth) {
-            std::memcpy(upload.depth_mapped, depth, pixel_num * sizeof(float));
         }
 
         _submitUpload(eye, color_index, depth_index);
@@ -1236,7 +1361,9 @@ class RS_VRImpl {
             upload.color_staging,
             _color_images[eye][color_index].image,
             VK_IMAGE_ASPECT_COLOR_BIT,
-            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            static_cast<uint32_t>(_eye_width),
+            static_cast<uint32_t>(_eye_height)
         );
         if (_has_depth_extension) {
             _copyBufferToImage(
@@ -1244,7 +1371,9 @@ class RS_VRImpl {
                 upload.depth_staging,
                 _depth_images[eye][depth_index].image,
                 VK_IMAGE_ASPECT_DEPTH_BIT,
-                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+                VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                static_cast<uint32_t>(_eye_width),
+                static_cast<uint32_t>(_eye_height)
             );
         }
 
@@ -1265,7 +1394,9 @@ class RS_VRImpl {
         VkBuffer buffer,
         VkImage image,
         VkImageAspectFlags aspect,
-        VkImageLayout final_layout
+        VkImageLayout final_layout,
+        uint32_t width,
+        uint32_t height
     ) {
         VkImageMemoryBarrier to_transfer{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
         to_transfer.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -1295,9 +1426,7 @@ class RS_VRImpl {
         region.bufferImageHeight = 0;
         region.imageSubresource = {aspect, 0, 0, 1};
         region.imageOffset = {0, 0, 0};
-        region.imageExtent = {
-            static_cast<uint32_t>(_eye_width), static_cast<uint32_t>(_eye_height), 1
-        };
+        region.imageExtent = {width, height, 1};
         vkCmdCopyBufferToImage(
             command_buffer, buffer, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region
         );
@@ -1325,7 +1454,8 @@ class RS_VRImpl {
         );
     }
 
-    // Release any pending frame so the component sees isFrameSynced again after a session drop.
+    // Release any pending frame so the component's staging claim succeeds again after a session
+    // drop.
     void _drainPending() { _has_pending.store(false, std::memory_order_release); }
 
     /****************************************************************
@@ -1539,16 +1669,29 @@ class RS_VRImpl {
                     intent.position = _getPlayPosition(grip_position);
                     intent.orientation = _getPlayOrientation(grip_orientation);
                 }
+                intent.is_aim_valid = has_aim;
                 if (has_aim) {
                     intent.aim_origin = _getPlayPosition(aim_origin);
-                    intent.aim_direction = _getPlayOrientation(aim_orientation).toOrthoAxisX();
+                    intent.aim_orientation = _getPlayOrientation(aim_orientation);
                 }
             }
             intent.push_amount = _getFloatAction(_xr_push, hand);
             intent.is_push = intent.push_amount > RFloat(0.1);
             intent.is_grab = _getFloatAction(_xr_grab, hand) > RFloat(0.5);
-            std::scoped_lock lock(_intent_mutex);
-            _intents[hand] = intent;
+            {
+                std::scoped_lock lock(_intent_mutex);
+                _intents[hand] = intent;
+            }
+
+            // Keep the raw physical aim and grip so the ray and marker quads track each controller
+            // live; the grip drives the marker even when the aim pose is not tracked.
+            _has_ctrl_ray_aim[hand] = has_aim;
+            if (has_aim) {
+                _ctrl_ray_origin_room[hand] = aim_origin;
+                _ctrl_ray_dir_room[hand] = aim_orientation.toOrthoAxisX();
+            }
+            _has_ctrl_grip_room[hand] = has_grip;
+            if (has_grip) _ctrl_grip_origin_room[hand] = grip_position;
         }
     }
 
@@ -1561,11 +1704,12 @@ class RS_VRImpl {
         if (space == XR_NULL_HANDLE) return false;
         XrSpaceLocation location{XR_TYPE_SPACE_LOCATION};
         if (XR_FAILED(xrLocateSpace(space, _xr_space, display_time, &location))) return false;
-        if (!(location.locationFlags & XR_SPACE_LOCATION_POSITION_VALID_BIT) ||
-            !(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_VALID_BIT)) {
+        // Only output position and return true if actively tracked, not merely valid.
+        if (!(location.locationFlags & XR_SPACE_LOCATION_POSITION_TRACKED_BIT) ||
+            !(location.locationFlags & XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT)) {
             return false;
         }
-        position_out = _getRisePosition(location.pose.position);
+        position_out = _getRiseVector(location.pose.position);
         orientation_out = _getRiseOrientation(location.pose.orientation);
         return true;
     }
@@ -1998,6 +2142,301 @@ class RS_VRImpl {
     }
 
     /****************************************************************
+     * Controller
+     ****************************************************************/
+    // Create the controller texture atlas once per session and fill its beam, reticle, and marker
+    // cells.
+    void _initController() {
+        const uint32_t width = 8 * RS_VR_RAY_CELL;
+        const uint32_t height = RS_VR_RAY_CELL;
+
+        XrSwapchainCreateInfo info{XR_TYPE_SWAPCHAIN_CREATE_INFO};
+        info.usageFlags = XR_SWAPCHAIN_USAGE_COLOR_ATTACHMENT_BIT |
+                          XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+        info.format = static_cast<int64_t>(_color_format);
+        info.sampleCount = 1;
+        info.width = width;
+        info.height = height;
+        info.faceCount = 1;
+        info.arraySize = 1;
+        info.mipCount = 1;
+        RS_XR_CHECK(xrCreateSwapchain(_xr_session, &info, &_ctrl_xr_ray_swapchain));
+        uint32_t image_count = 0;
+        RS_XR_CHECK(xrEnumerateSwapchainImages(_ctrl_xr_ray_swapchain, 0, &image_count, nullptr));
+        _ctrl_ray_images.assign(image_count, {XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR});
+        RS_XR_CHECK(xrEnumerateSwapchainImages(
+            _ctrl_xr_ray_swapchain,
+            image_count,
+            &image_count,
+            reinterpret_cast<XrSwapchainImageBaseHeader*>(_ctrl_ray_images.data())
+        ));
+
+        // Draw the atlas into a host buffer, then copy it into an acquired swapchain image once;
+        // the released image stays referenced by the quad layers every frame afterward.
+        VkBuffer staging = VK_NULL_HANDLE;
+        VkDeviceMemory staging_memory = VK_NULL_HANDLE;
+        void* mapped = nullptr;
+        _makeStagingBuffer(
+            static_cast<VkDeviceSize>(width) * height * 4, staging, staging_memory, mapped
+        );
+        _drawControllerRayAtlas(static_cast<RColor4b*>(mapped), width, height);
+
+        uint32_t index = 0;
+        XrSwapchainImageAcquireInfo acquire{XR_TYPE_SWAPCHAIN_IMAGE_ACQUIRE_INFO};
+        RS_XR_CHECK(xrAcquireSwapchainImage(_ctrl_xr_ray_swapchain, &acquire, &index));
+        _waitSwapchainImage(_ctrl_xr_ray_swapchain);
+
+        VkCommandBufferAllocateInfo alloc{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        alloc.commandPool = _command_pool;
+        alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        alloc.commandBufferCount = 1;
+        VkCommandBuffer command_buffer = VK_NULL_HANDLE;
+        RS_VK_CHECK(vkAllocateCommandBuffers(_vk_device, &alloc, &command_buffer));
+        VkFenceCreateInfo fence_info{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        VkFence fence = VK_NULL_HANDLE;
+        RS_VK_CHECK(vkCreateFence(_vk_device, &fence_info, nullptr, &fence));
+
+        VkCommandBufferBeginInfo begin{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        RS_VK_CHECK(vkBeginCommandBuffer(command_buffer, &begin));
+        _copyBufferToImage(
+            command_buffer,
+            staging,
+            _ctrl_ray_images[index].image,
+            VK_IMAGE_ASPECT_COLOR_BIT,
+            VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            width,
+            height
+        );
+        RS_VK_CHECK(vkEndCommandBuffer(command_buffer));
+        VkSubmitInfo submit{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &command_buffer;
+        RS_VK_CHECK(vkQueueSubmit(_vk_queue, 1, &submit, fence));
+        vkWaitForFences(_vk_device, 1, &fence, VK_TRUE, UINT64_MAX);
+
+        XrSwapchainImageReleaseInfo release{XR_TYPE_SWAPCHAIN_IMAGE_RELEASE_INFO};
+        RS_XR_CHECK(xrReleaseSwapchainImage(_ctrl_xr_ray_swapchain, &release));
+
+        vkDestroyFence(_vk_device, fence, nullptr);
+        vkFreeCommandBuffers(_vk_device, _command_pool, 1, &command_buffer);
+        vkDestroyBuffer(_vk_device, staging, nullptr);
+        vkFreeMemory(_vk_device, staging_memory, nullptr);
+        _is_ctrl_ray_ready = true;
+    }
+
+    // Fill the atlas: a beam strip and reticle per mode color plus a white controller marker. The
+    // beam cells are neutral, grab, push; the reticle cells are neutral-miss, neutral-hit, grab,
+    // push. The beam width maps across the cell, so the soft edge lives along the cell's columns.
+    void _drawControllerRayAtlas(RColor4b* pixel, uint32_t width, uint32_t height) {
+        for (uint32_t i = 0; i < width * height; ++i) pixel[i] = RColor4b{0, 0, 0, 0};
+        const RColor4b cyan{64, 220, 255, 255};
+        const RColor4b amber{255, 170, 40, 255};
+        const RColor4b green{60, 230, 90, 255};
+        const RColor4b red{240, 70, 60, 255};
+        _drawControllerRayBeam(pixel, width, 0 * RS_VR_RAY_CELL, cyan);
+        _drawControllerRayBeam(pixel, width, 1 * RS_VR_RAY_CELL, green);
+        _drawControllerRayBeam(pixel, width, 2 * RS_VR_RAY_CELL, red);
+        _drawControllerRayReticle(pixel, width, 3 * RS_VR_RAY_CELL, cyan);
+        _drawControllerRayReticle(pixel, width, 4 * RS_VR_RAY_CELL, amber);
+        _drawControllerRayReticle(pixel, width, 5 * RS_VR_RAY_CELL, green);
+        _drawControllerRayReticle(pixel, width, 6 * RS_VR_RAY_CELL, red);
+        _drawControllerMarker(pixel, width, 7 * RS_VR_RAY_CELL);
+    }
+
+    // Draw a soft-edged beam strip into one atlas cell at the given column offset.
+    static void _drawControllerRayBeam(RColor4b* pixel, uint32_t width, int32_t offset, RColor4b color) {
+        const float center = (RS_VR_RAY_CELL - 1) * 0.5f;
+        for (int32_t y = 0; y < RS_VR_RAY_CELL; ++y) {
+            for (int32_t x = 0; x < RS_VR_RAY_CELL; ++x) {
+                float across = 1.0f - std::fabs((x - center) / center);
+                color.a = static_cast<RByte>(RS_MIN(across * 2.5f, 1.0f) * 240.0f);
+                pixel[y * width + offset + x] = color;
+            }
+        }
+    }
+
+    // Draw a ring plus a center dot into one atlas cell at the given column offset.
+    static void _drawControllerRayReticle(RColor4b* pixel, uint32_t width, int32_t offset, RColor4b color) {
+        const float center = (RS_VR_RAY_CELL - 1) * 0.5f;
+        for (int32_t y = 0; y < RS_VR_RAY_CELL; ++y) {
+            for (int32_t x = 0; x < RS_VR_RAY_CELL; ++x) {
+                float dx = x - center;
+                float dy = y - center;
+                float radius = std::sqrt(dx * dx + dy * dy);
+                bool is_ring = radius >= 22.0f && radius <= 28.0f;
+                bool is_dot = radius <= 4.0f;
+                if (is_ring || is_dot) pixel[y * width + offset + x] = color;
+            }
+        }
+    }
+
+    // Draw the controller marker: a bright white boundary ring around a faint translucent fill, so
+    // the billboard reads as a see-through ball at the controller.
+    static void _drawControllerMarker(RColor4b* pixel, uint32_t width, int32_t offset) {
+        const float center = (RS_VR_RAY_CELL - 1) * 0.5f;
+        for (int32_t y = 0; y < RS_VR_RAY_CELL; ++y) {
+            for (int32_t x = 0; x < RS_VR_RAY_CELL; ++x) {
+                float dx = x - center;
+                float dy = y - center;
+                float radius = std::sqrt(dx * dx + dy * dy);
+                if (radius > 30.0f) continue;
+                RByte alpha = radius >= 25.0f ? 255 : 45;
+                pixel[y * width + offset + x] = RColor4b{255, 255, 255, alpha};
+            }
+        }
+    }
+
+    // Build the beam and reticle quads for one hand from its live physical aim, or return false.
+    bool _getControllerRayQuads(
+        uint32_t hand,
+        const XrPosef& head_pose,
+        XrCompositionLayerQuad& beam,
+        XrCompositionLayerQuad& reticle
+    ) {
+        bool is_active;
+        RFloat length;
+        bool is_hit;
+        RayMode mode;
+        {
+            std::scoped_lock lock(_ctrl_ray_mutex);
+            is_active = _is_ctrl_ray_active[hand];
+            length = _ctrl_ray_length[hand];
+            is_hit = _is_ctrl_ray_hit[hand];
+            mode = _ctrl_ray_mode[hand];
+        }
+        // Beam and reticle color by gesture: neutral cyan, grab green, push red.
+        int beam_cell = mode == RayMode::GRAB ? 1 : mode == RayMode::PUSH ? 2 : 0;
+        int reticle_cell = mode == RayMode::GRAB   ? 5
+                           : mode == RayMode::PUSH ? 6
+                           : is_hit                ? 4
+                                                   : 3;
+        if (!is_active || !_has_ctrl_ray_aim[hand] || length <= RFloat(0)) return false;
+        RVec3rf direction = _ctrl_ray_dir_room[hand];
+        if (direction.length() < RFloat(RS_EPS)) return false;
+        direction = direction.normalized();
+
+        // The beam is a short stub from the controller, clipped to a near target; the reticle marks
+        // the target at the hit distance, or a modest reach when nothing is hit.
+        RFloat reticle_distance = is_hit ? length : RS_MIN(length, _ctrl_ray_reach);
+        RFloat beam_length = RS_MIN(length, _ctrl_ray_beam_length);
+        RVec3rf start = _ctrl_ray_origin_room[hand];
+        RVec3rf beam_mid = start + direction * (beam_length * RFloat(0.5));
+        RVec3rf reticle_pos = start + direction * reticle_distance;
+        RVec3rf head_position = _getRiseVector(head_pose.position);
+
+        // Beam billboard: the long axis runs along the ray, the face turns toward the head.
+        RVec3rf beam_right = direction.cross(head_position - beam_mid);
+        if (beam_right.length() < RFloat(RS_EPS)) return false;
+        beam_right = beam_right.normalized();
+        RVec3rf beam_normal = beam_right.cross(direction).normalized();
+        beam = _makeControllerRayQuad(
+            beam_mid,
+            _getControllerBasisOrientation(beam_right, direction, beam_normal),
+            _ctrl_ray_beam_width,
+            beam_length,
+            beam_cell
+        );
+
+        // Reticle: a small square at the target facing the head, sized by distance to hold a steady
+        // angular size, in the hit cell when the ray lands on a structure.
+        RVec3rf reticle_normal = head_position - reticle_pos;
+        if (reticle_normal.length() < RFloat(RS_EPS)) reticle_normal = direction * RFloat(-1);
+        reticle_normal = reticle_normal.normalized();
+        RVec3rf reticle_right = RVec3rf(0, 0, 1).cross(reticle_normal);
+        if (reticle_right.length() < RFloat(RS_EPS)) reticle_right = beam_right;
+        reticle_right = reticle_right.normalized();
+        RVec3rf reticle_up = reticle_normal.cross(reticle_right).normalized();
+        RFloat size = RS_MAX(reticle_distance * _ctrl_ray_reticle_fraction, _ctrl_ray_reticle_min);
+        reticle = _makeControllerRayQuad(
+            reticle_pos,
+            _getControllerBasisOrientation(reticle_right, reticle_up, reticle_normal),
+            size,
+            size,
+            reticle_cell
+        );
+        return true;
+    }
+
+    // Build the marker quad for one hand at its live physical grip, a ball facing the head, or
+    // return false when the grip is not tracked.
+    bool _getControllerMarkerQuad(uint32_t hand, const XrPosef& head_pose, XrCompositionLayerQuad& quad) {
+        if (!_has_ctrl_grip_room[hand]) return false;
+        RVec3rf position = _ctrl_grip_origin_room[hand];
+        RVec3rf normal = _getRiseVector(head_pose.position) - position;
+        if (normal.length() < RFloat(RS_EPS)) return false;
+        normal = normal.normalized();
+        RVec3rf right = RVec3rf(0, 0, 1).cross(normal);
+        if (right.length() < RFloat(RS_EPS)) right = RVec3rf(1, 0, 0);
+        right = right.normalized();
+        RVec3rf up = normal.cross(right).normalized();
+        quad = _makeControllerRayQuad(
+            position,
+            _getControllerBasisOrientation(right, up, normal),
+            _ctrl_marker_size,
+            _ctrl_marker_size,
+            7
+        );
+        return true;
+    }
+
+    // Assemble one world-locked quad layer sampling the given atlas cell.
+    XrCompositionLayerQuad _makeControllerRayQuad(
+        const RVec3rf& position,
+        const RQuat3rf& orientation,
+        RFloat width,
+        RFloat height,
+        int cell
+    ) {
+        XrCompositionLayerQuad quad{XR_TYPE_COMPOSITION_LAYER_QUAD};
+        quad.layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT |
+                          XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
+        quad.space = _xr_space;
+        quad.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        quad.subImage.swapchain = _ctrl_xr_ray_swapchain;
+        quad.subImage.imageRect.offset = {cell * RS_VR_RAY_CELL, 0};
+        quad.subImage.imageRect.extent = {RS_VR_RAY_CELL, RS_VR_RAY_CELL};
+        quad.pose.position = _getXrVector(position);
+        // The orientation already lives in OpenXR coordinates, so assign it directly; running it
+        // through the two-sided head-pose conversion would collapse the quad edge-on.
+        quad.pose.orientation = XrQuaternionf{
+            static_cast<float>(orientation.x),
+            static_cast<float>(orientation.y),
+            static_cast<float>(orientation.z),
+            static_cast<float>(orientation.w)
+        };
+        quad.size = {static_cast<float>(width), static_cast<float>(height)};
+        return quad;
+    }
+
+    // The OpenXR-space orientation whose local x, y, z axes point along the given world-space right,
+    // up, and normal. The axes are converted to OpenXR coordinates first so the quad is a proper
+    // world-locked billboard instead of an edge-on sliver.
+    RQuat3rf _getControllerBasisOrientation(
+        const RVec3rf& right, const RVec3rf& up, const RVec3rf& normal
+    ) const {
+        XrVector3f x = _getXrVector(right);
+        XrVector3f y = _getXrVector(up);
+        XrVector3f z = _getXrVector(normal);
+        RMat3rf matrix(
+            x.x,
+            y.x,
+            z.x,
+            //
+            x.y,
+            y.y,
+            z.y,
+            //
+            x.z,
+            y.z,
+            z.z
+        );
+        RQuat3rf orientation;
+        orientation.fromRotationMatrix(matrix);
+        return orientation;
+    }
+
+    /****************************************************************
      * Coordinates
      ****************************************************************/
     // The OpenXR reference space is right handed with +Y up and the view looking along -Z. The
@@ -2022,8 +2461,8 @@ class RS_VRImpl {
         return basis;
     }
 
-    RVec3rf _getRisePosition(const XrVector3f& position) const {
-        return RVec3rf(-position.z, -position.x, position.y);
+    RVec3rf _getRiseVector(const XrVector3f& vector) const {
+        return RVec3rf(-vector.z, -vector.x, vector.y);
     }
 
     RQuat3rf _getRiseOrientation(const XrQuaternionf& orientation) const {
@@ -2031,11 +2470,11 @@ class RS_VRImpl {
         return (_basis * head * _basis.conjugate()).normalized();
     }
 
-    XrVector3f _getXrPosition(const RVec3rf& position) const {
+    XrVector3f _getXrVector(const RVec3rf& vector) const {
         return XrVector3f{
-            static_cast<float>(-position.y),
-            static_cast<float>(position.z),
-            static_cast<float>(-position.x)
+            static_cast<float>(-vector.y),
+            static_cast<float>(vector.z),
+            static_cast<float>(-vector.x)
         };
     }
 
@@ -2053,7 +2492,7 @@ class RS_VRImpl {
     // the projection layer is labeled with, so the runtime reprojects against the physical head.
     XrPosef _getLayerPose(const FramePose& frame_pose) {
         XrPosef pose;
-        pose.position = _getXrPosition(frame_pose.position);
+        pose.position = _getXrVector(frame_pose.position);
         pose.orientation = _getXrOrientation(frame_pose.orientation);
         return pose;
     }
@@ -2158,7 +2597,7 @@ RS_WorldSessionComponentVR::RS_WorldSessionComponentVR(
     RFloat hud_follow_tau
 )
     : _name(std::move(name)),
-      _controller_name(_name + "#controller"),
+      _vr_controller_name(_name + "#controller"),
       _samples_per_pixel(samples_per_pixel),
       _max_depth(max_depth),
       _near_depth(near_depth),
@@ -2175,6 +2614,12 @@ RS_WorldSessionComponentVR::RS_WorldSessionComponentVR(
             "A VR component already exists; OpenXR drives a single headset session per process"
         ));
     }
+    _ray_controller_name[0] = _name + "#ray_left";
+    _ray_controller_name[1] = _name + "#ray_right";
+    _ray_sensor_name[0] = _name + "#ray_sensor_left";
+    _ray_sensor_name[1] = _name + "#ray_sensor_right";
+    _manipulation_controller_name[0] = _name + "#manipulation_left";
+    _manipulation_controller_name[1] = _name + "#manipulation_right";
 }
 
 RS_WorldSessionComponentVR::~RS_WorldSessionComponentVR() { _is_created = false; }
@@ -2196,33 +2641,62 @@ void RS_WorldSessionComponentVR::onAttach(RS_WorldSessionAccess access) {
 }
 
 void RS_WorldSessionComponentVR::onCallback(RBigFloat time, RS_ThreadPool& pool) {
-    pool.detachTask([this] { _syncVRCharacterization(); });
-    pool.detachTask([this, time] { _updateInfo(time); });
-    if (_vr_state.load() != VRState::CONNECTED) return;
+    auto intents = _xr->getHandIntents();
+    const RS_VRImpl::HandIntent* hand_intents[2] = {&intents.first, &intents.second};
+    for (RIndex hand = 0; hand < 2; ++hand) {
+        _highlight_gid[hand] = RS_NULL_INDEX;
+        if (_vr_state.load() != VRState::ENGAGED) continue;
+        if (_manip_state[hand] != ManipulationState::IDLE) {
+            _highlight_gid[hand] = _target_gid[hand];
+        } else if (hand_intents[hand]->is_aim_valid) {
+            RIndex gid = RS_NULL_INDEX;
+            RIndex body_sid = RS_NULL_INDEX;
+            RIndex segment_bid = RS_NULL_INDEX;
+            RFloat distance = 0;
+            _readRayHit(hand, gid, distance, body_sid, segment_bid);
+            _highlight_gid[hand] = gid;
+        }
+    }
 
-    // Skip the frame hand-off while a publish is still in flight or the present thread is behind, so
-    // the simulation never blocks and no pool task overwrites buffers still in use.
-    if (_is_publishing_frame.load() || !_xr->isFrameSynced()) return;
+    _updateRay();
+
+    pool.detachTask([this] {
+        _syncVRCharacterization();
+        if (_vr_state.load() == VRState::ENGAGED) {
+            for (RIndex hand = 0; hand < 2; ++hand) _syncManipulationCharacterization(hand);
+        }
+    });
+    pool.detachTask([this, time] { _updateInfo(time); });
+    if (_vr_state.load() != VRState::ENGAGED) return;
+
+    // Skip the frame while a publish is in flight or the staging is not free, so the simulation
+    // never blocks and no task overwrites staging the present thread still reads. Claiming the
+    // staging holds it against a disconnect until the publish task releases it below.
+    if (_is_publishing_frame.load() || !_xr->beginStagingWrite()) return;
     _is_publishing_frame.store(true);
-    
+
     RIndex pixel_num = static_cast<RIndex>(static_cast<RBigSize>(_eye_width) * _eye_height);
     RSize block_num = RS_CEIL_DIV(pixel_num, RS_VR_CONVERT_BLOCK);
     auto convert = std::make_shared<RS_MultiFuture<void>>(pool.submitTaskSequence(
-        0,
-        static_cast<RIndex>(2 * block_num),
-        [this, pixel_num, block_num](RIndex i) {
+        0, static_cast<RIndex>(2 * block_num), [this, pixel_num, block_num](RIndex i) {
             RIndex eye = i / static_cast<RIndex>(block_num);
             RIndex start = (i % static_cast<RIndex>(block_num)) * RS_VR_CONVERT_BLOCK;
-            _convertFrame(eye, start, RS_MIN(start + RS_VR_CONVERT_BLOCK, pixel_num));
+            _convertAndWriteFrame(eye, start, RS_MIN(start + RS_VR_CONVERT_BLOCK, pixel_num));
         }
     ));
     pool.detachTask([this, convert] {
+        // Release the staging claim and the publish flag on every exit path, so an exception in
+        // convert or commit cannot strand the borrow and hang a disconnect.
+        auto guard = std::shared_ptr<void>(nullptr, [this](void*) {
+            _xr->endStagingWrite();
+            _is_publishing_frame.store(false);
+        });
+        // Wait for the direct staging fill, commit the frame to release the present thread, then
+        // write the camera signal for the next render; one task keeps these in order.
         convert->wait();
-        // Publish the converted frame first to release the present thread, then write the camera
-        // signal for the next render; one task keeps the label capture and signal write in order.
-        _syncFrame();
+        _commitFrame();
         _writeCameraSignal();
-        _is_publishing_frame.store(false);
+        _writeRaySignal();
     });
 }
 
@@ -2232,56 +2706,177 @@ void RS_WorldSessionComponentVR::_syncVRCharacterization() {
     bool is_running = _xr->isRunning();
     bool is_resident = _access->handle()->findEntityGID(_name) != RS_NULL_INDEX;
     switch (_vr_state.load()) {
-        case VRState::NOT_CONNECTED:
+        case VRState::IDLE:
             if (is_running && is_resident) {
-                _vr_state.store(VRState::CONNECTED);
+                _vr_state.store(VRState::ENGAGED);
             } else if (is_running) {
                 _eye_width = _xr->eyeWidth();
                 _eye_height = _xr->eyeHeight();
-                RBigSize count = static_cast<RBigSize>(_eye_width) * _eye_height;
                 for (RIndex eye = 0; eye < 2; ++eye) {
-                    _frame_rgba[eye] = std::shared_ptr<RColor4b[]>(new RColor4b[count]());
-                    _frame_depth[eye] = std::shared_ptr<float[]>(new float[count]());
                     _eye_pose[eye] = {RVec3rf(0, 0, 0), RQuat3rf(0, 0, 0, 1)};
                 }
                 _access->handle()->addEntity(_makeCamera());
-                _access->handle()->addController(_makeController(_controller_name));
-                _vr_state.store(VRState::ADDING_RSC);
-            }
-            break;
-        case VRState::ADDING_RSC:
-            // Wait for the async add to land before rendering, then it is safe to draw and remove.
-            if (is_resident) _vr_state.store(VRState::CONNECTED);
-            break;
-        case VRState::CONNECTED:
-            if (!is_running) {
-                _access->handle()->removeController(_controller_name);
-                _access->handle()->removeEntity(_name);
-                _vr_state.store(VRState::REMOVING_RSC);
-            } else if (!is_resident) {
-                _vr_state.store(VRState::NOT_CONNECTED);
-            }
-            break;
-        case VRState::REMOVING_RSC:
-            // Free the frame buffers only once the entity is truly gone, so no in-flight frame job
-            // reads them mid-teardown.
-            if (!is_resident) {
-                for (RIndex eye = 0; eye < 2; ++eye) {
-                    _frame_rgba[eye].reset();
-                    _frame_depth[eye].reset();
+                _access->handle()->addController(_makeController(_vr_controller_name));
+                for (RIndex hand = 0; hand < 2; ++hand) {
+                    _access->handle()->addController(_makeController(_ray_controller_name[hand]));
+                    _access->handle()->addEntity(
+                        _makeRaySensor(_ray_sensor_name[hand], _ray_controller_name[hand])
+                    );
                 }
-                _vr_state.store(VRState::NOT_CONNECTED);
+                _vr_state.store(VRState::ENGAGING);
             }
+            break;
+        case VRState::ENGAGING:
+            // Wait for the async add to land before rendering, then it is safe to draw and remove.
+            if (is_resident) _vr_state.store(VRState::ENGAGED);
+            break;
+        case VRState::ENGAGED:
+            if (!is_running) {
+                _access->handle()->removeController(_vr_controller_name);
+                _access->handle()->removeEntity(_name);
+                for (RIndex hand = 0; hand < 2; ++hand) {
+                    _access->handle()->removeEntity(_ray_sensor_name[hand]);
+                    _access->handle()->removeController(_ray_controller_name[hand]);
+                }
+                _vr_state.store(VRState::DISENGAGING);
+            } else if (!is_resident) {
+                _vr_state.store(VRState::IDLE);
+            }
+            break;
+        case VRState::DISENGAGING:
+            // Wait until the entity is truly gone before returning to idle, so no in-flight frame
+            // job runs against a half-removed characterization.
+            if (!is_resident) _vr_state.store(VRState::IDLE);
             break;
     }
 }
 
-void RS_WorldSessionComponentVR::_syncManipulationCharacterization() {}
+void RS_WorldSessionComponentVR::_syncManipulationCharacterization(RIndex hand) {
+    auto intents = _xr->getHandIntents();
+    const RS_VRImpl::HandIntent& intent = hand == 0 ? intents.first : intents.second;
+    bool is_trigger = intent.is_grab || intent.is_push;
+    auto handle = _access->handle();
+    const std::string& controller_name = _manipulation_controller_name[hand];
 
-void RS_WorldSessionComponentVR::_convertFrame(RIndex eye, RIndex pixel_start, RIndex pixel_end) {
+    switch (_manip_state[hand]) {
+        case ManipulationState::IDLE: {
+            if (!is_trigger || !intent.is_aim_valid) break;
+            RIndex gid = RS_NULL_INDEX;
+            RIndex body_sid = RS_NULL_INDEX;
+            RIndex segment_bid = RS_NULL_INDEX;
+            RFloat distance = 0;
+            if (!_readRayHit(hand, gid, distance, body_sid, segment_bid)) break;
+            std::string name = handle->findEntityName(gid);
+            if (name.empty() || handle->findEntityGID(name) == RS_NULL_INDEX) break;
+            _target_gid[hand] = gid;
+            _target_body_sid[hand] = body_sid;
+            _target_segment_bid[hand] = segment_bid;
+            _target_structure[hand] = name;
+            _hand_prev_position[hand] = intent.position;
+            _hand_prev_orientation[hand] = intent.orientation;
+
+            rsc::RSC_Transform transform;
+            transform.name = controller_name + "#transform";
+            transform.source_controller_reference = controller_name;
+            transform.structure_name = name;
+            rsc::RSC_Force force;
+            force.name = controller_name + "#force";
+            force.source_controller_reference = controller_name;
+            force.structure_name = name;
+            force.voxel_range = RBound3ri::highest();
+            force.body_sid = body_sid;
+            force.segment_bid = segment_bid;
+
+            // One transaction so the controller and both signals land together; hold the add tasks.
+            _pending_tasks[hand].clear();
+            handle->beginModificationTransaction();
+            _pending_tasks[hand].push_back(handle->addController(_makeController(controller_name)));
+            _pending_tasks[hand].push_back(handle->addSignal(rsc::RSC_SignalVariant(transform)));
+            _pending_tasks[hand].push_back(handle->addSignal(rsc::RSC_SignalVariant(force)));
+            handle->endModificationTransaction();
+            _manip_state[hand] = ManipulationState::ENGAGING;
+            break;
+        }
+        case ManipulationState::ENGAGING: {
+            // Poll the add tasks non-blocking: any failure tears the partial add down; once all
+            // succeed the controller and signals are resident for the next step's snapshot.
+            bool is_any_failed = false;
+            bool is_all_finished = true;
+            for (const RS_WorldTask& task : _pending_tasks[hand]) {
+                RSE_WorldTaskState state = task.state();
+                if (state == RSE_WORLD_TASK_FAIL) is_any_failed = true;
+                if (state == RSE_WORLD_TASK_PENDING) is_all_finished = false;
+            }
+            if (is_any_failed) {
+                _manip_state[hand] = ManipulationState::DISENGAGING;
+            } else if (is_all_finished) {
+                _pending_tasks[hand].clear();
+                _manip_state[hand] = is_trigger ? ManipulationState::ENGAGED
+                                                : ManipulationState::DISENGAGING;
+            }
+            break;
+        }
+        case ManipulationState::ENGAGED: {
+            if (is_trigger && handle->findEntityGID(_target_structure[hand]) != RS_NULL_INDEX) {
+                // Freeze while grabbing so the transform snaps the body without gravity sag; a push
+                // keeps physics live. Freezing a foreign structure needs the full scope, so without
+                // it the grab still drags the body and only the anti-sag freeze is skipped.
+                bool want_frozen =
+                    intent.is_grab && handle->scope() == RSE_WORLD_SESSION_SCOPE_FULL;
+                if (want_frozen && !_is_target_frozen[hand]) {
+                    handle->freezeEntity(_target_structure[hand]);
+                    _is_target_frozen[hand] = true;
+                } else if (!want_frozen && _is_target_frozen[hand]) {
+                    handle->unfreezeEntity(_target_structure[hand]);
+                    _is_target_frozen[hand] = false;
+                }
+                _writeManipulationSignal(hand);
+            } else {
+                if (_is_target_frozen[hand]) {
+                    handle->unfreezeEntity(_target_structure[hand]);
+                    _is_target_frozen[hand] = false;
+                }
+                _manip_state[hand] = ManipulationState::DISENGAGING;
+            }
+            break;
+        }
+        case ManipulationState::DISENGAGING: {
+            if (_pending_tasks[hand].empty()) {
+                // Remove both signals and the controller together; a leaked force would keep
+                // pushing.
+                handle->beginModificationTransaction();
+                _pending_tasks[hand].push_back(
+                    handle->removeSignal(controller_name + "#transform")
+                );
+                _pending_tasks[hand].push_back(handle->removeSignal(controller_name + "#force"));
+                _pending_tasks[hand].push_back(handle->removeController(controller_name));
+                handle->endModificationTransaction();
+                _target_gid[hand] = RS_NULL_INDEX;
+                _target_structure[hand].clear();
+            }
+            bool is_all_finished = true;
+            for (const RS_WorldTask& task : _pending_tasks[hand]) {
+                if (task.state() == RSE_WORLD_TASK_PENDING) is_all_finished = false;
+            }
+            if (is_all_finished) {
+                _pending_tasks[hand].clear();
+                _manip_state[hand] = ManipulationState::IDLE;
+            }
+            break;
+        }
+    }
+}
+
+void RS_WorldSessionComponentVR::_convertAndWriteFrame(
+    RIndex eye,
+    RIndex pixel_start,
+    RIndex pixel_end
+) {
+    RColor4b* dst_rgba = _xr->getColorStagingBuffer(eye);
+    float* dst_depth = _xr->getDepthStagingBuffer(eye);
     for (auto& controller_ref : _access->controllers()) {
         RS_WorldController& controller = controller_ref.get();
-        if (controller.name != _controller_name) continue;
+        if (controller.name != _vr_controller_name) continue;
         for (auto& record_variant : controller.records) {
             record_variant.visit([&](auto& record) {
                 using Record = std::decay_t<decltype(record)>;
@@ -2293,16 +2888,26 @@ void RS_WorldSessionComponentVR::_convertFrame(RIndex eye, RIndex pixel_start, R
                                                        : record.right_rgb.pixel;
                     const float* src_depth = eye == 0 ? record.left_depth.pixel
                                                       : record.right_depth.pixel;
-                    RColor4b* dst_rgba = _frame_rgba[eye].get();
+                    const RIndex* src_gid =
+                        (eye == 0 ? record.left_entity_info : record.right_entity_info).entity_gid;
+                    // Blend a fixed amber tint over the pixels of either hand's highlighted
+                    // structure, resolved once in onCallback.
+                    bool is_tint_active =
+                        src_gid != nullptr && (_highlight_gid[0] != RS_NULL_INDEX ||
+                                               _highlight_gid[1] != RS_NULL_INDEX);
                     for (RIndex pixel = pixel_start; pixel < pixel_end; ++pixel) {
-                        dst_rgba[pixel].r = src_rgb[pixel].r;
-                        dst_rgba[pixel].g = src_rgb[pixel].g;
-                        dst_rgba[pixel].b = src_rgb[pixel].b;
-                        dst_rgba[pixel].a = 255;
+                        RColor4b color{src_rgb[pixel].r, src_rgb[pixel].g, src_rgb[pixel].b, 255};
+                        if (is_tint_active && (src_gid[pixel] == _highlight_gid[0] ||
+                                               src_gid[pixel] == _highlight_gid[1])) {
+                            color.r = static_cast<RByte>((static_cast<int>(color.r) + 255) / 2);
+                            color.g = static_cast<RByte>((static_cast<int>(color.g) + 170) / 2);
+                            color.b = static_cast<RByte>((static_cast<int>(color.b) + 40) / 2);
+                        }
+                        dst_rgba[pixel] = color;
                     }
-                    if (src_depth) {
+                    if (src_depth && dst_depth) {
                         std::memcpy(
-                            _frame_depth[eye].get() + pixel_start,
+                            dst_depth + pixel_start,
                             src_depth + pixel_start,
                             static_cast<RBigSize>(pixel_end - pixel_start) * sizeof(float)
                         );
@@ -2313,12 +2918,8 @@ void RS_WorldSessionComponentVR::_convertFrame(RIndex eye, RIndex pixel_start, R
     }
 }
 
-void RS_WorldSessionComponentVR::_syncFrame() {
-    _xr->syncFrame(
-        _frame_rgba[0],
-        _frame_rgba[1],
-        _frame_depth[0],
-        _frame_depth[1],
+void RS_WorldSessionComponentVR::_commitFrame() {
+    _xr->commitFrame(
         {_eye_pose[0].position, _eye_pose[0].orientation},
         {_eye_pose[1].position, _eye_pose[1].orientation},
         _eye_width,
@@ -2335,7 +2936,7 @@ void RS_WorldSessionComponentVR::_writeCameraSignal() {
     _eye_pose[1] = {right.raw_position, right.raw_orientation};
     for (auto& controller_ref : _access->controllers()) {
         RS_WorldController& controller = controller_ref.get();
-        if (controller.name != _controller_name) continue;
+        if (controller.name != _vr_controller_name) continue;
         for (auto& signal_variant : controller.signals) {
             signal_variant.visit([&](auto& signal) {
                 using Signal = std::decay_t<decltype(signal)>;
@@ -2376,7 +2977,99 @@ void RS_WorldSessionComponentVR::_writeCameraSignal() {
     }
 }
 
-void RS_WorldSessionComponentVR::_writeManipulationSignal() {}
+void RS_WorldSessionComponentVR::_writeRaySignal() {
+    auto intents = _xr->getHandIntents();
+    const RS_VRImpl::HandIntent* hands[2] = {&intents.first, &intents.second};
+    // Note: for each hand their ray sensor casts along its local +x.
+    for (auto& controller_ref : _access->controllers()) {
+        RS_WorldController& controller = controller_ref.get();
+        RIndex hand = controller.name == _ray_controller_name[0]   ? 0
+                      : controller.name == _ray_controller_name[1] ? 1
+                                                                    : RS_NULL_INDEX;
+        if (hand == RS_NULL_INDEX) continue;
+        const RS_VRImpl::HandIntent& intent = *hands[hand];
+        for (auto& signal_variant : controller.signals) {
+            signal_variant.visit([&](auto& signal) {
+                using Signal = std::decay_t<decltype(signal)>;
+                if constexpr (std::is_same_v<Signal, RS_WorldRaySensorSignal>) {
+                    if (signal.position_signals.object_num > 0 && signal.position_signals.position) {
+                        signal.position_signals.position[0] = intent.aim_origin;
+                    }
+                    if (signal.orientation_signals.object_num > 0 &&
+                        signal.orientation_signals.orientation) {
+                        signal.orientation_signals.orientation[0] = intent.aim_orientation;
+                    }
+                }
+            });
+        }
+    }
+}
+
+void RS_WorldSessionComponentVR::_writeManipulationSignal(RIndex hand) {
+    auto intents = _xr->getHandIntents();
+    const RS_VRImpl::HandIntent& intent = hand == 0 ? intents.first : intents.second;
+    // Grab carries the body by the incremental hand delta about the previous grip pose; an identity
+    // transform when not grabbing maps every point to itself, so physics keeps running.
+    RQuat3rf rotation = intent.is_grab
+                            ? intent.orientation * _hand_prev_orientation[hand].conjugate()
+                            : RQuat3rf::unit();
+    RVec3rf translation =
+        intent.is_grab ? intent.position - _hand_prev_position[hand] : RVec3rf(0, 0, 0);
+    RVec3rf pivot = _hand_prev_position[hand];
+    RVec3rf push =
+        intent.is_push
+            ? intent.aim_orientation.toOrthoAxisX() * (intent.push_amount * _push_force.load())
+            : RVec3rf(0, 0, 0);
+
+    for (auto& controller_ref : _access->controllers()) {
+        RS_WorldController& controller = controller_ref.get();
+        if (controller.name != _manipulation_controller_name[hand]) continue;
+        for (auto& signal_variant : controller.signals) {
+            signal_variant.visit([&](auto& signal) {
+                using Signal = std::decay_t<decltype(signal)>;
+                if constexpr (std::is_same_v<Signal, RS_WorldTransformSignal>) {
+                    if (signal.rotation_signals.object_num > 0 &&
+                        signal.rotation_signals.rotation) {
+                        signal.rotation_signals.rotation[0] = rotation;
+                        signal.rotation_signals.pivot[0] = pivot;
+                    }
+                    if (signal.translation_signals.object_num > 0 &&
+                        signal.translation_signals.translation) {
+                        signal.translation_signals.translation[0] = translation;
+                    }
+                } else if constexpr (std::is_same_v<Signal, RS_WorldForceSignal>) {
+                    if (signal.force_signals.object_num > 0 && signal.force_signals.force) {
+                        signal.force_signals.force[0] = push;
+                    }
+                }
+            });
+        }
+    }
+
+    _hand_prev_position[hand] = intent.position;
+    _hand_prev_orientation[hand] = intent.orientation;
+}
+
+void RS_WorldSessionComponentVR::_updateRay() {
+    if (_vr_state.load() != VRState::ENGAGED) {
+        _xr->setRay(true, false, 0, false, RS_VRImpl::RayMode::NEUTRAL);
+        _xr->setRay(false, false, 0, false, RS_VRImpl::RayMode::NEUTRAL);
+        return;
+    }
+    auto intents = _xr->getHandIntents();
+    const RS_VRImpl::HandIntent* hands[2] = {&intents.first, &intents.second};
+    for (RIndex hand = 0; hand < 2; ++hand) {
+        RIndex gid = RS_NULL_INDEX;
+        RIndex body_sid = RS_NULL_INDEX;
+        RIndex segment_bid = RS_NULL_INDEX;
+        RFloat distance = static_cast<RFloat>(_far_depth);
+        bool is_hit = _readRayHit(hand, gid, distance, body_sid, segment_bid);
+        RS_VRImpl::RayMode mode = hands[hand]->is_grab   ? RS_VRImpl::RayMode::GRAB
+                                  : hands[hand]->is_push ? RS_VRImpl::RayMode::PUSH
+                                                         : RS_VRImpl::RayMode::NEUTRAL;
+        _xr->setRay(hand == 0, true, distance, is_hit, mode);
+    }
+}
 
 void RS_WorldSessionComponentVR::_updateInfo(RBigFloat time) {
     if (!_xr) return;
@@ -2394,7 +3087,41 @@ void RS_WorldSessionComponentVR::_updateInfo(RBigFloat time) {
     _xr->setHudInfo(info);
 }
 
-std::string RS_WorldSessionComponentVR::_pickTarget(const RVec3rf&, const RVec3rf&) { return ""; }
+bool RS_WorldSessionComponentVR::_readRayHit(
+    RIndex hand, RIndex& gid, RFloat& distance, RIndex& body_sid, RIndex& segment_bid
+) {
+    gid = RS_NULL_INDEX;
+    distance = static_cast<RFloat>(_far_depth);
+    body_sid = RS_NULL_INDEX;
+    segment_bid = RS_NULL_INDEX;
+    bool is_hit = false;
+    for (auto& controller_ref : _access->controllers()) {
+        RS_WorldController& controller = controller_ref.get();
+        if (controller.name != _ray_controller_name[hand]) continue;
+        for (auto& record_variant : controller.records) {
+            record_variant.visit([&](auto& record) {
+                using Record = std::decay_t<decltype(record)>;
+                if constexpr (std::is_same_v<Record, RS_WorldRaySensorRecord>) {
+                    if (!record.isValid() || record.ray_num < 1 || !record.hit.is_hit ||
+                        !record.hit.is_hit[0])
+                        return;
+                    // The beam ends at any surface, so read the distance whatever it hit; the hit
+                    // flag and target ids only count a structure, since that is what we manipulate.
+                    if (record.hit.distance) distance = record.hit.distance[0];
+                    if (!record.entity_info.entity_type ||
+                        record.entity_info.entity_type[0] != RSE_WORLD_ENTITY_TYPE_STRUCTURE_VOXEL)
+                        return;
+                    is_hit = true;
+                    if (record.entity_info.entity_gid) gid = record.entity_info.entity_gid[0];
+                    if (record.entity_detail.body_sid) body_sid = record.entity_detail.body_sid[0];
+                    if (record.entity_detail.segment_bid)
+                        segment_bid = record.entity_detail.segment_bid[0];
+                }
+            });
+        }
+    }
+    return is_hit;
+}
 
 rsc::RSC_EntityVariant RS_WorldSessionComponentVR::_makeCamera() const {
     auto [left, right] = _xr->getEyes();
@@ -2414,9 +3141,25 @@ rsc::RSC_EntityVariant RS_WorldSessionComponentVR::_makeCamera() const {
     camera.record.is_depth_hyperbolic = true;
     camera.record.hyperbolic_near_depth = _near_depth;
     camera.record.hyperbolic_far_depth = _far_depth;
-    camera.record.target_controller_reference = _controller_name;
-    camera.signal.source_controller_reference = _controller_name;
+    camera.record.target_controller_reference = _vr_controller_name;
+    camera.signal.source_controller_reference = _vr_controller_name;
     return rsc::RSC_EntityVariant(camera);
+}
+
+rsc::RSC_EntityVariant RS_WorldSessionComponentVR::_makeRaySensor(
+    std::string name, std::string controller_name
+) const {
+    rsc::RSC_RaySensorFree sensor;
+    sensor.name = std::move(name);
+    // One ray along local +x; the signal drives the sensor orientation so it points along the aim.
+    sensor.ray_directions = {RVec3rf(1, 0, 0)};
+    sensor.max_range = _far_depth;
+    sensor.record.has_hit = true;
+    sensor.record.has_entity_info = true;
+    sensor.record.has_entity_detail = true;
+    sensor.record.target_controller_reference = controller_name;
+    sensor.signal.source_controller_reference = controller_name;
+    return rsc::RSC_EntityVariant(sensor);
 }
 
 rsc::RSC_ControllerVariant RS_WorldSessionComponentVR::_makeController(std::string name) const {

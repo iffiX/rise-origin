@@ -977,12 +977,8 @@ inline void initRSPYRSC(py::module &m) {
         .def_readwrite("has_motion", &RSC_CameraPerspectiveRecord::has_motion)
         .def_readwrite("has_entity_info", &RSC_CameraPerspectiveRecord::has_entity_info)
         .def_readwrite("is_depth_hyperbolic", &RSC_CameraPerspectiveRecord::is_depth_hyperbolic)
-        .def_readwrite(
-            "hyperbolic_near_depth", &RSC_CameraPerspectiveRecord::hyperbolic_near_depth
-        )
-        .def_readwrite(
-            "hyperbolic_far_depth", &RSC_CameraPerspectiveRecord::hyperbolic_far_depth
-        );
+        .def_readwrite("hyperbolic_near_depth", &RSC_CameraPerspectiveRecord::hyperbolic_near_depth)
+        .def_readwrite("hyperbolic_far_depth", &RSC_CameraPerspectiveRecord::hyperbolic_far_depth);
 
     rspyRSC<RSC_CameraPerspectiveSignal, RSC_SignalBase>(m, "RSC_CameraPerspectiveSignal")
         .def(py::init<>())
@@ -1040,9 +1036,7 @@ inline void initRSPYRSC(py::module &m) {
         .def_readwrite("image_height", &RSC_CameraStereoBase::image_height)
         .def_readwrite("samples_per_pixel", &RSC_CameraStereoBase::samples_per_pixel)
         .def_readwrite("max_depth", &RSC_CameraStereoBase::max_depth)
-        .def_readwrite(
-            "interpupillary_distance", &RSC_CameraStereoBase::interpupillary_distance
-        )
+        .def_readwrite("interpupillary_distance", &RSC_CameraStereoBase::interpupillary_distance)
         .def_readwrite("convergence_distance", &RSC_CameraStereoBase::convergence_distance)
         .def_readwrite("angle_left", &RSC_CameraStereoBase::angle_left)
         .def_readwrite("angle_right", &RSC_CameraStereoBase::angle_right)
@@ -1067,6 +1061,39 @@ inline void initRSPYRSC(py::module &m) {
         .def_readwrite(
             "relative_orientation", &RSC_CameraStereoRigidBodyLinked::relative_orientation
         );
+
+    rspyRSC<RSC_RaySensorRecord, RSC_RecordBase>(m, "RSC_RaySensorRecord")
+        .def(py::init<>())
+        .def_readwrite("has_hit", &RSC_RaySensorRecord::has_hit)
+        .def_readwrite("has_entity_info", &RSC_RaySensorRecord::has_entity_info)
+        .def_readwrite("has_entity_detail", &RSC_RaySensorRecord::has_entity_detail)
+        .def_readwrite("has_material", &RSC_RaySensorRecord::has_material)
+        .def_readwrite("has_normal", &RSC_RaySensorRecord::has_normal)
+        .def_readwrite("has_velocity", &RSC_RaySensorRecord::has_velocity);
+
+    rspyRSC<RSC_RaySensorSignal, RSC_SignalBase>(m, "RSC_RaySensorSignal")
+        .def(py::init<>())
+        .def_readwrite("position_signal_num", &RSC_RaySensorSignal::position_signal_num)
+        .def_readwrite("orientation_signal_num", &RSC_RaySensorSignal::orientation_signal_num);
+
+    rspyRSC<RSC_RaySensorBase, RSC_EntityBase>(m, "RSC_RaySensorBase")
+        .def_readwrite("ray_directions", &RSC_RaySensorBase::ray_directions)
+        .def_readwrite("max_range", &RSC_RaySensorBase::max_range)
+        .def_readwrite("record", &RSC_RaySensorBase::record)
+        .def_readwrite("signal", &RSC_RaySensorBase::signal);
+
+    rspyRSC<RSC_RaySensorFree, RSC_RaySensorBase>(m, "RSC_RaySensorFree")
+        .def(py::init<>())
+        .def_readwrite("origin_position", &RSC_RaySensorFree::origin_position)
+        .def_readwrite("orientation", &RSC_RaySensorFree::orientation);
+
+    rspyRSC<RSC_RaySensorRigidBodyLinked, RSC_RaySensorBase>(m, "RSC_RaySensorRigidBodyLinked")
+        .def(py::init<>())
+        .def_readwrite("structure_name", &RSC_RaySensorRigidBodyLinked::structure_name)
+        .def_readwrite("body_sid", &RSC_RaySensorRigidBodyLinked::body_sid)
+        .def_readwrite("segment_bid", &RSC_RaySensorRigidBodyLinked::segment_bid)
+        .def_readwrite("relative_anchor", &RSC_RaySensorRigidBodyLinked::relative_anchor)
+        .def_readwrite("relative_orientation", &RSC_RaySensorRigidBodyLinked::relative_orientation);
 
     /***************************************************************
      * Record

@@ -151,6 +151,114 @@ class RSCF_ResolveVoxelDependency : public device::RS_ComputeFunction<RSCF_Resol
     }
 };
 
+/**
+ * @brief Classify a voxel into the dynamic and static subsets.
+ * @details The dynamic subset is every mobile voxel so physics never reads static state. The
+ * static subset is every immobile voxel, with no exposed gate: the structure voxel manager
+ * already keeps only exposed voxels when it emits a fixed body, and a static voxel's exposure
+ * never changes at runtime, so the gate would be redundant for fixed and frozen-rigid bodies.
+ * A frozen soft body adds its interior voxels to the static subset, an accepted cost.
+ *
+ * @param k             simulation kernel.
+ * @param voxel         handle of the voxel to classify.
+ * @param flag_index    index of this voxel within the flag arrays.
+ * @param dynamic_flags per-voxel output, 1 when mobile.
+ * @param static_flags  per-voxel output, 1 when immobile.
+ */
+class RSCF_GetVoxelMobilityFlags : public device::RS_ComputeFunction<RSCF_GetVoxelMobilityFlags> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void run(
+        const Kernel *k,
+        RHandle voxel,
+        RIndex flag_index,
+        device::RS_Vector<RIndex> dynamic_flags,
+        device::RS_Vector<RIndex> static_flags
+    ) {
+        if (k == nullptr || voxel == RS_NULL_HANDLE) return;
+        auto &ctx = k->ctx;
+        auto &dynamic_flag = dynamic_flags[flag_index];
+        auto &static_flag = static_flags[flag_index];
+        RS_VoxelStateUnion s_union{V_G(state)};
+        if (!s_union.voxel_state.is_enabled) {
+            dynamic_flag = 0;
+            static_flag = 0;
+            return;
+        }
+        bool is_static = s_union.voxel_state.is_static;
+        if (!is_static && s_union.voxel_state.is_rigid) {
+            RHandle rigid_body = V_G(rigid_body);
+            if (rigid_body != RS_NULL_HANDLE) {
+                RS_RigidBodyStateUnion rb_union{RB_G(rigid_body, state)};
+                is_static = rb_union.rigid_body_state.is_static;
+            }
+        }
+        dynamic_flag = is_static ? 0 : 1;
+        static_flag = is_static ? 1 : 0;
+    }
+};
+
+/**
+ * @brief Classify a mobile voxel into the dynamic BVH subset.
+ * @details Launched over the dynamic subset, so the voxel is already known mobile; only the
+ * exposed gate remains, since only an air or transparent face can be hit. Run on every dynamic
+ * BVH rebuild so a freshly exposed voxel, such as a soft bond tearing open, joins the BVH.
+ *
+ * @param k                 simulation kernel.
+ * @param voxel             handle of the voxel to classify.
+ * @param flag_index        index of this voxel within the flag array.
+ * @param bvh_dynamic_flags per-voxel output, 1 when exposed.
+ */
+class RSCF_GetVoxelBVHDynamicFlags
+    : public device::RS_ComputeFunction<RSCF_GetVoxelBVHDynamicFlags> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void run(
+        const Kernel *k,
+        RHandle voxel,
+        RIndex flag_index,
+        device::RS_Vector<RIndex> bvh_dynamic_flags
+    ) {
+        if (k == nullptr || voxel == RS_NULL_HANDLE) return;
+        auto &ctx = k->ctx;
+        RS_VoxelStateUnion s_union{V_G(state)};
+        bool is_exposed = isContactActive(s_union.voxel_state_packed) ||
+                          isRenderActive(s_union.voxel_state_packed);
+        bvh_dynamic_flags[flag_index] = (s_union.voxel_state.is_enabled && is_exposed) ? 1 : 0;
+    }
+};
+
+/**
+ * @brief Scatter the flagged voxel handles into a packed list using the prefix-sum.
+ * @details Used for both the static and dynamic subsets. A voxel whose flag is set writes its
+ * handle into out_handles at prefix_sums[flag_index] - 1.
+ *
+ * @param k           simulation kernel.
+ * @param voxel       handle of this voxel.
+ * @param flag_index  index of this voxel within the flag and prefix arrays.
+ * @param flags       per-voxel 0/1 membership flags for the subset being compacted.
+ * @param prefix_sums inclusive prefix sum of flags giving each flagged voxel its output slot.
+ * @param out_handles packed output list of the flagged voxel handles.
+ */
+class RSCF_CompactVoxelHandles : public device::RS_ComputeFunction<RSCF_CompactVoxelHandles> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void run(
+        const Kernel *k,
+        RHandle voxel,
+        RIndex flag_index,
+        device::RS_Vector<RIndex> flags,
+        device::RS_Vector<RIndex> prefix_sums,
+        device::RS_Vector<RHandle> out_handles
+    ) {
+        if (k == nullptr || voxel == RS_NULL_HANDLE) return;
+        if (flags[flag_index]) {
+            RIndex out = prefix_sums[flag_index] - 1;
+            out_handles[out] = voxel;
+        }
+    }
+};
+
 template <RSE_FloatType FloatComputeAccuracy>
 class RS_VoxelCompute {
    public:
@@ -653,116 +761,6 @@ class RS_VoxelCompute {
     };
 
     /**
-     * @brief Classify a voxel into the dynamic and static subsets.
-     * @details The dynamic subset is every mobile voxel so physics never reads static state. The
-     * static subset is every immobile voxel, with no exposed gate: the structure voxel manager
-     * already keeps only exposed voxels when it emits a fixed body, and a static voxel's exposure
-     * never changes at runtime, so the gate would be redundant for fixed and frozen-rigid bodies.
-     * A frozen soft body adds its interior voxels to the static subset, an accepted cost.
-     *
-     * @param k             simulation kernel.
-     * @param voxel         handle of the voxel to classify.
-     * @param flag_index    index of this voxel within the flag arrays.
-     * @param dynamic_flags per-voxel output, 1 when mobile.
-     * @param static_flags  per-voxel output, 1 when immobile.
-     */
-    class RSCF_GetVoxelMobilityFlags
-        : public device::RS_ComputeFunction<RSCF_GetVoxelMobilityFlags> {
-       public:
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(
-            const Kernel *k,
-            RHandle voxel,
-            RIndex flag_index,
-            device::RS_Vector<RIndex> dynamic_flags,
-            device::RS_Vector<RIndex> static_flags
-        ) {
-            if (k == nullptr || voxel == RS_NULL_HANDLE) return;
-            auto &ctx = k->ctx;
-            auto &dynamic_flag = dynamic_flags[flag_index];
-            auto &static_flag = static_flags[flag_index];
-            RS_VoxelStateUnion s_union{V_G(state)};
-            if (!s_union.voxel_state.is_enabled) {
-                dynamic_flag = 0;
-                static_flag = 0;
-                return;
-            }
-            bool is_static = s_union.voxel_state.is_static;
-            if (!is_static && s_union.voxel_state.is_rigid) {
-                RHandle rigid_body = V_G(rigid_body);
-                if (rigid_body != RS_NULL_HANDLE) {
-                    RS_RigidBodyStateUnion rb_union{RB_G(rigid_body, state)};
-                    is_static = rb_union.rigid_body_state.is_static;
-                }
-            }
-            dynamic_flag = is_static ? 0 : 1;
-            static_flag = is_static ? 1 : 0;
-        }
-    };
-
-    /**
-     * @brief Classify a mobile voxel into the dynamic BVH subset.
-     * @details Launched over the dynamic subset, so the voxel is already known mobile; only the
-     * exposed gate remains, since only an air or transparent face can be hit. Run on every dynamic
-     * BVH rebuild so a freshly exposed voxel, such as a soft bond tearing open, joins the BVH.
-     *
-     * @param k                 simulation kernel.
-     * @param voxel             handle of the voxel to classify.
-     * @param flag_index        index of this voxel within the flag array.
-     * @param bvh_dynamic_flags per-voxel output, 1 when exposed.
-     */
-    class RSCF_GetVoxelBVHDynamicFlags
-        : public device::RS_ComputeFunction<RSCF_GetVoxelBVHDynamicFlags> {
-       public:
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(
-            const Kernel *k,
-            RHandle voxel,
-            RIndex flag_index,
-            device::RS_Vector<RIndex> bvh_dynamic_flags
-        ) {
-            if (k == nullptr || voxel == RS_NULL_HANDLE) return;
-            auto &ctx = k->ctx;
-            RS_VoxelStateUnion s_union{V_G(state)};
-            bool is_exposed = isContactActive(s_union.voxel_state_packed) ||
-                              isRenderActive(s_union.voxel_state_packed);
-            bvh_dynamic_flags[flag_index] =
-                (s_union.voxel_state.is_enabled && is_exposed) ? 1 : 0;
-        }
-    };
-
-    /**
-     * @brief Scatter the flagged voxel handles into a packed list using the prefix-sum.
-     * @details Used for both the static and dynamic subsets. A voxel whose flag is set writes its
-     * handle into out_handles at prefix_sums[flag_index] - 1.
-     *
-     * @param k           simulation kernel.
-     * @param voxel       handle of this voxel.
-     * @param flag_index  index of this voxel within the flag and prefix arrays.
-     * @param flags       per-voxel 0/1 membership flags for the subset being compacted.
-     * @param prefix_sums inclusive prefix sum of flags giving each flagged voxel its output slot.
-     * @param out_handles packed output list of the flagged voxel handles.
-     */
-    class RSCF_CompactVoxelHandles : public device::RS_ComputeFunction<RSCF_CompactVoxelHandles> {
-       public:
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(
-            const Kernel *k,
-            RHandle voxel,
-            RIndex flag_index,
-            device::RS_Vector<RIndex> flags,
-            device::RS_Vector<RIndex> prefix_sums,
-            device::RS_Vector<RHandle> out_handles
-        ) {
-            if (k == nullptr || voxel == RS_NULL_HANDLE) return;
-            if (flags[flag_index]) {
-                RIndex out = prefix_sums[flag_index] - 1;
-                out_handles[out] = voxel;
-            }
-        }
-    };
-
-    /**
      * @brief Fill one voxel-BVH leaf on the build path.
      * @details For each active voxel, composes the leaf identifier of object metadata and handle
      * into obj_ids and writes the loose world-AABB into leaf_bounds.
@@ -1013,9 +1011,9 @@ class RS_VoxelCompute {
                         // Indices are stored as mod-16 residuals; the signed mod-16
                         // difference recovers the true gap because sphere overlap
                         // bounds candidates to one grid unit per axis. Another voxel
-                        // in the same structure physically cannot self collide out of 
+                        // in the same structure physically cannot self collide out of
                         // radius with another same structure while having same residual
-                        // in indices. 
+                        // in indices.
                         if (self_filter_key.contact_filter_key.body_sid ==
                             other_filter_key.contact_filter_key.body_sid) {
                             int dx = _mod16Difference(

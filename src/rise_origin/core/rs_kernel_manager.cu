@@ -165,6 +165,9 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.structure_voxel_static_flags.init(0, _device_provider);
         k.ctx.structure_voxel_static_prefix_sums.init(0, _device_provider);
 
+        k.ctx.structure_rigid_body_dynamic_flags.init(0, _device_provider);
+        k.ctx.structure_rigid_body_dynamic_prefix_sums.init(0, _device_provider);
+
         k.ctx.structure_signals.init(0, _device_provider);
 
         k.ctx.structure_link_material_layout.init(_device_provider);
@@ -262,6 +265,26 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.light_weight.init(0, _device_provider);
         k.ctx.light_cdf.init(0, _device_provider);
 
+        k.ctx.ray_sensors.init(0, _device_provider);
+        k.ctx.ray_sensor_records.init(0, _device_provider);
+        k.ctx.ray_sensor_recorder_buffers.init(0, _device_provider);
+        k.ctx.ray_sensor_controller_buffers.init(0, _device_provider);
+        k.ctx.ray_sensor_directions.init(0, _device_provider);
+        k.ctx.ray_sensor_signals.init(0, _device_provider);
+
+        k.ctx.ray_sensor_layout.init(_device_provider);
+        k.ctx.ray_sensor_ray_layout.init(_device_provider);
+        k.ctx.ray_sensor_record_layout.init(_device_provider);
+        k.ctx.ray_sensor_hit_record_layout.init(_device_provider);
+        k.ctx.ray_sensor_entity_info_record_layout.init(_device_provider);
+        k.ctx.ray_sensor_entity_detail_record_layout.init(_device_provider);
+        k.ctx.ray_sensor_material_record_layout.init(_device_provider);
+        k.ctx.ray_sensor_normal_record_layout.init(_device_provider);
+        k.ctx.ray_sensor_velocity_record_layout.init(_device_provider);
+        k.ctx.ray_sensor_state_record_layout.init(_device_provider);
+
+        k.ctx.ray_sensor_signal_layout.init(_device_provider);
+
         k.ctx.intersect_regions.init(0, _device_provider);
         k.ctx.intersect_region_counts.init(0, _device_provider);
         k.ctx.intersect_region_offsets.init(0, _device_provider);
@@ -319,6 +342,7 @@ void RS_KernelManager::freeKernel() {
     _kernel_structure_voxel_managers.clear();
     _kernel_camera_perspective_managers.clear();
     _kernel_camera_stereo_managers.clear();
+    _kernel_ray_sensor_managers.clear();
     _kernel_floor_manager.reset();
 
     // Cosmic background must release before the texture manager for texture dependencies.
@@ -368,6 +392,9 @@ void RS_KernelManager::freeKernel() {
         k.ctx.structure_voxel_bvh_dynamic_prefix_sums.free();
         k.ctx.structure_voxel_static_flags.free();
         k.ctx.structure_voxel_static_prefix_sums.free();
+
+        k.ctx.structure_rigid_body_dynamic_flags.free();
+        k.ctx.structure_rigid_body_dynamic_prefix_sums.free();
 
         k.ctx.structure_signals.free();
 
@@ -462,6 +489,26 @@ void RS_KernelManager::freeKernel() {
         k.ctx.light_weight.free();
         k.ctx.light_cdf.free();
 
+        k.ctx.ray_sensors.free();
+        k.ctx.ray_sensor_records.free();
+        k.ctx.ray_sensor_recorder_buffers.free();
+        k.ctx.ray_sensor_controller_buffers.free();
+        k.ctx.ray_sensor_directions.free();
+        k.ctx.ray_sensor_signals.free();
+
+        k.ctx.ray_sensor_layout.free();
+        k.ctx.ray_sensor_ray_layout.free();
+        k.ctx.ray_sensor_record_layout.free();
+        k.ctx.ray_sensor_hit_record_layout.free();
+        k.ctx.ray_sensor_entity_info_record_layout.free();
+        k.ctx.ray_sensor_entity_detail_record_layout.free();
+        k.ctx.ray_sensor_material_record_layout.free();
+        k.ctx.ray_sensor_normal_record_layout.free();
+        k.ctx.ray_sensor_velocity_record_layout.free();
+        k.ctx.ray_sensor_state_record_layout.free();
+
+        k.ctx.ray_sensor_signal_layout.free();
+
         k.ctx.intersect_regions.free();
         k.ctx.intersect_region_counts.free();
         k.ctx.intersect_region_offsets.free();
@@ -541,6 +588,9 @@ void RS_KernelManager::syncRecorderRecords() {
     for (auto& manager : _kernel_camera_stereo_managers) {
         manager.second->syncRecorderRecords();
     }
+    for (auto& manager : _kernel_ray_sensor_managers) {
+        manager.second->syncRecorderRecords();
+    }
     for (auto& manager : _kernel_intersect_region_managers) {
         manager.second->syncRecorderRecords();
     }
@@ -555,6 +605,9 @@ void RS_KernelManager::waitForRecorderRecordsSync() {
         manager.second->waitForRecorderRecordsSync();
     }
     for (auto& manager : _kernel_camera_stereo_managers) {
+        manager.second->waitForRecorderRecordsSync();
+    }
+    for (auto& manager : _kernel_ray_sensor_managers) {
         manager.second->waitForRecorderRecordsSync();
     }
     for (auto& manager : _kernel_intersect_region_managers) {
@@ -604,6 +657,20 @@ RS_KernelManager::getRecorderCameraStereoRecords() {
     return result;
 }
 
+unordered_map<string, RS_KernelRecorderRaySensorBundle>
+RS_KernelManager::getRecorderRaySensorRecords() {
+    RS_KernelManagerCommandExecutionGuard guard(this);
+    unordered_map<string, RS_KernelRecorderRaySensorBundle> result;
+
+    for (auto& [sensor_name, sensor_manager] : _kernel_ray_sensor_managers) {
+        string recorder_name = sensor_manager->getRecordRecorderName();
+        if (recorder_name.empty()) continue;
+        result[recorder_name].ray_sensor_records[sensor_manager->getEntityName()] =
+            sensor_manager->getRecorderRecords();
+    }
+    return result;
+}
+
 unordered_map<string, RS_KernelRecorderIntersectRegionBundle>
 RS_KernelManager::getRecorderIntersectRegionRecords() {
     RS_KernelManagerCommandExecutionGuard guard(this);
@@ -635,6 +702,11 @@ void RS_KernelManager::syncControllerRecords() {
             manager.second->syncControllerRecord();
         }
     }
+    for (auto& manager : _kernel_ray_sensor_managers) {
+        if (manager.second->hasControllerRecord()) {
+            manager.second->syncControllerRecord();
+        }
+    }
     for (auto& manager : _kernel_intersect_region_managers) {
         if (manager.second->hasControllerRecord()) {
             manager.second->syncControllerRecord();
@@ -655,6 +727,11 @@ void RS_KernelManager::syncControllerSignals() {
         }
     }
     for (auto& manager : _kernel_camera_stereo_managers) {
+        if (manager.second->hasControllerSignal()) {
+            manager.second->syncControllerSignal();
+        }
+    }
+    for (auto& manager : _kernel_ray_sensor_managers) {
         if (manager.second->hasControllerSignal()) {
             manager.second->syncControllerSignal();
         }
@@ -718,6 +795,18 @@ unordered_map<string, RS_KernelControllerBundle> RS_KernelManager::getController
         if (cam_manager->hasControllerRecord()) {
             const string& cn = cam_manager->getRecordControllerName();
             if (!cn.empty()) result[cn].records.emplace_back(cam_manager->getControllerRecord());
+        }
+    }
+
+    // Ray sensor: free sensors carry a signal; all sensors may emit a record.
+    for (auto& [sensor_name, sensor_manager] : _kernel_ray_sensor_managers) {
+        if (sensor_manager->hasControllerSignal()) {
+            const string& cn = sensor_manager->getSignalControllerName();
+            if (!cn.empty()) result[cn].signals.emplace_back(sensor_manager->getControllerSignal());
+        }
+        if (sensor_manager->hasControllerRecord()) {
+            const string& cn = sensor_manager->getRecordControllerName();
+            if (!cn.empty()) result[cn].records.emplace_back(sensor_manager->getControllerRecord());
         }
     }
 
@@ -833,6 +922,10 @@ std::string RS_KernelManager::purgeStructure(RIndex structure_gid) {
         if (mgr->getStructureGid() == structure_gid)
             dependent_cameras.push_back(mgr->getEntityName());
     }
+    for (auto& [key, mgr] : _kernel_ray_sensor_managers) {
+        if (mgr->getStructureGid() == structure_gid)
+            dependent_cameras.push_back(mgr->getEntityName());
+    }
     for (auto& [key, mgr] : _kernel_intersect_region_managers) {
         if (mgr->getStructureGid() == structure_gid)
             dependent_records.push_back(mgr->getRecordName());
@@ -896,6 +989,18 @@ bool RS_KernelManager::isVoxelPartitionModified() const {
 
 void RS_KernelManager::clearVoxelPartitionModified() {
     _kernel_spatial_manager.clearVoxelPartitionModified();
+}
+
+void RS_KernelManager::markRigidBodyPartitionModified() {
+    _kernel_spatial_manager.markRigidBodyPartitionModified();
+}
+
+bool RS_KernelManager::isRigidBodyPartitionModified() const {
+    return _kernel_spatial_manager.isRigidBodyPartitionModified();
+}
+
+void RS_KernelManager::clearRigidBodyPartitionModified() {
+    _kernel_spatial_manager.clearRigidBodyPartitionModified();
 }
 
 void RS_KernelManager::markStaticVoxelMoved() { _kernel_spatial_manager.markStaticVoxelMoved(); }
@@ -1160,6 +1265,8 @@ bool RS_KernelManager::isEntityFrozen(const std::string& name) {
     if (auto it = _kernel_camera_stereo_managers.find(name);
         it != _kernel_camera_stereo_managers.end())
         return it->second->isFrozen();
+    if (auto it = _kernel_ray_sensor_managers.find(name); it != _kernel_ray_sensor_managers.end())
+        return it->second->isFrozen();
     if (_kernel_floor_manager) {
         bool matched = false;
         _kernel_floor_manager->getRSC().visit([&](auto& c) {
@@ -1188,6 +1295,9 @@ RSC_EntityVariant RS_KernelManager::findEntity(const std::string& name) {
     }
     if (auto it = _kernel_camera_stereo_managers.find(name);
         it != _kernel_camera_stereo_managers.end()) {
+        return it->second->getRSC().visit([](auto& c) { return RSC_EntityVariant(c); });
+    }
+    if (auto it = _kernel_ray_sensor_managers.find(name); it != _kernel_ray_sensor_managers.end()) {
         return it->second->getRSC().visit([](auto& c) { return RSC_EntityVariant(c); });
     }
     if (_kernel_floor_manager) {
@@ -1341,6 +1451,9 @@ RSC_World RS_KernelManager::getWorld() {
     }
     for (auto& [_, cm] : _kernel_camera_stereo_managers) {
         cm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
+    }
+    for (auto& [_, sm] : _kernel_ray_sensor_managers) {
+        sm->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
     }
     if (_kernel_floor_manager) {
         _kernel_floor_manager->getRSC().visit([&](auto& c) { world.entities.emplace_back(c); });
@@ -1506,6 +1619,11 @@ RS_KernelManager::getKernelCameraPerspectiveManagers() {
 unordered_map<string, unique_ptr<RS_KernelCameraStereoManager>>&
 RS_KernelManager::getKernelCameraStereoManagers() {
     return _kernel_camera_stereo_managers;
+}
+
+unordered_map<string, unique_ptr<RS_KernelRaySensorManager>>&
+RS_KernelManager::getKernelRaySensorManagers() {
+    return _kernel_ray_sensor_managers;
 }
 
 unordered_map<string, unique_ptr<RS_KernelForceManager>>&
@@ -2003,6 +2121,11 @@ void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, TaskPromise t
             auto mgr = std::make_unique<RS_KernelCameraStereoManager>(this, c);
             _kernel_camera_stereo_managers[c.name] = std::move(mgr);
             _stageCommit(RSE_KERNEL_MANAGER_CAMERA_STEREO, c.name);
+        } else if constexpr (std::is_same_v<T, RSC_RaySensorFree> ||
+                             std::is_same_v<T, RSC_RaySensorRigidBodyLinked>) {
+            auto mgr = std::make_unique<RS_KernelRaySensorManager>(this, c);
+            _kernel_ray_sensor_managers[c.name] = std::move(mgr);
+            _stageCommit(RSE_KERNEL_MANAGER_RAY_SENSOR, c.name);
         } else if constexpr (std::is_same_v<T, RSC_FloorFlat> ||
                              std::is_same_v<T, RSC_FloorArray>) {
             if (_kernel_floor_manager) {
@@ -2072,6 +2195,20 @@ void RS_KernelManager::_removeEntity(const std::string& name, TaskPromise task) 
         _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
+    if (auto it = _kernel_ray_sensor_managers.find(name); it != _kernel_ray_sensor_managers.end()) {
+        if (it->second->getUseCount() > 0) {
+            RS_THROW(RS_SimulationException(
+                "Cannot remove ray sensor '{}': still in use ({} reference(s))",
+                name,
+                it->second->getUseCount()
+            ));
+        }
+        it->second->decommit();
+        _kernel_ray_sensor_managers.erase(it);
+        _retractPendingCommit(RSE_KERNEL_MANAGER_RAY_SENSOR, name);
+        _queueResult(task, RS_WorldTaskDataSuccess{});
+        return;
+    }
     if (_kernel_floor_manager) {
         bool matched = false;
         _kernel_floor_manager->getRSC().visit([&](auto& c) {
@@ -2134,6 +2271,11 @@ void RS_KernelManager::_freezeEntity(const std::string& name, TaskPromise task) 
         _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
     }
+    if (auto it = _kernel_ray_sensor_managers.find(name); it != _kernel_ray_sensor_managers.end()) {
+        it->second->freeze();
+        _queueResult(task, RS_WorldTaskDataSuccess{});
+        return;
+    }
     if (_kernel_floor_manager) {
         bool matched = false;
         _kernel_floor_manager->getRSC().visit([&](auto& c) {
@@ -2174,6 +2316,11 @@ void RS_KernelManager::_unfreezeEntity(const std::string& name, TaskPromise task
     }
     if (auto it = _kernel_camera_stereo_managers.find(name);
         it != _kernel_camera_stereo_managers.end()) {
+        it->second->unfreeze();
+        _queueResult(task, RS_WorldTaskDataSuccess{});
+        return;
+    }
+    if (auto it = _kernel_ray_sensor_managers.find(name); it != _kernel_ray_sensor_managers.end()) {
         it->second->unfreeze();
         _queueResult(task, RS_WorldTaskDataSuccess{});
         return;
@@ -2335,6 +2482,11 @@ void RS_KernelManager::_flushOneCommit(RSE_KernelManagerType type, const std::st
         case RSE_KERNEL_MANAGER_CAMERA_STEREO:
             if (auto it = _kernel_camera_stereo_managers.find(name);
                 it != _kernel_camera_stereo_managers.end())
+                it->second->commit();
+            break;
+        case RSE_KERNEL_MANAGER_RAY_SENSOR:
+            if (auto it = _kernel_ray_sensor_managers.find(name);
+                it != _kernel_ray_sensor_managers.end())
                 it->second->commit();
             break;
         case RSE_KERNEL_MANAGER_FLOOR:

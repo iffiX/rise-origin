@@ -665,6 +665,205 @@ class RSPY_WorldCameraStereoRecord {
     [[nodiscard]] State right_camera_state() const { return State(record.right_camera_state); }
 };
 
+class RSPY_WorldRaySensorRecord {
+   public:
+    RS_WorldRaySensorRecord record;
+    explicit RSPY_WorldRaySensorRecord(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+    class Hit {
+       public:
+        RS_WorldRaySensorRecord record;
+        explicit Hit(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RSize size() const { return record.ray_num; }
+
+        /// Hit flag per ray as a [ray_num] uint8 ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<uint8_t> is_hit() const {
+            if (record.hit.object_num == 0 || !record.isValid()) return py::array_t<uint8_t>(0);
+            return rspyRoArray1D(reinterpret_cast<uint8_t *>(record.hit.is_hit), record.ray_num);
+        }
+
+        /// Hit distance per ray as a [ray_num] float ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<RFloat> distance() const {
+            if (record.hit.object_num == 0 || !record.isValid()) return py::array_t<RFloat>(0);
+            return rspyRoArray1D(record.hit.distance, record.ray_num);
+        }
+
+        /// Hit position per ray as a [ray_num, 3] float ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<RFloat> hit_position() const {
+            if (record.hit.object_num == 0 || !record.isValid()) return py::array_t<RFloat>(0);
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.hit.hit_position), record.ray_num, 3
+            );
+        }
+    };
+
+    class EntityInfo {
+       public:
+        RS_WorldRaySensorRecord record;
+        explicit EntityInfo(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RSize size() const { return record.ray_num; }
+
+        /// Hit entity global id per ray as a [ray_num] uint32 ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<uint32_t> entity_gid() const {
+            if (record.entity_info.object_num == 0 || !record.isValid())
+                return py::array_t<uint32_t>(0);
+            return rspyRoArray1D(
+                reinterpret_cast<uint32_t *>(record.entity_info.entity_gid), record.ray_num
+            );
+        }
+
+        /// Hit entity type per ray as a [ray_num] uint32 ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<uint32_t> entity_type() const {
+            if (record.entity_info.object_num == 0 || !record.isValid())
+                return py::array_t<uint32_t>(0);
+            return rspyRoArray1D(
+                reinterpret_cast<uint32_t *>(record.entity_info.entity_type), record.ray_num
+            );
+        }
+    };
+
+    class EntityDetail {
+       public:
+        RS_WorldRaySensorRecord record;
+        explicit EntityDetail(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RSize size() const { return record.ray_num; }
+
+        /// Hit body id per ray as a [ray_num] uint32 ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<uint32_t> body_sid() const {
+            if (record.entity_detail.object_num == 0 || !record.isValid())
+                return py::array_t<uint32_t>(0);
+            return rspyRoArray1D(
+                reinterpret_cast<uint32_t *>(record.entity_detail.body_sid), record.ray_num
+            );
+        }
+
+        /// Hit segment id per ray as a [ray_num] uint32 ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<uint32_t> segment_bid() const {
+            if (record.entity_detail.object_num == 0 || !record.isValid())
+                return py::array_t<uint32_t>(0);
+            return rspyRoArray1D(
+                reinterpret_cast<uint32_t *>(record.entity_detail.segment_bid), record.ray_num
+            );
+        }
+
+        /// Hit voxel id per ray as a [ray_num] uint32 ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<uint32_t> voxel_sid() const {
+            if (record.entity_detail.object_num == 0 || !record.isValid())
+                return py::array_t<uint32_t>(0);
+            return rspyRoArray1D(
+                reinterpret_cast<uint32_t *>(record.entity_detail.voxel_sid), record.ray_num
+            );
+        }
+    };
+
+    class Material {
+       public:
+        RS_WorldRaySensorRecord record;
+        explicit Material(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RSize size() const { return record.ray_num; }
+
+        /// Hit material id per ray as a [ray_num] uint32 ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<uint32_t> material_id() const {
+            if (record.material.object_num == 0 || !record.isValid())
+                return py::array_t<uint32_t>(0);
+            return rspyRoArray1D(
+                reinterpret_cast<uint32_t *>(record.material.material_id), record.ray_num
+            );
+        }
+
+        /// Hit material emission per ray as a [ray_num] float ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<RFloat> emission() const {
+            if (record.material.object_num == 0 || !record.isValid()) return py::array_t<RFloat>(0);
+            return rspyRoArray1D(record.material.emission, record.ray_num);
+        }
+    };
+
+    class Normal {
+       public:
+        RS_WorldRaySensorRecord record;
+        explicit Normal(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RSize size() const { return record.ray_num; }
+
+        /// Hit normal per ray as a [ray_num, 3] float ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<RFloat> normal() const {
+            if (record.normal.object_num == 0 || !record.isValid()) return py::array_t<RFloat>(0);
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.normal.normal), record.ray_num, 3
+            );
+        }
+    };
+
+    class Velocity {
+       public:
+        RS_WorldRaySensorRecord record;
+        explicit Velocity(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RSize size() const { return record.ray_num; }
+
+        /// Hit world velocity per ray as a [ray_num, 3] float ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<RFloat> v_hit() const {
+            if (record.velocity.object_num == 0 || !record.isValid()) return py::array_t<RFloat>(0);
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.velocity.v_hit), record.ray_num, 3
+            );
+        }
+
+        /// Relative velocity per ray as a [ray_num, 3] float ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<RFloat> v_rel() const {
+            if (record.velocity.object_num == 0 || !record.isValid()) return py::array_t<RFloat>(0);
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.velocity.v_rel), record.ray_num, 3
+            );
+        }
+
+        /// Radial velocity per ray as a [ray_num] float ndarray, empty when disabled.
+        [[nodiscard]] py::array_t<RFloat> v_radial() const {
+            if (record.velocity.object_num == 0 || !record.isValid()) return py::array_t<RFloat>(0);
+            return rspyRoArray1D(record.velocity.v_radial, record.ray_num);
+        }
+    };
+
+    class State {
+       public:
+        RS_WorldRaySensorRecord record;
+        explicit State(const RS_WorldRaySensorRecord &rec) : record(rec) {}
+
+        [[nodiscard]] RBigSize size() const { return record.sensor_state.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> position() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.sensor_state.position), size(), 3
+            );
+        }
+        [[nodiscard]] py::array_t<RFloat> orientation() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.sensor_state.orientation), size(), 4
+            );
+        }
+    };
+
+    [[nodiscard]] RBigIndex step() const { return record.getStep(); }
+    [[nodiscard]] RBigFloat time() const { return record.getTime(); }
+    [[nodiscard]] RIndex sensor_gid() const { return record.sensor_gid; }
+    [[nodiscard]] RIndex structure_gid() const { return record.structure_gid; }
+    [[nodiscard]] RIndex rigid_body_sid() const { return record.rigid_body_sid; }
+    [[nodiscard]] RSize ray_num() const { return record.ray_num; }
+    [[nodiscard]] bool is_valid() const { return record.isValid(); }
+
+    [[nodiscard]] Hit hit() const { return Hit(record); }
+    [[nodiscard]] EntityInfo entity_info() const { return EntityInfo(record); }
+    [[nodiscard]] EntityDetail entity_detail() const { return EntityDetail(record); }
+    [[nodiscard]] Material material() const { return Material(record); }
+    [[nodiscard]] Normal normal() const { return Normal(record); }
+    [[nodiscard]] Velocity velocity() const { return Velocity(record); }
+    [[nodiscard]] State state() const { return State(record); }
+};
+
 class RSPY_WorldIntersectRegionRecord {
    public:
     RS_WorldIntersectRegionRecord record;
@@ -854,6 +1053,43 @@ class RSPY_WorldCameraStereoSignal {
     }
 };
 
+class RSPY_WorldRaySensorSignal {
+   public:
+    RS_WorldRaySensorSignal signal;
+    explicit RSPY_WorldRaySensorSignal(const RS_WorldRaySensorSignal &sig) : signal(sig) {}
+
+    class Position {
+       public:
+        RS_WorldRaySensorSignal signal;
+        explicit Position(const RS_WorldRaySensorSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.position_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> position() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.position_signals.position), size(), 3
+            );
+        }
+    };
+
+    class Orientation {
+       public:
+        RS_WorldRaySensorSignal signal;
+        explicit Orientation(const RS_WorldRaySensorSignal &sig) : signal(sig) {}
+
+        [[nodiscard]] RBigSize size() const { return signal.orientation_signals.object_num; }
+
+        [[nodiscard]] py::array_t<RFloat> orientation() const {
+            return rspyRwArray2D(
+                reinterpret_cast<RFloat *>(signal.orientation_signals.orientation), size(), 4
+            );
+        }
+    };
+
+    [[nodiscard]] Position position_signals() const { return Position(signal); }
+    [[nodiscard]] Orientation orientation_signals() const { return Orientation(signal); }
+};
+
 class RSPY_WorldForceSignal {
    public:
     RS_WorldForceSignal signal;
@@ -962,6 +1198,8 @@ class RSPY_WorldController {
                     result.append(py::cast(RSPY_WorldCameraPerspectiveRecord(held)));
                 } else if constexpr (std::is_same_v<T, RS_WorldCameraStereoRecord>) {
                     result.append(py::cast(RSPY_WorldCameraStereoRecord(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldRaySensorRecord>) {
+                    result.append(py::cast(RSPY_WorldRaySensorRecord(held)));
                 } else if constexpr (std::is_same_v<T, RS_WorldIntersectRegionRecord>) {
                     result.append(py::cast(RSPY_WorldIntersectRegionRecord(held)));
                 }
@@ -981,6 +1219,8 @@ class RSPY_WorldController {
                     result.append(py::cast(RSPY_WorldCameraPerspectiveSignal(held)));
                 } else if constexpr (std::is_same_v<T, RS_WorldCameraStereoSignal>) {
                     result.append(py::cast(RSPY_WorldCameraStereoSignal(held)));
+                } else if constexpr (std::is_same_v<T, RS_WorldRaySensorSignal>) {
+                    result.append(py::cast(RSPY_WorldRaySensorSignal(held)));
                 } else if constexpr (std::is_same_v<T, RS_WorldForceSignal>) {
                     result.append(py::cast(RSPY_WorldForceSignal(held)));
                 } else if constexpr (std::is_same_v<T, RS_WorldTorqueSignal>) {
@@ -1494,6 +1734,60 @@ inline void initRSPYCore(py::module &m) {
         .def("focus_distance", &RSPY_WorldCameraStereoRecord::State::focus_distance)
         .def("field_of_view", &RSPY_WorldCameraStereoRecord::State::field_of_view);
 
+    auto ray_sensor_record =
+        py::class_<RSPY_WorldRaySensorRecord>(m, "RS_WorldRaySensorRecord")
+            .def("step", &RSPY_WorldRaySensorRecord::step)
+            .def("time", &RSPY_WorldRaySensorRecord::time)
+            .def("sensor_gid", &RSPY_WorldRaySensorRecord::sensor_gid)
+            .def("structure_gid", &RSPY_WorldRaySensorRecord::structure_gid)
+            .def("rigid_body_sid", &RSPY_WorldRaySensorRecord::rigid_body_sid)
+            .def("ray_num", &RSPY_WorldRaySensorRecord::ray_num)
+            .def("is_valid", &RSPY_WorldRaySensorRecord::is_valid)
+            .def_property_readonly("hit", &RSPY_WorldRaySensorRecord::hit)
+            .def_property_readonly("entity_info", &RSPY_WorldRaySensorRecord::entity_info)
+            .def_property_readonly("entity_detail", &RSPY_WorldRaySensorRecord::entity_detail)
+            .def_property_readonly("material", &RSPY_WorldRaySensorRecord::material)
+            .def_property_readonly("normal", &RSPY_WorldRaySensorRecord::normal)
+            .def_property_readonly("velocity", &RSPY_WorldRaySensorRecord::velocity)
+            .def_property_readonly("state", &RSPY_WorldRaySensorRecord::state);
+
+    py::class_<RSPY_WorldRaySensorRecord::Hit>(ray_sensor_record, "Hit")
+        .def("size", &RSPY_WorldRaySensorRecord::Hit::size)
+        .def("is_hit", &RSPY_WorldRaySensorRecord::Hit::is_hit)
+        .def("distance", &RSPY_WorldRaySensorRecord::Hit::distance)
+        .def("hit_position", &RSPY_WorldRaySensorRecord::Hit::hit_position);
+
+    py::class_<RSPY_WorldRaySensorRecord::EntityInfo>(ray_sensor_record, "EntityInfo")
+        .def("size", &RSPY_WorldRaySensorRecord::EntityInfo::size)
+        .def("entity_gid", &RSPY_WorldRaySensorRecord::EntityInfo::entity_gid)
+        .def("entity_type", &RSPY_WorldRaySensorRecord::EntityInfo::entity_type);
+
+    py::class_<RSPY_WorldRaySensorRecord::EntityDetail>(ray_sensor_record, "EntityDetail")
+        .def("size", &RSPY_WorldRaySensorRecord::EntityDetail::size)
+        .def("body_sid", &RSPY_WorldRaySensorRecord::EntityDetail::body_sid)
+        .def("segment_bid", &RSPY_WorldRaySensorRecord::EntityDetail::segment_bid)
+        .def("voxel_sid", &RSPY_WorldRaySensorRecord::EntityDetail::voxel_sid);
+
+    py::class_<RSPY_WorldRaySensorRecord::Material>(ray_sensor_record, "Material")
+        .def("size", &RSPY_WorldRaySensorRecord::Material::size)
+        .def("material_id", &RSPY_WorldRaySensorRecord::Material::material_id)
+        .def("emission", &RSPY_WorldRaySensorRecord::Material::emission);
+
+    py::class_<RSPY_WorldRaySensorRecord::Normal>(ray_sensor_record, "Normal")
+        .def("size", &RSPY_WorldRaySensorRecord::Normal::size)
+        .def("normal", &RSPY_WorldRaySensorRecord::Normal::normal);
+
+    py::class_<RSPY_WorldRaySensorRecord::Velocity>(ray_sensor_record, "Velocity")
+        .def("size", &RSPY_WorldRaySensorRecord::Velocity::size)
+        .def("v_hit", &RSPY_WorldRaySensorRecord::Velocity::v_hit)
+        .def("v_rel", &RSPY_WorldRaySensorRecord::Velocity::v_rel)
+        .def("v_radial", &RSPY_WorldRaySensorRecord::Velocity::v_radial);
+
+    py::class_<RSPY_WorldRaySensorRecord::State>(ray_sensor_record, "State")
+        .def("size", &RSPY_WorldRaySensorRecord::State::size)
+        .def("position", &RSPY_WorldRaySensorRecord::State::position)
+        .def("orientation", &RSPY_WorldRaySensorRecord::State::orientation);
+
     auto intersect_region_record =
         py::class_<RSPY_WorldIntersectRegionRecord>(m, "RS_WorldIntersectRegionRecord")
             .def("step", &RSPY_WorldIntersectRegionRecord::step)
@@ -1562,6 +1856,16 @@ inline void initRSPYCore(py::module &m) {
         .def("right_orientation_signals", &RSPY_WorldCameraStereoSignal::right_orientation_signals)
         .def("left_optics_signals", &RSPY_WorldCameraStereoSignal::left_optics_signals)
         .def("right_optics_signals", &RSPY_WorldCameraStereoSignal::right_optics_signals);
+
+    auto ray_sensor_signal = py::class_<RSPY_WorldRaySensorSignal>(m, "RS_WorldRaySensorSignal");
+    py::class_<RSPY_WorldRaySensorSignal::Position>(ray_sensor_signal, "Position")
+        .def("size", &RSPY_WorldRaySensorSignal::Position::size)
+        .def("position", &RSPY_WorldRaySensorSignal::Position::position);
+    py::class_<RSPY_WorldRaySensorSignal::Orientation>(ray_sensor_signal, "Orientation")
+        .def("size", &RSPY_WorldRaySensorSignal::Orientation::size)
+        .def("orientation", &RSPY_WorldRaySensorSignal::Orientation::orientation);
+    ray_sensor_signal.def("position_signals", &RSPY_WorldRaySensorSignal::position_signals)
+        .def("orientation_signals", &RSPY_WorldRaySensorSignal::orientation_signals);
 
     auto force_signal = py::class_<RSPY_WorldForceSignal>(m, "RS_WorldForceSignal");
     py::class_<RSPY_WorldForceSignal::Force>(force_signal, "Force")
@@ -2432,6 +2736,10 @@ inline void initRSPYCore(py::module &m) {
     /*****************************************************************
      * World session
      *****************************************************************/
+    py::enum_<RSE_WorldSessionScope>(m, "RSE_WorldSessionScope")
+        .value("RSE_WORLD_SESSION_SCOPE_OWNED", RSE_WORLD_SESSION_SCOPE_OWNED)
+        .value("RSE_WORLD_SESSION_SCOPE_FULL", RSE_WORLD_SESSION_SCOPE_FULL)
+        .export_values();
 
     py::class_<RS_WorldSession>(m, "RS_WorldSession")
         .def(
@@ -2457,8 +2765,11 @@ inline void initRSPYCore(py::module &m) {
             &RS_WorldSession::addComponent,
             py::arg("name"),
             py::arg("component"),
+            py::arg("scope") = RSE_WORLD_SESSION_SCOPE_OWNED,
             R"doc(
-            Attach a component under a name, giving it its own scoped access.
+            Attach a component under a name, giving it its own scoped access. The scope decides the
+            component's power over the world: OWNED is the default sandbox, FULL grants read and
+            write over the whole world.
         )doc"
         )
         .def(

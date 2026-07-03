@@ -11,9 +11,12 @@
 #include "rise_origin/device/rs_constant_memory.h"
 #include "rise_origin/logic/mesh/rs_mesh_triangle_c.h"
 #include "rise_origin/logic/metric/rs_basic_metric_c.h"
+#include "rise_origin/logic/ray/rs_ray_sensor_c.h"
+#include "rise_origin/logic/ray/rs_ray_sensor_ray_c.h"
 #include "rise_origin/logic/record/rs_basic_record_c.h"
 #include "rise_origin/logic/record/rs_camera_record_c.h"
 #include "rise_origin/logic/record/rs_intersect_region_c.h"
+#include "rise_origin/logic/record/rs_ray_sensor_record_c.h"
 #include "rise_origin/logic/record/rs_structure_record_c.h"
 #include "rise_origin/logic/rigid/rs_constraint_c.h"
 #include "rise_origin/logic/rigid/rs_contact_c.h"
@@ -671,12 +674,14 @@ void RS_SimulationExecutor::_runRigidbodyContactAndConstraintUpdate() {
         if (ctx.structure_rigid_body_layout.size() == 0) return;
         auto rigid_body_handles = _getLaunchHandles("rigid_body");
         auto rigid_body_surface_voxel_handles = _getLaunchHandles("rigid_body_surface_voxel");
+        auto dynamic_rigid_body_handles = _getLaunchHandles("dynamic_rigid_body");
 
         // Apply gravity impulse before any solver so the solver sees gravity-loaded lm.
         p_ptr->template run<RSCF_LaunchWithHandles<
             typename RS_RigidBodyCompute<ComputeAccuracy>::RSCF_ApplyGravity,
             KernelType>>(
-            {rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false}, rigid_body_handles
+            {dynamic_rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+            dynamic_rigid_body_handles
         );
 
         // Constraint joints solve, using block-shared PGS, one block per structure.
@@ -710,7 +715,8 @@ void RS_SimulationExecutor::_runRigidbodyContactAndConstraintUpdate() {
             p_ptr->template run<RSCF_LaunchWithHandles<
                 typename RS_RigidBodyCompute<ComputeAccuracy>::RSCF_ResetRigidBodyCouplingWork,
                 KernelType>>(
-                {rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false}, rigid_body_handles
+                {dynamic_rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+                dynamic_rigid_body_handles
             );
         }
 
@@ -989,14 +995,15 @@ void RS_SimulationExecutor::_runRigidbodyContactAndConstraintUpdate() {
         p_ptr->template run<RSCF_LaunchWithHandles<
             typename RS_RigidBodyCompute<ComputeAccuracy>::RSCF_ApplyDamping,
             KernelType>>(
-            {rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false}, rigid_body_handles
+            {dynamic_rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+            dynamic_rigid_body_handles
         );
     });
 }
 
 void RS_SimulationExecutor::_runRecordUpdate() {
     _runWithCriticalDataAccessGuard([&](auto *, auto *, auto, bool) {
-        _updateLightAndVision();
+        _updateVisionAndRay();
         _updateIntersectRegionRecord();
     });
 }
@@ -1049,11 +1056,12 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
 
         // Force signals: rigid and soft.
         if (ctx.force_rigid.size() > 0) {
-            auto rigid_body_handles = _getLaunchHandles("rigid_body");
+            auto dynamic_rigid_body_handles = _getLaunchHandles("dynamic_rigid_body");
             p_ptr->template run<RSCF_LaunchWithHandles<
                 typename RS_ForceCompute<ComputeAccuracy>::RSCF_ApplyRigidForceSignal,
                 KernelType>>(
-                {rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false}, rigid_body_handles
+                {dynamic_rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+                dynamic_rigid_body_handles
             );
 
             p_ptr->template run<RSCF_LaunchDirect<
@@ -1075,11 +1083,12 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
 
         // Torque signals: rigid only.
         if (ctx.torque_rigid.size() > 0) {
-            auto rigid_body_handles = _getLaunchHandles("rigid_body");
+            auto dynamic_rigid_body_handles = _getLaunchHandles("dynamic_rigid_body");
             p_ptr->template run<RSCF_LaunchWithHandles<
                 typename RS_TorqueCompute<ComputeAccuracy>::RSCF_ApplyRigidTorqueSignal,
                 KernelType>>(
-                {rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false}, rigid_body_handles
+                {dynamic_rigid_body_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+                dynamic_rigid_body_handles
             );
 
             p_ptr->template run<RSCF_LaunchDirect<
@@ -1156,7 +1165,7 @@ void RS_SimulationExecutor::_performCallback() {
     });
 }
 
-void RS_SimulationExecutor::_updateLightAndVision() {
+void RS_SimulationExecutor::_updateVisionAndRay() {
     _rebuildStaticVoxelBVHIfNeeded();
     _rebuildFloorTriangleBVHIfNeeded();
     _rebuildDynamicVoxelBVH();
@@ -1180,6 +1189,11 @@ void RS_SimulationExecutor::_updateLightAndVision() {
             p_ptr->template run<
                 RSCF_LaunchWithLayout<RS_CameraCompute<>::RSCF_UpdateCamera, KernelType>>(
                 {ctx.camera_layout.size(), RS_AUTO_BLOCK_SIZE, false}, ctx.camera_layout
+            );
+
+            p_ptr->template run<
+                RSCF_LaunchWithLayout<RS_RaySensorCompute<>::RSCF_UpdateRaySensor, KernelType>>(
+                {ctx.ray_sensor_layout.size(), RS_AUTO_BLOCK_SIZE, false}, ctx.ray_sensor_layout
             );
 
             p_ptr->template run<RSCF_LaunchWithLayoutPerSegment<
@@ -1606,6 +1620,40 @@ void RS_SimulationExecutor::_storeRecorderRecords() {
                     ctx.camera_state_record_layout
                 );
             }
+
+            /****************************************************************
+             * Ray sensor records
+             ****************************************************************/
+            if (ctx.host_data->ray_sensor_record_layout.size() != 0) {
+                p_ptr->template run<
+                    RSCF_LaunchUpdateRootRecord<RSCF_UpdateRaySensorRootRecord, KernelType>>(
+                    {ctx.ray_sensor_records.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.ray_sensor_recorder_buffers,
+                    ctx.ray_sensor_records,
+                    ctx.ray_sensor_hit_record_layout,
+                    ctx.ray_sensor_entity_info_record_layout,
+                    ctx.ray_sensor_entity_detail_record_layout,
+                    ctx.ray_sensor_material_record_layout,
+                    ctx.ray_sensor_normal_record_layout,
+                    ctx.ray_sensor_velocity_record_layout,
+                    ctx.ray_sensor_state_record_layout
+                );
+
+                p_ptr->template run<RSCF_LaunchStoreRecordWithLayout<
+                    RS_RaySensorRayCompute<>::RSCF_TraceRaySensorRays,
+                    KernelType>>(
+                    {ctx.ray_sensor_ray_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.ray_sensor_records,
+                    ctx.ray_sensor_ray_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreRaySensorStateRecord, KernelType>>(
+                    {ctx.ray_sensor_state_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.ray_sensor_records,
+                    ctx.ray_sensor_state_record_layout
+                );
+            }
         });
     });
 }
@@ -1735,6 +1783,40 @@ void RS_SimulationExecutor::_storeControllerRecords() {
                     {ctx.camera_state_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.camera_records,
                     ctx.camera_state_record_layout
+                );
+            }
+
+            /****************************************************************
+             * Ray sensor records
+             ****************************************************************/
+            if (ctx.host_data->ray_sensor_record_layout.size() != 0) {
+                p_ptr->template run<
+                    RSCF_LaunchUpdateRootRecord<RSCF_UpdateRaySensorRootRecord, KernelType>>(
+                    {ctx.ray_sensor_records.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.ray_sensor_controller_buffers,
+                    ctx.ray_sensor_records,
+                    ctx.ray_sensor_hit_record_layout,
+                    ctx.ray_sensor_entity_info_record_layout,
+                    ctx.ray_sensor_entity_detail_record_layout,
+                    ctx.ray_sensor_material_record_layout,
+                    ctx.ray_sensor_normal_record_layout,
+                    ctx.ray_sensor_velocity_record_layout,
+                    ctx.ray_sensor_state_record_layout
+                );
+
+                p_ptr->template run<RSCF_LaunchStoreRecordWithLayout<
+                    RS_RaySensorRayCompute<>::RSCF_TraceRaySensorRays,
+                    KernelType>>(
+                    {ctx.ray_sensor_ray_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.ray_sensor_records,
+                    ctx.ray_sensor_ray_layout
+                );
+
+                p_ptr->template run<
+                    RSCF_LaunchStoreRecordWithLayout<RSCF_StoreRaySensorStateRecord, KernelType>>(
+                    {ctx.ray_sensor_state_record_layout.size(), RS_AUTO_BLOCK_SIZE, false},
+                    ctx.ray_sensor_records,
+                    ctx.ray_sensor_state_record_layout
                 );
             }
         });
@@ -1947,6 +2029,10 @@ RS_Vector<RHandle> RS_SimulationExecutor::_getLaunchHandles(const std::string &n
                         ctx.host_data->structure_rigid_body_layout.versionID();
                 }
                 indices = _handles["rigid_body"];
+            } else if (name == "dynamic_rigid_body") {
+                // The mobile subset is derived from the full rigid body set.
+                _resolveRigidBodyMobilityPartitionIfNeeded();
+                indices = _handles.at(name);
             } else if (name == "rigid_body_surface_voxel") {
                 if (ctx.host_data->structure_rigid_body_surface_voxel_layout.versionID() !=
                     _handle_version_ids.at(name)) {
@@ -2025,7 +2111,7 @@ bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
 
                     // One classify pass writes both flag arrays.
                     p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                        typename RS_VoxelCompute<ComputeAccuracy>::RSCF_GetVoxelMobilityFlags,
+                        logic::RSCF_GetVoxelMobilityFlags,
                         KernelType>>(
                         {num_voxels, RS_AUTO_BLOCK_SIZE, false},
                         voxel_handles,
@@ -2040,7 +2126,7 @@ bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
                         ensure_vector_size(_handles[key], count);
                         if (count > 0) {
                             p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                                typename RS_VoxelCompute<ComputeAccuracy>::RSCF_CompactVoxelHandles,
+                                logic::RSCF_CompactVoxelHandles,
                                 KernelType>>(
                                 {num_voxels, RS_AUTO_BLOCK_SIZE, false},
                                 voxel_handles,
@@ -2097,7 +2183,7 @@ void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
                 // Re-evaluate exposure over the dynamic subset so a voxel exposed since the last
                 // rebuild joins the dynamic BVH.
                 p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_GetVoxelBVHDynamicFlags,
+                    logic::RSCF_GetVoxelBVHDynamicFlags,
                     KernelType>>(
                     {count_dynamic, RS_AUTO_BLOCK_SIZE, false},
                     dynamic_handles,
@@ -2115,7 +2201,7 @@ void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
                 ensure_vector_size(_handles["bvh_dynamic_voxel"], count);
                 if (count > 0) {
                     p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                        typename RS_VoxelCompute<ComputeAccuracy>::RSCF_CompactVoxelHandles,
+                        logic::RSCF_CompactVoxelHandles,
                         KernelType>>(
                         {count_dynamic, RS_AUTO_BLOCK_SIZE, false},
                         dynamic_handles,
@@ -2127,6 +2213,73 @@ void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
             });
         });
     });
+}
+
+bool RS_SimulationExecutor::_resolveRigidBodyMobilityPartitionIfNeeded() {
+    bool recomputed = false;
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+            auto &ctx = k_ptr->ctx;
+
+            // Physics iterates the mobile subset, so static and frozen bodies cost no threads; the
+            // full set still serves the transform and the contact anchors.
+            if (_handles.find("dynamic_rigid_body") == _handles.end()) {
+                _handles.insert({"dynamic_rigid_body", RS_Vector<RHandle>(p_ptr)});
+                _handle_version_ids["rigid_body_partition"] = 0;
+            }
+
+            // Recompute when the layout topology changed or any body's mobility flipped.
+            uint64_t version = ctx.host_data->structure_rigid_body_layout.versionID();
+            bool dirty = _kernel_manager->isRigidBodyPartitionModified() ||
+                         _handle_version_ids.at("rigid_body_partition") != version;
+            if (!dirty) return;
+
+            auto rigid_body_handles = _getLaunchHandles("rigid_body");
+            RSize num_rigid_bodies = rigid_body_handles.size();
+
+            if (num_rigid_bodies == 0) {
+                _handles["dynamic_rigid_body"].occupy(0);
+            } else {
+                ensure_vector_size(ctx.structure_rigid_body_dynamic_flags, num_rigid_bodies);
+                ensure_vector_size(ctx.structure_rigid_body_dynamic_prefix_sums, num_rigid_bodies);
+
+                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                    logic::RSCF_GetRigidBodyMobilityFlags,
+                    KernelType>>(
+                    {num_rigid_bodies, RS_AUTO_BLOCK_SIZE, false},
+                    rigid_body_handles,
+                    ctx.structure_rigid_body_dynamic_flags
+                );
+
+                _scan.template inclusiveSum<RIndex, RIndex>(
+                    ctx.structure_rigid_body_dynamic_flags,
+                    ctx.structure_rigid_body_dynamic_prefix_sums
+                );
+                RIndex count = 0;
+                ctx.structure_rigid_body_dynamic_prefix_sums.readSlice(
+                    &count, 1, num_rigid_bodies - 1, true
+                );
+                ensure_vector_size(_handles["dynamic_rigid_body"], count);
+                if (count > 0) {
+                    p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                        logic::RSCF_CompactRigidBodyHandles,
+                        KernelType>>(
+                        {num_rigid_bodies, RS_AUTO_BLOCK_SIZE, false},
+                        rigid_body_handles,
+                        ctx.structure_rigid_body_dynamic_flags,
+                        ctx.structure_rigid_body_dynamic_prefix_sums,
+                        _handles["dynamic_rigid_body"]
+                    );
+                }
+            }
+
+            _handle_version_ids["rigid_body_partition"] = version;
+            _kernel_manager->clearRigidBodyPartitionModified();
+            recomputed = true;
+        });
+    });
+    return recomputed;
 }
 
 void RS_SimulationExecutor::_resizeReduceBufferIfNeeded(

@@ -28,6 +28,7 @@
 #include "kernel_manager/rs_kernel_gid_registration.h"
 #include "kernel_manager/rs_kernel_intersect_region_manager.h"
 #include "kernel_manager/rs_kernel_material_manager.h"
+#include "kernel_manager/rs_kernel_ray_sensor_manager.h"
 #include "kernel_manager/rs_kernel_spatial_manager.h"
 #include "kernel_manager/rs_kernel_structure_voxel_manager.h"
 #include "kernel_manager/rs_kernel_texture_manager.h"
@@ -53,13 +54,14 @@ RS_ENUM(
     RIndex,
     (RSE_KERNEL_MANAGER_STRUCTURE_VOXEL, 0),
     (RSE_KERNEL_MANAGER_CAMERA_PERSPECTIVE, 1),
-    (RSE_KERNEL_MANAGER_FLOOR, 2),
-    (RSE_KERNEL_MANAGER_COSMIC_BACKGROUND, 3),
-    (RSE_KERNEL_MANAGER_FORCE, 4),
-    (RSE_KERNEL_MANAGER_TORQUE, 5),
-    (RSE_KERNEL_MANAGER_TRANSFORM, 6),
-    (RSE_KERNEL_MANAGER_INTERSECT_REGION, 7),
-    (RSE_KERNEL_MANAGER_CAMERA_STEREO, 8)
+    (RSE_KERNEL_MANAGER_CAMERA_STEREO, 2),
+    (RSE_KERNEL_MANAGER_RAY_SENSOR, 3),
+    (RSE_KERNEL_MANAGER_FLOOR, 4),
+    (RSE_KERNEL_MANAGER_COSMIC_BACKGROUND, 5),
+    (RSE_KERNEL_MANAGER_FORCE, 6),
+    (RSE_KERNEL_MANAGER_TORQUE, 7),
+    (RSE_KERNEL_MANAGER_TRANSFORM, 8),
+    (RSE_KERNEL_MANAGER_INTERSECT_REGION, 9)
 )
 
 /**
@@ -89,6 +91,13 @@ struct RS_KernelRecorderCameraPerspectiveBundle {
  */
 struct RS_KernelRecorderCameraStereoBundle {
     std::unordered_map<std::string, std::vector<RS_WorldCameraStereoRecord>> camera_records;
+};
+
+/**
+ * @brief Per-recorder ray-sensor record bundle (keyed by recorder name).
+ */
+struct RS_KernelRecorderRaySensorBundle {
+    std::unordered_map<std::string, std::vector<RS_WorldRaySensorRecord>> ray_sensor_records;
 };
 
 /**
@@ -168,6 +177,7 @@ class RS_KernelManager {
     getRecorderCameraPerspectiveRecords();
     std::unordered_map<std::string, RS_KernelRecorderCameraStereoBundle>
     getRecorderCameraStereoRecords();
+    std::unordered_map<std::string, RS_KernelRecorderRaySensorBundle> getRecorderRaySensorRecords();
     std::unordered_map<std::string, RS_KernelRecorderIntersectRegionBundle>
     getRecorderIntersectRegionRecords();
 
@@ -231,6 +241,21 @@ class RS_KernelManager {
      * @brief Clear the voxel partition modified flag after a dynamic voxel BVH rebuild.
      */
     void clearVoxelPartitionModified();
+
+    /**
+     * @brief Mark the rigid body partition modified so the next step rebuilds the dynamic subset.
+     */
+    void markRigidBodyPartitionModified();
+
+    /**
+     * @brief Whether the rigid body partition changed since the last dynamic subset rebuild.
+     */
+    [[nodiscard]] bool isRigidBodyPartitionModified() const;
+
+    /**
+     * @brief Clear the rigid body partition modified flag after a dynamic subset rebuild.
+     */
+    void clearRigidBodyPartitionModified();
 
     /**
      * @brief Mark static voxels moved so the next step rebuilds the static voxel BVH.
@@ -356,6 +381,8 @@ class RS_KernelManager {
     getKernelCameraPerspectiveManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelCameraStereoManager>> &
     getKernelCameraStereoManagers();
+    std::unordered_map<std::string, std::unique_ptr<RS_KernelRaySensorManager>> &
+    getKernelRaySensorManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelForceManager>> &
     getKernelForceManagers();
     std::unordered_map<std::string, std::unique_ptr<RS_KernelTorqueManager>> &
@@ -464,6 +491,8 @@ class RS_KernelManager {
         _kernel_camera_perspective_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelCameraStereoManager>>
         _kernel_camera_stereo_managers;
+    std::unordered_map<std::string, std::unique_ptr<RS_KernelRaySensorManager>>
+        _kernel_ray_sensor_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelForceManager>> _kernel_force_managers;
     std::unordered_map<std::string, std::unique_ptr<RS_KernelTorqueManager>>
         _kernel_torque_managers;

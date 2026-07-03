@@ -980,6 +980,48 @@ class RSC_CameraStereoRigidBodyLinked(RSC_CameraStereoBase):
     relative_orientation: RQuat3rf
 
 
+class RSC_RaySensorRecord(RSC_RecordBase):
+    def __init__(self) -> None: ...
+
+    has_hit: bool
+    has_entity_info: bool
+    has_entity_detail: bool
+    has_material: bool
+    has_normal: bool
+    has_velocity: bool
+
+
+class RSC_RaySensorSignal(RSC_SignalBase):
+    def __init__(self) -> None: ...
+
+    position_signal_num: int
+    orientation_signal_num: int
+
+
+class RSC_RaySensorBase(RSC_EntityBase):
+    ray_directions: list[RVec3rf]
+    max_range: float
+    record: RSC_RaySensorRecord
+    signal: RSC_RaySensorSignal
+
+
+class RSC_RaySensorFree(RSC_RaySensorBase):
+    def __init__(self) -> None: ...
+
+    origin_position: RVec3rf
+    orientation: RQuat3rf
+
+
+class RSC_RaySensorRigidBodyLinked(RSC_RaySensorBase):
+    def __init__(self) -> None: ...
+
+    structure_name: str
+    body_sid: int
+    segment_bid: int
+    relative_anchor: RVec3rf
+    relative_orientation: RQuat3rf
+
+
 ################################################################################
 # Records
 ################################################################################
@@ -1314,6 +1356,7 @@ class RSE_WorldMessageLevel:
     RSE_WORLD_MESSAGE_WARNING: int
     RSE_WORLD_MESSAGE_ERROR: int
 
+
 class RS_WorldMessage:
     index: int
     time: datetime.datetime
@@ -1331,19 +1374,23 @@ class RSE_WorldTaskState:
     RSE_WORLD_TASK_SUCCESS: int
     RSE_WORLD_TASK_FAIL: int
 
+
 class RS_WorldTaskDataCreated:
     gid: int
     name: str
 
     def __init__(self) -> None: ...
 
+
 class RS_WorldTaskDataSuccess:
     def __init__(self) -> None: ...
+
 
 class RS_WorldTaskDataFailed:
     error: str
 
     def __init__(self) -> None: ...
+
 
 class RS_WorldTaskData:
     def __init__(self) -> None: ...
@@ -1352,6 +1399,7 @@ class RS_WorldTaskData:
     def value(
         self,
     ) -> Optional[Union[RS_WorldTaskDataCreated, RS_WorldTaskDataSuccess, RS_WorldTaskDataFailed]]: ...
+
 
 class RS_WorldTask:
     def __init__(self) -> None: ...
@@ -1730,6 +1778,132 @@ class RS_WorldCameraStereoRecord:
     def right_camera_state(self) -> "RS_WorldCameraStereoRecord.State": ...
 
 
+class RS_WorldRaySensorRecord:
+    """Ray-sensor record snapshot. Per-ray channels are exposed through nested
+    accessor classes, each returning [ray_num, ...] arrays that are empty when
+    the channel is disabled."""
+
+    class Hit:
+        def size(self) -> int: ...
+
+        def is_hit(self) -> np.ndarray:
+            """[ray_num] uint8 hit flags."""
+            ...
+
+        def distance(self) -> np.ndarray:
+            """[ray_num] float32 hit distances."""
+            ...
+
+        def hit_position(self) -> np.ndarray:
+            """[ray_num, 3] float32 world hit positions."""
+            ...
+
+    class EntityInfo:
+        def size(self) -> int: ...
+
+        def entity_gid(self) -> np.ndarray:
+            """[ray_num] uint32 hit entity global ids."""
+            ...
+
+        def entity_type(self) -> np.ndarray:
+            """[ray_num] uint32 hit entity type ids."""
+            ...
+
+    class EntityDetail:
+        def size(self) -> int: ...
+
+        def body_sid(self) -> np.ndarray:
+            """[ray_num] uint32 hit body ids."""
+            ...
+
+        def segment_bid(self) -> np.ndarray:
+            """[ray_num] uint32 hit segment ids."""
+            ...
+
+        def voxel_sid(self) -> np.ndarray:
+            """[ray_num] uint32 hit voxel ids."""
+            ...
+
+    class Material:
+        def size(self) -> int: ...
+
+        def material_id(self) -> np.ndarray:
+            """[ray_num] uint32 hit material ids."""
+            ...
+
+        def emission(self) -> np.ndarray:
+            """[ray_num] float32 hit material emission."""
+            ...
+
+    class Normal:
+        def size(self) -> int: ...
+
+        def normal(self) -> np.ndarray:
+            """[ray_num, 3] float32 world hit normals."""
+            ...
+
+    class Velocity:
+        def size(self) -> int: ...
+
+        def v_hit(self) -> np.ndarray:
+            """[ray_num, 3] float32 world velocity of the hit surface."""
+            ...
+
+        def v_rel(self) -> np.ndarray:
+            """[ray_num, 3] float32 hit velocity relative to the sensor."""
+            ...
+
+        def v_radial(self) -> np.ndarray:
+            """[ray_num] float32 radial component of the relative velocity."""
+            ...
+
+    class State:
+        def size(self) -> int: ...
+
+        def position(self) -> np.ndarray:
+            """[size, 3] sensor positions."""
+            ...
+
+        def orientation(self) -> np.ndarray:
+            """[size, 4] sensor orientations (x, y, z, w)."""
+            ...
+
+    def step(self) -> int: ...
+
+    def time(self) -> float: ...
+
+    def sensor_gid(self) -> int: ...
+
+    def structure_gid(self) -> int: ...
+
+    def rigid_body_sid(self) -> int: ...
+
+    def ray_num(self) -> int: ...
+
+    def is_valid(self) -> bool: ...
+
+    @property
+    def hit(self) -> "RS_WorldRaySensorRecord.Hit": ...
+
+    @property
+    def entity_info(self) -> "RS_WorldRaySensorRecord.EntityInfo": ...
+
+    @property
+    def entity_detail(self) -> "RS_WorldRaySensorRecord.EntityDetail": ...
+
+    @property
+    def material(self) -> "RS_WorldRaySensorRecord.Material": ...
+
+    @property
+    def normal(self) -> "RS_WorldRaySensorRecord.Normal": ...
+
+    @property
+    def velocity(self) -> "RS_WorldRaySensorRecord.Velocity": ...
+
+    @property
+    def state(self) -> "RS_WorldRaySensorRecord.State": ...
+
+
 class RS_WorldIntersectRegionRecord:
     """Region-membership record snapshot. Lists the structures whose voxels lie
     inside the region this record step via the nested ``Membership`` accessor."""
@@ -1828,6 +2002,22 @@ class RS_WorldCameraStereoSignal:
     def left_optics_signals(self) -> RS_WorldCameraStereoSignal.Optics: ...
 
     def right_optics_signals(self) -> RS_WorldCameraStereoSignal.Optics: ...
+
+
+class RS_WorldRaySensorSignal:
+    class Position:
+        def size(self) -> int: ...
+
+        def position(self) -> np.ndarray: ...
+
+    class Orientation:
+        def size(self) -> int: ...
+
+        def orientation(self) -> np.ndarray: ...
+
+    def position_signals(self) -> RS_WorldRaySensorSignal.Position: ...
+
+    def orientation_signals(self) -> RS_WorldRaySensorSignal.Orientation: ...
 
 
 class RS_WorldForceSignal:
@@ -2466,6 +2656,11 @@ class RS_WorldSessionComponentVR(RS_WorldSessionComponent):
 # World Session
 ################################################################################
 
+class RSE_WorldSessionScope:
+    RSE_WORLD_SESSION_SCOPE_OWNED: int
+    RSE_WORLD_SESSION_SCOPE_FULL: int
+
+    
 class RS_WorldSession:
     """Owns a running world's handle and callback and drives its components."""
 
@@ -2473,7 +2668,12 @@ class RS_WorldSession:
 
     def has_component(self, name: str) -> bool: ...
 
-    def add_component(self, name: str, component: RS_WorldSessionComponent) -> None: ...
+    def add_component(
+        self,
+        name: str,
+        component: RS_WorldSessionComponent,
+        scope: RSE_WorldSessionScope = ...,
+    ) -> None: ...
 
     def remove_component(self, name: str) -> None: ...
 

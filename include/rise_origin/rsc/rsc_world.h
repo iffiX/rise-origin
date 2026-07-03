@@ -24,6 +24,7 @@
 #include "entity/rsc_camera.h"
 #include "entity/rsc_cosmic_background.h"
 #include "entity/rsc_floor.h"
+#include "entity/rsc_ray_sensor.h"
 #include "entity/rsc_structure.h"
 
 /// Records
@@ -77,7 +78,9 @@ using RSC_EntityVariant = RS_Variant<
     RSC_CameraPerspectiveFree,
     RSC_CameraPerspectiveRigidBodyLinked,
     RSC_CameraStereoFree,
-    RSC_CameraStereoRigidBodyLinked>;
+    RSC_CameraStereoRigidBodyLinked,
+    RSC_RaySensorFree,
+    RSC_RaySensorRigidBodyLinked>;
 
 /**
  * @brief Record variant

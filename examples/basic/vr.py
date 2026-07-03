@@ -138,7 +138,11 @@ def main() -> None:
     engine = rs.RiseOrigin("cuda:0")
     handle, callback = engine.hello(build())
     session = rs.RS_WorldSession(handle, callback)
-    session.add_component("vr", rs.RS_WorldSessionComponentVR("vr-camera"))
+    session.add_component(
+        "vr",
+        rs.RS_WorldSessionComponentVR("vr-camera"),
+        scope=rs.RSE_WorldSessionScope.RSE_WORLD_SESSION_SCOPE_FULL,
+    )
     session.run()
     # import os
     # import sys

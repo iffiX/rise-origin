@@ -99,7 +99,7 @@ class RS_WorldSessionComponentCamera : public RS_WorldSessionComponent {
     RFloat _field_of_view;
     RFloat _defocus_angle;
     RFloat _focus_distance;
-    
+
     std::optional<RS_WorldSessionAccess> _access;
 
     // Double-buffered RGB frames: one is published to frame(), the other is filled by the parallel
@@ -143,13 +143,13 @@ class RS_VRImpl;
 
 /**
  * @brief Stereo VR component: drives an OpenXR runtime over a Vulkan binding.
- * @details It owns an RS_VRImpl whose present thread runs the OpenXR lifecycle and connects whenever
- * a headset comes up, at start or later. While a headset is live it injects one stereo camera sized
- * to the per-eye resolution, and each control step converts the latest stereo record into its own
- * color and depth buffers, hands them to the present thread, and writes the latest per-eye head pose
- * and frustum back through the camera signal. When the headset drops it removes the camera and waits
- * for the next connection. The render rate is the world's control rate, and the runtime reprojects
- * from the submitted depth.
+ * @details It owns an RS_VRImpl whose present thread runs the OpenXR lifecycle and connects
+ * whenever a headset comes up, at start or later. While a headset is live it injects one stereo
+ * camera sized to the per-eye resolution, and each control step converts the latest stereo record
+ * into its own color and depth buffers, hands them to the present thread, and writes the latest
+ * per-eye head pose and frustum back through the camera signal. When the headset drops it removes
+ * the camera and waits for the next connection. The render rate is the world's control rate, and
+ * the runtime reprojects from the submitted depth.
  */
 class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
    public:
@@ -178,8 +178,12 @@ class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
     void onDetach() override;
 
    private:
-    // Staged presence of the VR characterization in the simulation, advanced only from a handle query.
-    enum class VRState { NOT_CONNECTED, ADDING_RSC, CONNECTED, REMOVING_RSC };
+    // Staged presence of the VR characterization in the simulation, advanced only from a handle
+    // query.
+    enum class VRState { IDLE, ENGAGING, ENGAGED, DISENGAGING };
+
+    // Manipulation lifecycle: engage the targeted structure, carry or push it, then tear it down.
+    enum class ManipulationState { IDLE, ENGAGING, ENGAGED, DISENGAGING };
 
     // The last physical eye pose RS_VRImpl issued to render from, handed back to it so the
     // projection layer is labeled with the physical head.
@@ -191,8 +195,14 @@ class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
     // Guards against a second VR component; OpenXR drives a single headset session per process.
     static std::atomic<bool> _is_created;
 
+    std::optional<RS_WorldSessionAccess> _access;
+    std::unique_ptr<RS_VRImpl> _xr;
+
+    /**** VR main ****/
     std::string _name;
-    std::string _controller_name;
+    std::string _vr_controller_name;
+    std::string _ray_controller_name[2];
+    std::string _ray_sensor_name[2];
     RSize _samples_per_pixel;
     RSize _max_depth;
     RFloat _near_depth;
@@ -212,27 +222,40 @@ class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
     EyePose _eye_pose[2];
 
     // Staged presence of the VR characterization, advanced from a per-callback handle query.
-    std::atomic<VRState> _vr_state{VRState::NOT_CONNECTED};
+    std::atomic<VRState> _vr_state{VRState::IDLE};
 
-    std::optional<RS_WorldSessionAccess> _access;
-    std::unique_ptr<RS_VRImpl> _xr;
-
-    // Converted color and copied depth, one buffer per eye.
-    std::shared_ptr<RColor4b[]> _frame_rgba[2];
-    std::shared_ptr<float[]> _frame_depth[2];
-    // True while a convert and publish pipeline is in flight, so buffers are not overwritten in use.
+    // True while a convert and publish pipeline is in flight, so the borrowed staging is not
+    // overwritten in use.
     std::atomic<bool> _is_publishing_frame{false};
 
+    /**** Manipulation ****/
+    RIndex _highlight_gid[2] = {RS_NULL_INDEX, RS_NULL_INDEX};
+    ManipulationState _manip_state[2] = {ManipulationState::IDLE, ManipulationState::IDLE};
+    bool _is_target_frozen[2] = {false, false};
+    RIndex _target_gid[2] = {RS_NULL_INDEX, RS_NULL_INDEX};
+    RIndex _target_body_sid[2] = {RS_NULL_INDEX, RS_NULL_INDEX};
+    RIndex _target_segment_bid[2] = {RS_NULL_INDEX, RS_NULL_INDEX};
+    std::string _manipulation_controller_name[2];
+    std::string _target_structure[2];
+    RVec3rf _hand_prev_position[2];
+    RQuat3rf _hand_prev_orientation[2];
+    std::vector<RS_WorldTask> _pending_tasks[2];
+
     void _syncVRCharacterization();
-    void _syncManipulationCharacterization();
-    void _convertFrame(RIndex eye, RIndex pixel_start, RIndex pixel_end);
-    void _syncFrame();
+    void _syncManipulationCharacterization(RIndex hand);
+    void _convertAndWriteFrame(RIndex eye, RIndex pixel_start, RIndex pixel_end);
+    void _commitFrame();
     void _writeCameraSignal();
-    void _writeManipulationSignal();
+    void _writeRaySignal();
+    void _writeManipulationSignal(RIndex hand);
+    void _updateRay();
     void _updateInfo(RBigFloat time);
-    [[nodiscard]] std::string
-    _pickTarget(const RVec3rf &aim_origin, const RVec3rf &aim_direction);
+
+    [[nodiscard]] bool
+    _readRayHit(RIndex hand, RIndex &gid, RFloat &distance, RIndex &body_sid, RIndex &segment_bid);
     [[nodiscard]] rsc::RSC_EntityVariant _makeCamera() const;
+    [[nodiscard]] rsc::RSC_EntityVariant
+    _makeRaySensor(std::string name, std::string controller_name) const;
     [[nodiscard]] rsc::RSC_ControllerVariant _makeController(std::string name) const;
 };
 

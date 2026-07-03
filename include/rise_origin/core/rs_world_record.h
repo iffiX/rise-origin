@@ -1068,6 +1068,294 @@ class RS_WorldCameraStereoRecord : public RS_WorldCameraRecordBase {
     }
 };
 
+class RS_WorldRaySensorRecordBase : public RS_WorldRootRecord {
+   public:
+    struct Hit : public RS_WorldObjectRecord {
+        /// Whether the ray hits anything within range
+        RByte* is_hit = nullptr;
+
+        /// Distance to the hit along the ray in meters
+        RFloat* distance = nullptr;
+
+        /// World position of the hit
+        RVec3rf* hit_position = nullptr;
+
+        Hit() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RByte)) +   // is_hit
+                   align(object_num * sizeof(RFloat)) +  // distance
+                   align(object_num * sizeof(RVec3rf));  // hit_position
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(is_hit, memory, 0);
+            setPtr(distance, is_hit, object_num * sizeof(RByte));
+            setPtr(hit_position, distance, object_num * sizeof(RFloat));
+            void* end;
+            setPtr(end, hit_position, object_num * sizeof(RVec3rf));
+            return end;
+        }
+    };
+
+    struct EntityInfo : public RS_WorldObjectRecord {
+        /// Global id of the hit entity
+        RIndex* entity_gid = nullptr;
+
+        /// Type of the hit entity
+        RSE_WorldEntityType* entity_type = nullptr;
+
+        EntityInfo() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RIndex)) +              // entity_gid
+                   align(object_num * sizeof(RSE_WorldEntityType));  // entity_type
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(entity_gid, memory, 0);
+            setPtr(entity_type, entity_gid, object_num * sizeof(RIndex));
+            void* end;
+            setPtr(end, entity_type, object_num * sizeof(RSE_WorldEntityType));
+            return end;
+        }
+    };
+
+    struct EntityDetail : public RS_WorldObjectRecord {
+        /// Body index of the hit voxel in the structure
+        RIndex* body_sid = nullptr;
+
+        /// Segment id of the hit voxel in the body
+        RIndex* segment_bid = nullptr;
+
+        /// Voxel index of the hit voxel in the structure
+        RIndex* voxel_sid = nullptr;
+
+        EntityDetail() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RIndex)) +  // body_sid
+                   align(object_num * sizeof(RIndex)) +  // segment_bid
+                   align(object_num * sizeof(RIndex));   // voxel_sid
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(body_sid, memory, 0);
+            setPtr(segment_bid, body_sid, object_num * sizeof(RIndex));
+            setPtr(voxel_sid, segment_bid, object_num * sizeof(RIndex));
+            void* end;
+            setPtr(end, voxel_sid, object_num * sizeof(RIndex));
+            return end;
+        }
+    };
+
+    struct Material : public RS_WorldObjectRecord {
+        /// Material id of the hit surface
+        RIndex* material_id = nullptr;
+
+        /// Self-emitted intensity of the hit material
+        RFloat* emission = nullptr;
+
+        Material() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RIndex)) +  // material_id
+                   align(object_num * sizeof(RFloat));   // emission
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(material_id, memory, 0);
+            setPtr(emission, material_id, object_num * sizeof(RIndex));
+            void* end;
+            setPtr(end, emission, object_num * sizeof(RFloat));
+            return end;
+        }
+    };
+
+    struct Normal : public RS_WorldObjectRecord {
+        /// World-space unit surface normal at the hit
+        RVec3rf* normal = nullptr;
+
+        Normal() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RVec3rf));  // normal
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(normal, memory, 0);
+            void* end;
+            setPtr(end, normal, object_num * sizeof(RVec3rf));
+            return end;
+        }
+    };
+
+    struct Velocity : public RS_WorldObjectRecord {
+        /// World velocity of the hit surface
+        RVec3rf* v_hit = nullptr;
+
+        /// Velocity of the hit surface relative to the sensor
+        RVec3rf* v_rel = nullptr;
+
+        /// Component of the relative velocity along the ray
+        RFloat* v_radial = nullptr;
+
+        Velocity() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RVec3rf)) +  // v_hit
+                   align(object_num * sizeof(RVec3rf)) +  // v_rel
+                   align(object_num * sizeof(RFloat));    // v_radial
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(v_hit, memory, 0);
+            setPtr(v_rel, v_hit, object_num * sizeof(RVec3rf));
+            setPtr(v_radial, v_rel, object_num * sizeof(RVec3rf));
+            void* end;
+            setPtr(end, v_radial, object_num * sizeof(RFloat));
+            return end;
+        }
+    };
+
+    struct State : public RS_WorldObjectRecord {
+        /// Sensor origin position
+        RVec3rf* position = nullptr;
+
+        /// Sensor orientation
+        RQuat3rf* orientation = nullptr;
+
+        State() = default;
+
+        [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+            RBigSize object_num = 1
+        ) {
+            using namespace world_record_helper;
+            return align(object_num * sizeof(RVec3rf)) +  // position
+                   align(object_num * sizeof(RQuat3rf));  // orientation
+        }
+
+        HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num = 1) {
+            using namespace world_record_helper;
+            memory = RS_WorldObjectRecord::initFromMemory(memory, object_num);
+            setPtr(position, memory, 0);
+            setPtr(orientation, position, object_num * sizeof(RVec3rf));
+            void* end;
+            setPtr(end, orientation, object_num * sizeof(RQuat3rf));
+            return end;
+        }
+    };
+};
+
+class RS_WorldRaySensorRecord : public RS_WorldRaySensorRecordBase {
+   public:
+    /// Ray sensor global id
+    RIndex sensor_gid = RS_NULL_INDEX;
+
+    /// Linked structure gid
+    RIndex structure_gid = RS_NULL_INDEX;
+
+    /// Linked rigid body sid
+    RIndex rigid_body_sid = RS_NULL_INDEX;
+
+    /// Number of rays
+    RSize ray_num = 0;
+
+    /// Hit records, the size of each frame is ray num
+    Hit hit;
+
+    /// Entity info records, the size of each frame is ray num
+    EntityInfo entity_info;
+
+    /// Entity detail records, the size of each frame is ray num
+    EntityDetail entity_detail;
+
+    /// Material records, the size of each frame is ray num
+    Material material;
+
+    /// Normal records, the size of each frame is ray num
+    Normal normal;
+
+    /// Velocity records, the size of each frame is ray num
+    Velocity velocity;
+
+    /// Sensor state records, the size of each frame is 1
+    State sensor_state;
+
+    RS_WorldRaySensorRecord() = default;
+
+    [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
+        RBigSize hit_object_num,
+        RBigSize entity_info_object_num,
+        RBigSize entity_detail_object_num,
+        RBigSize material_object_num,
+        RBigSize normal_object_num,
+        RBigSize velocity_object_num,
+        RBigSize sensor_state_object_num = 1
+    ) {
+        return RS_WorldRootRecord::getRequiredMemorySize() +
+               Hit::getRequiredMemorySize(hit_object_num) +
+               EntityInfo::getRequiredMemorySize(entity_info_object_num) +
+               EntityDetail::getRequiredMemorySize(entity_detail_object_num) +
+               Material::getRequiredMemorySize(material_object_num) +
+               Normal::getRequiredMemorySize(normal_object_num) +
+               Velocity::getRequiredMemorySize(velocity_object_num) +
+               State::getRequiredMemorySize(sensor_state_object_num);
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(
+        void* memory,
+        RBigSize hit_object_num,
+        RBigSize entity_info_object_num,
+        RBigSize entity_detail_object_num,
+        RBigSize material_object_num,
+        RBigSize normal_object_num,
+        RBigSize velocity_object_num,
+        RBigSize sensor_state_object_num = 1
+    ) {
+        is_valid = true;
+        memory = RS_WorldRootRecord::initFromMemory(memory);
+        memory = hit.initFromMemory(memory, hit_object_num);
+        memory = entity_info.initFromMemory(memory, entity_info_object_num);
+        memory = entity_detail.initFromMemory(memory, entity_detail_object_num);
+        memory = material.initFromMemory(memory, material_object_num);
+        memory = normal.initFromMemory(memory, normal_object_num);
+        memory = velocity.initFromMemory(memory, velocity_object_num);
+        memory = sensor_state.initFromMemory(memory, sensor_state_object_num);
+        return memory;
+    }
+};
+
 class RS_WorldIntersectRegionRecordBase : public RS_WorldRootRecord {
    public:
     /**

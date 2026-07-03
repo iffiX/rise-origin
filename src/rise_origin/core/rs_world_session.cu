@@ -13,10 +13,11 @@ namespace rise {
 /*****************************************************************************
  * RS_WorldSessionHandle
  *****************************************************************************/
-void RS_WorldSessionHandle::_requireOwned(
+void RS_WorldSessionHandle::_checkScope(
     const std::string &name,
     const std::unordered_set<std::string> &owned
-) {
+) const {
+    if (_scope == RSE_WORLD_SESSION_SCOPE_FULL) return;
     if (!owned.count(name)) {
         RS_THROW(RS_WorldSessionScopeException(
             "'{}' was not created by this component, so it cannot be modified or deleted", name
@@ -90,7 +91,7 @@ RS_WorldTask RS_WorldSessionHandle::addResource(const rsc::RSC_ResourceVariant &
 }
 
 RS_WorldTask RS_WorldSessionHandle::removeResource(const std::string &name) {
-    _requireOwned(name, _owned_resources);
+    _checkScope(name, _owned_resources);
     RS_WorldTask task = _raw->removeResource(name);
     _owned_resources.erase(name);
     return task;
@@ -110,12 +111,12 @@ RS_WorldTask RS_WorldSessionHandle::updateEssence(
     const std::string &name,
     const rsc::RSC_EssenceVariant &essence
 ) {
-    _requireOwned(name, _owned_essences);
+    _checkScope(name, _owned_essences);
     return _raw->updateEssence(name, essence);
 }
 
 RS_WorldTask RS_WorldSessionHandle::removeEssence(const std::string &name) {
-    _requireOwned(name, _owned_essences);
+    _checkScope(name, _owned_essences);
     RS_WorldTask task = _raw->removeEssence(name);
     _owned_essences.erase(name);
     return task;
@@ -132,19 +133,19 @@ RS_WorldTask RS_WorldSessionHandle::addEntity(const rsc::RSC_EntityVariant &enti
 }
 
 RS_WorldTask RS_WorldSessionHandle::removeEntity(const std::string &name) {
-    _requireOwned(name, _owned_entities);
+    _checkScope(name, _owned_entities);
     RS_WorldTask task = _raw->removeEntity(name);
     _owned_entities.erase(name);
     return task;
 }
 
 RS_WorldTask RS_WorldSessionHandle::freezeEntity(const std::string &name) {
-    _requireOwned(name, _owned_entities);
+    _checkScope(name, _owned_entities);
     return _raw->freezeEntity(name);
 }
 
 RS_WorldTask RS_WorldSessionHandle::unfreezeEntity(const std::string &name) {
-    _requireOwned(name, _owned_entities);
+    _checkScope(name, _owned_entities);
     return _raw->unfreezeEntity(name);
 }
 
@@ -169,7 +170,7 @@ RS_WorldTask RS_WorldSessionHandle::addRecord(const rsc::RSC_RecordVariant &reco
 }
 
 RS_WorldTask RS_WorldSessionHandle::removeRecord(const std::string &name) {
-    _requireOwned(name, _owned_records);
+    _checkScope(name, _owned_records);
     RS_WorldTask task = _raw->removeRecord(name);
     _owned_records.erase(name);
     return task;
@@ -186,7 +187,7 @@ RS_WorldTask RS_WorldSessionHandle::addSignal(const rsc::RSC_SignalVariant &sign
 }
 
 RS_WorldTask RS_WorldSessionHandle::removeSignal(const std::string &name) {
-    _requireOwned(name, _owned_signals);
+    _checkScope(name, _owned_signals);
     RS_WorldTask task = _raw->removeSignal(name);
     _owned_signals.erase(name);
     return task;
@@ -203,7 +204,7 @@ RS_WorldTask RS_WorldSessionHandle::addRecorder(const rsc::RSC_RecorderVariant &
 }
 
 RS_WorldTask RS_WorldSessionHandle::removeRecorder(const std::string &name) {
-    _requireOwned(name, _owned_recorders);
+    _checkScope(name, _owned_recorders);
     RS_WorldTask task = _raw->removeRecorder(name);
     _owned_recorders.erase(name);
     return task;
@@ -220,7 +221,7 @@ RS_WorldTask RS_WorldSessionHandle::addController(const rsc::RSC_ControllerVaria
 }
 
 RS_WorldTask RS_WorldSessionHandle::removeController(const std::string &name) {
-    _requireOwned(name, _owned_controllers);
+    _checkScope(name, _owned_controllers);
     RS_WorldTask task = _raw->removeController(name);
     _owned_controllers.erase(name);
     return task;
@@ -234,15 +235,19 @@ rsc::RSC_ControllerVariant RS_WorldSessionHandle::findController(const std::stri
  * RS_WorldSessionAccess
  *****************************************************************************/
 std::vector<std::reference_wrapper<RS_WorldController>> RS_WorldSessionAccess::controllers() {
+    bool is_full = _handle->_scope == RSE_WORLD_SESSION_SCOPE_FULL;
     std::vector<std::reference_wrapper<RS_WorldController>> mine;
     for (auto &controller : _controllers.get()) {
-        if (_handle->_owned_controllers.count(controller.name)) mine.emplace_back(controller);
+        if (is_full || _handle->_owned_controllers.count(controller.name)) {
+            mine.emplace_back(controller);
+        }
     }
     return mine;
 }
 
 RS_WorldController &RS_WorldSessionAccess::controller(const std::string &name) {
-    if (!_handle->_owned_controllers.count(name)) {
+    bool is_full = _handle->_scope == RSE_WORLD_SESSION_SCOPE_FULL;
+    if (!is_full && !_handle->_owned_controllers.count(name)) {
         RS_THROW(
             RS_WorldSessionScopeException("controller '{}' is outside this component's scope", name)
         );
@@ -281,9 +286,10 @@ bool RS_WorldSession::hasComponent(const std::string &name) const {
 
 void RS_WorldSession::addComponent(
     const std::string &name,
-    std::shared_ptr<RS_WorldSessionComponent> component
+    std::shared_ptr<RS_WorldSessionComponent> component,
+    RSE_WorldSessionScope scope
 ) {
-    component->onAttach(_makeAccess());
+    component->onAttach(_makeAccess(scope));
     _components.emplace(name, std::move(component));
 }
 
@@ -313,9 +319,9 @@ void RS_WorldSession::run(bool is_blocking) {
     }
 }
 
-RS_WorldSessionAccess RS_WorldSession::_makeAccess() {
+RS_WorldSessionAccess RS_WorldSession::_makeAccess(RSE_WorldSessionScope scope) {
     return RS_WorldSessionAccess(
-        std::make_shared<RS_WorldSessionHandle>(_raw), _controllers, _broker
+        std::make_shared<RS_WorldSessionHandle>(_raw, scope), _controllers, _broker
     );
 }
 
@@ -330,6 +336,7 @@ std::shared_ptr<RS_WorldSessionComponentGeneric> RS_WorldSession::_makeCoreCompo
     };
     auto handle = std::make_shared<RS_WorldSessionHandle>(
         _raw,
+        RSE_WORLD_SESSION_SCOPE_OWNED,
         getNames(world.resources),
         getNames(world.essences),
         getNames(world.entities),

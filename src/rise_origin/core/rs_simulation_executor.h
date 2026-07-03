@@ -99,7 +99,7 @@ class RS_SimulationExecutor {
     void _performCallback();
 
     // Launch helpers invoked inside a guarded phase (no guard of their own).
-    void _updateLightAndVision();
+    void _updateVisionAndRay();
     void _updateIntersectRegionRecord();
     void _storeRecorderRecords();
     void _storeControllerRecords();
@@ -118,6 +118,7 @@ class RS_SimulationExecutor {
     device::RS_Vector<RHandle> _getLaunchHandles(const std::string &name);
     bool _resolveVoxelMobilityPartitionIfNeeded();
     void _resolveVoxelBVHDynamicPartition();
+    bool _resolveRigidBodyMobilityPartitionIfNeeded();
     void _resizeReduceBufferIfNeeded(RBigSize needed_input_size, RBigSize needed_output_size);
 
     /**

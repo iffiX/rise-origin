@@ -13,95 +13,6 @@ namespace rise {
 
 namespace rsc {
 
-static void
-_readPerspectiveCameraBase(RSC_CameraPerspectiveBase &cam, const RS_RSCPropertyTreeReader &tree) {
-    cam.image_width = tree.get<RSize>("image_width", cam.image_width);
-    cam.image_height = tree.get<RSize>("image_height", cam.image_height);
-    cam.samples_per_pixel = tree.get<RSize>("samples_per_pixel", cam.samples_per_pixel);
-    cam.max_depth = tree.get<RSize>("max_depth", cam.max_depth);
-    cam.field_of_view = tree.get<RFloat>("field_of_view", cam.field_of_view);
-    cam.defocus_angle = tree.get<RFloat>("defocus_angle", cam.defocus_angle);
-    cam.focus_distance = tree.get<RFloat>("focus_distance", cam.focus_distance);
-    if (tree.isChildExist("record")) {
-        cam.record.read(tree.getChild("record"));
-    }
-    if (tree.isChildExist("signal")) {
-        cam.signal.read(tree.getChild("signal"));
-    }
-}
-
-static void
-_writePerspectiveCameraBase(const RSC_CameraPerspectiveBase &cam, RS_RSCPropertyTreeWriter &tree) {
-    tree.add("image_width", cam.image_width);
-    tree.add("image_height", cam.image_height);
-    tree.add("samples_per_pixel", cam.samples_per_pixel);
-    tree.add("max_depth", cam.max_depth);
-    tree.add("field_of_view", cam.field_of_view);
-    tree.add("defocus_angle", cam.defocus_angle);
-    tree.add("focus_distance", cam.focus_distance);
-    cam.record.write(tree.addChild("record"));
-    cam.signal.write(tree.addChild("signal"));
-}
-
-static void _validatePerspectiveCameraBase(const RSC_CameraPerspectiveBase &cam) {
-    RSC_EXPECT_GT(RSC_CameraPerspectiveBase, cam.image_width, 0);
-    RSC_EXPECT_GT(RSC_CameraPerspectiveBase, cam.image_height, 0);
-    RSC_EXPECT_GT(RSC_CameraPerspectiveBase, cam.samples_per_pixel, 0);
-    RSC_EXPECT_GT(RSC_CameraPerspectiveBase, cam.max_depth, 0);
-    RSC_EXPECT_LE(RSC_CameraPerspectiveBase, cam.max_depth, RS_WORLD_VISION_TRACE_MAX_DEPTH);
-    RSC_EXPECT_GT(RSC_CameraPerspectiveBase, cam.focus_distance, 0);
-    RSC_EXPECT_GT(RSC_CameraPerspectiveBase, cam.field_of_view, 0);
-    RSC_EXPECT_GE(RSC_CameraPerspectiveBase, cam.defocus_angle, 0);
-}
-
-static void _readStereoCameraBase(RSC_CameraStereoBase &cam, const RS_RSCPropertyTreeReader &tree) {
-    cam.image_width = tree.get<RSize>("image_width", cam.image_width);
-    cam.image_height = tree.get<RSize>("image_height", cam.image_height);
-    cam.samples_per_pixel = tree.get<RSize>("samples_per_pixel", cam.samples_per_pixel);
-    cam.max_depth = tree.get<RSize>("max_depth", cam.max_depth);
-    cam.interpupillary_distance =
-        tree.get<RFloat>("interpupillary_distance", cam.interpupillary_distance);
-    cam.convergence_distance = tree.get<RFloat>("convergence_distance", cam.convergence_distance);
-    cam.angle_left = tree.get<RFloat>("angle_left", cam.angle_left);
-    cam.angle_right = tree.get<RFloat>("angle_right", cam.angle_right);
-    cam.angle_up = tree.get<RFloat>("angle_up", cam.angle_up);
-    cam.angle_down = tree.get<RFloat>("angle_down", cam.angle_down);
-    if (tree.isChildExist("record")) {
-        cam.record.read(tree.getChild("record"));
-    }
-    if (tree.isChildExist("signal")) {
-        cam.signal.read(tree.getChild("signal"));
-    }
-}
-
-static void
-_writeStereoCameraBase(const RSC_CameraStereoBase &cam, RS_RSCPropertyTreeWriter &tree) {
-    tree.add("image_width", cam.image_width);
-    tree.add("image_height", cam.image_height);
-    tree.add("samples_per_pixel", cam.samples_per_pixel);
-    tree.add("max_depth", cam.max_depth);
-    tree.add("interpupillary_distance", cam.interpupillary_distance);
-    tree.add("convergence_distance", cam.convergence_distance);
-    tree.add("angle_left", cam.angle_left);
-    tree.add("angle_right", cam.angle_right);
-    tree.add("angle_up", cam.angle_up);
-    tree.add("angle_down", cam.angle_down);
-    cam.record.write(tree.addChild("record"));
-    cam.signal.write(tree.addChild("signal"));
-}
-
-static void _validateStereoCameraBase(const RSC_CameraStereoBase &cam) {
-    RSC_EXPECT_GT(RSC_CameraStereoBase, cam.image_width, 0);
-    RSC_EXPECT_GT(RSC_CameraStereoBase, cam.image_height, 0);
-    RSC_EXPECT_GT(RSC_CameraStereoBase, cam.samples_per_pixel, 0);
-    RSC_EXPECT_GT(RSC_CameraStereoBase, cam.max_depth, 0);
-    RSC_EXPECT_LE(RSC_CameraStereoBase, cam.max_depth, RS_WORLD_VISION_TRACE_MAX_DEPTH);
-    RSC_EXPECT_GT(RSC_CameraStereoBase, cam.interpupillary_distance, 0);
-    RSC_EXPECT_GE(RSC_CameraStereoBase, cam.convergence_distance, 0);
-    RSC_EXPECT_GT(RSC_CameraStereoBase, cam.angle_right, cam.angle_left);
-    RSC_EXPECT_GT(RSC_CameraStereoBase, cam.angle_up, cam.angle_down);
-}
-
 bool RSC_CameraPerspectiveRecord::operator==(const RSC_CameraPerspectiveRecord &other) const {
     return RSC_RecordBase::operator==(other) && has_rgb == other.has_rgb &&
            has_depth == other.has_depth && has_normal == other.has_normal &&
@@ -175,21 +86,63 @@ void RSC_CameraPerspectiveSignal::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("optics_signal_num", optics_signal_num);
 }
 
+void RSC_CameraPerspectiveBase::_validate(RS_RSCValidator &validator) const {
+    RSC_EntityBase::_validate(validator);
+    validator.submitValidatorIfNotExists("RSC_CameraPerspectiveBase::_validate", this, [this] {
+        RSC_EXPECT_GT(RSC_CameraPerspectiveBase, image_width, 0);
+        RSC_EXPECT_GT(RSC_CameraPerspectiveBase, image_height, 0);
+        RSC_EXPECT_GT(RSC_CameraPerspectiveBase, samples_per_pixel, 0);
+        RSC_EXPECT_GT(RSC_CameraPerspectiveBase, max_depth, 0);
+        RSC_EXPECT_LE(RSC_CameraPerspectiveBase, max_depth, RS_WORLD_VISION_TRACE_MAX_DEPTH);
+        RSC_EXPECT_GT(RSC_CameraPerspectiveBase, focus_distance, 0);
+        RSC_EXPECT_GT(RSC_CameraPerspectiveBase, field_of_view, 0);
+        RSC_EXPECT_GE(RSC_CameraPerspectiveBase, defocus_angle, 0);
+    });
+}
+
+void RSC_CameraPerspectiveBase::_read(const RS_RSCPropertyTreeReader &tree) {
+    RSC_EntityBase::_read(tree);
+    image_width = tree.get<RSize>("image_width", image_width);
+    image_height = tree.get<RSize>("image_height", image_height);
+    samples_per_pixel = tree.get<RSize>("samples_per_pixel", samples_per_pixel);
+    max_depth = tree.get<RSize>("max_depth", max_depth);
+    field_of_view = tree.get<RFloat>("field_of_view", field_of_view);
+    defocus_angle = tree.get<RFloat>("defocus_angle", defocus_angle);
+    focus_distance = tree.get<RFloat>("focus_distance", focus_distance);
+    if (tree.isChildExist("record")) {
+        record.read(tree.getChild("record"));
+    }
+    if (tree.isChildExist("signal")) {
+        signal.read(tree.getChild("signal"));
+    }
+}
+
+void RSC_CameraPerspectiveBase::_write(RS_RSCPropertyTreeWriter &tree) const {
+    RSC_EntityBase::_write(tree);
+    tree.add("image_width", image_width);
+    tree.add("image_height", image_height);
+    tree.add("samples_per_pixel", samples_per_pixel);
+    tree.add("max_depth", max_depth);
+    tree.add("field_of_view", field_of_view);
+    tree.add("defocus_angle", defocus_angle);
+    tree.add("focus_distance", focus_distance);
+    record.write(tree.addChild("record"));
+    signal.write(tree.addChild("signal"));
+}
+
 bool RSC_CameraPerspectiveFree::operator==(const RSC_CameraPerspectiveFree &other) const {
     return RSC_CameraPerspectiveBase::operator==(other) &&
            origin_position == other.origin_position && orientation == other.orientation;
 }
 
 void RSC_CameraPerspectiveFree::_read(const RS_RSCPropertyTreeReader &tree) {
-    RSC_EntityBase::_read(tree);
-    _readPerspectiveCameraBase(*this, tree);
+    RSC_CameraPerspectiveBase::_read(tree);
     origin_position = readVec3rf(tree, "origin_position");
     orientation = readQuat3rf(tree, "orientation");
 }
 
 void RSC_CameraPerspectiveFree::_write(RS_RSCPropertyTreeWriter &tree) const {
-    RSC_EntityBase::_write(tree);
-    _writePerspectiveCameraBase(*this, tree);
+    RSC_CameraPerspectiveBase::_write(tree);
     writeVec3rf(tree, "origin_position", origin_position);
     writeQuat3rf(tree, "orientation", orientation);
 }
@@ -204,18 +157,16 @@ bool RSC_CameraPerspectiveRigidBodyLinked::operator==(
 }
 
 void RSC_CameraPerspectiveRigidBodyLinked::_validate(RS_RSCValidator &validator) const {
-    RSC_EntityBase::_validate(validator);
+    RSC_CameraPerspectiveBase::_validate(validator);
     validator.submitValidatorIfNotExists(
         "RSC_CameraPerspectiveRigidBodyLinked::_validate", this, [this] {
-            _validatePerspectiveCameraBase(*this);
             RSC_EXPECT_NOT_NULL(RSC_CameraPerspectiveRigidBodyLinked, body_sid, RS_NULL_INDEX);
         }
     );
 }
 
 void RSC_CameraPerspectiveRigidBodyLinked::_read(const RS_RSCPropertyTreeReader &tree) {
-    RSC_EntityBase::_read(tree);
-    _readPerspectiveCameraBase(*this, tree);
+    RSC_CameraPerspectiveBase::_read(tree);
     structure_name = tree.get<string>("structure_name");
     body_sid = tree.get<RIndex>("body_sid");
     segment_bid = tree.get<RIndex>("segment_bid", segment_bid);
@@ -224,8 +175,7 @@ void RSC_CameraPerspectiveRigidBodyLinked::_read(const RS_RSCPropertyTreeReader 
 }
 
 void RSC_CameraPerspectiveRigidBodyLinked::_write(RS_RSCPropertyTreeWriter &tree) const {
-    RSC_EntityBase::_write(tree);
-    _writePerspectiveCameraBase(*this, tree);
+    RSC_CameraPerspectiveBase::_write(tree);
     tree.add("structure_name", structure_name);
     tree.add("body_sid", body_sid);
     tree.add("segment_bid", segment_bid);
@@ -298,26 +248,76 @@ void RSC_CameraStereoSignal::_write(RS_RSCPropertyTreeWriter &tree) const {
     RSC_SignalBase::_write(tree);
 }
 
+void RSC_CameraStereoBase::_validate(RS_RSCValidator &validator) const {
+    RSC_EntityBase::_validate(validator);
+    validator.submitValidatorIfNotExists("RSC_CameraStereoBase::_validate", this, [this] {
+        RSC_EXPECT_GT(RSC_CameraStereoBase, image_width, 0);
+        RSC_EXPECT_GT(RSC_CameraStereoBase, image_height, 0);
+        RSC_EXPECT_GT(RSC_CameraStereoBase, samples_per_pixel, 0);
+        RSC_EXPECT_GT(RSC_CameraStereoBase, max_depth, 0);
+        RSC_EXPECT_LE(RSC_CameraStereoBase, max_depth, RS_WORLD_VISION_TRACE_MAX_DEPTH);
+        RSC_EXPECT_GT(RSC_CameraStereoBase, interpupillary_distance, 0);
+        RSC_EXPECT_GE(RSC_CameraStereoBase, convergence_distance, 0);
+        RSC_EXPECT_GT(RSC_CameraStereoBase, angle_right, angle_left);
+        RSC_EXPECT_GT(RSC_CameraStereoBase, angle_up, angle_down);
+    });
+}
+
+void RSC_CameraStereoBase::_read(const RS_RSCPropertyTreeReader &tree) {
+    RSC_EntityBase::_read(tree);
+    image_width = tree.get<RSize>("image_width", image_width);
+    image_height = tree.get<RSize>("image_height", image_height);
+    samples_per_pixel = tree.get<RSize>("samples_per_pixel", samples_per_pixel);
+    max_depth = tree.get<RSize>("max_depth", max_depth);
+    interpupillary_distance = tree.get<RFloat>("interpupillary_distance", interpupillary_distance);
+    convergence_distance = tree.get<RFloat>("convergence_distance", convergence_distance);
+    angle_left = tree.get<RFloat>("angle_left", angle_left);
+    angle_right = tree.get<RFloat>("angle_right", angle_right);
+    angle_up = tree.get<RFloat>("angle_up", angle_up);
+    angle_down = tree.get<RFloat>("angle_down", angle_down);
+    if (tree.isChildExist("record")) {
+        record.read(tree.getChild("record"));
+    }
+    if (tree.isChildExist("signal")) {
+        signal.read(tree.getChild("signal"));
+    }
+}
+
+void RSC_CameraStereoBase::_write(RS_RSCPropertyTreeWriter &tree) const {
+    RSC_EntityBase::_write(tree);
+    tree.add("image_width", image_width);
+    tree.add("image_height", image_height);
+    tree.add("samples_per_pixel", samples_per_pixel);
+    tree.add("max_depth", max_depth);
+    tree.add("interpupillary_distance", interpupillary_distance);
+    tree.add("convergence_distance", convergence_distance);
+    tree.add("angle_left", angle_left);
+    tree.add("angle_right", angle_right);
+    tree.add("angle_up", angle_up);
+    tree.add("angle_down", angle_down);
+    record.write(tree.addChild("record"));
+    signal.write(tree.addChild("signal"));
+}
+
 bool RSC_CameraStereoFree::operator==(const RSC_CameraStereoFree &other) const {
     return RSC_CameraStereoBase::operator==(other) && origin_position == other.origin_position &&
            orientation == other.orientation;
 }
 
 void RSC_CameraStereoFree::_read(const RS_RSCPropertyTreeReader &tree) {
-    RSC_EntityBase::_read(tree);
-    _readStereoCameraBase(*this, tree);
+    RSC_CameraStereoBase::_read(tree);
     origin_position = readVec3rf(tree, "origin_position");
     orientation = readQuat3rf(tree, "orientation");
 }
 
 void RSC_CameraStereoFree::_write(RS_RSCPropertyTreeWriter &tree) const {
-    RSC_EntityBase::_write(tree);
-    _writeStereoCameraBase(*this, tree);
+    RSC_CameraStereoBase::_write(tree);
     writeVec3rf(tree, "origin_position", origin_position);
     writeQuat3rf(tree, "orientation", orientation);
 }
 
-bool RSC_CameraStereoRigidBodyLinked::operator==(const RSC_CameraStereoRigidBodyLinked &other
+bool RSC_CameraStereoRigidBodyLinked::operator==(
+    const RSC_CameraStereoRigidBodyLinked &other
 ) const {
     return RSC_CameraStereoBase::operator==(other) && structure_name == other.structure_name &&
            body_sid == other.body_sid && segment_bid == other.segment_bid &&
@@ -326,18 +326,16 @@ bool RSC_CameraStereoRigidBodyLinked::operator==(const RSC_CameraStereoRigidBody
 }
 
 void RSC_CameraStereoRigidBodyLinked::_validate(RS_RSCValidator &validator) const {
-    RSC_EntityBase::_validate(validator);
+    RSC_CameraStereoBase::_validate(validator);
     validator.submitValidatorIfNotExists(
         "RSC_CameraStereoRigidBodyLinked::_validate", this, [this] {
-            _validateStereoCameraBase(*this);
             RSC_EXPECT_NOT_NULL(RSC_CameraStereoRigidBodyLinked, body_sid, RS_NULL_INDEX);
         }
     );
 }
 
 void RSC_CameraStereoRigidBodyLinked::_read(const RS_RSCPropertyTreeReader &tree) {
-    RSC_EntityBase::_read(tree);
-    _readStereoCameraBase(*this, tree);
+    RSC_CameraStereoBase::_read(tree);
     structure_name = tree.get<string>("structure_name");
     body_sid = tree.get<RIndex>("body_sid");
     segment_bid = tree.get<RIndex>("segment_bid", segment_bid);
@@ -346,8 +344,7 @@ void RSC_CameraStereoRigidBodyLinked::_read(const RS_RSCPropertyTreeReader &tree
 }
 
 void RSC_CameraStereoRigidBodyLinked::_write(RS_RSCPropertyTreeWriter &tree) const {
-    RSC_EntityBase::_write(tree);
-    _writeStereoCameraBase(*this, tree);
+    RSC_CameraStereoBase::_write(tree);
     tree.add("structure_name", structure_name);
     tree.add("body_sid", body_sid);
     tree.add("segment_bid", segment_bid);
