@@ -117,6 +117,45 @@ class RSC_IntersectRegionSphere : public RSC_RecordBase {
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
+/**
+ * @brief Record of which structures intersect a sphere rigidly linked to a rigid body.
+ */
+class RSC_IntersectRegionSphereRigidBodyLinked : public RSC_RecordBase {
+   public:
+    /// The name of the structure that the region is linked to.
+    std::string structure_name;
+
+    /// The index of the body that the region is linked to.
+    RIndex body_sid = RS_NULL_INDEX;
+
+    /// The index of the segment that the region is linked to.
+    RIndex segment_bid = RS_NULL_INDEX;
+
+    /// The relative anchor point of the sphere center in structure coordinate system.
+    RVec3rf relative_anchor = RVec3rf::zero();
+
+    /// Radius of the sphere.
+    RFloat radius = 0;
+
+    bool operator==(const RSC_IntersectRegionSphereRigidBodyLinked& other) const;
+
+    template <typename Serializer>
+    void serialize(Serializer& s) {
+        RSC_RecordBase::serialize(s);
+        s("structure_name", structure_name);
+        s("body_sid", body_sid);
+        s("segment_bid", segment_bid);
+        s("relative_anchor", relative_anchor);
+        s("radius", radius);
+    }
+
+   protected:
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCPropertyTreeReader& tree) override;
+    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
+};
+
 }  // namespace rsc
 
 }  // namespace rise

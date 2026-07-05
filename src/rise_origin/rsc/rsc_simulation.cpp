@@ -34,7 +34,8 @@ bool RSC_SimulationTime::operator==(const RSC_SimulationTime &other) const {
                other.dt_rigidbody_contact_and_constraint_update &&
            dt_contact_update == other.dt_contact_update &&
            dt_mechanical_signal_update == other.dt_mechanical_signal_update &&
-           dt_sentinel_update == other.dt_sentinel_update;
+           dt_sentinel_update == other.dt_sentinel_update &&
+           is_aligned_to_wallclock == other.is_aligned_to_wallclock;
 }
 
 void RSC_SimulationTime::_validate(RS_RSCValidator &validator) const {
@@ -67,6 +68,7 @@ void RSC_SimulationTime::_read(const RS_RSCPropertyTreeReader &tree) {
         dt_mechanical_signal_update = tree.get<RFloat>("dt_mechanical_signal_update");
     if (tree.isChildExist("dt_sentinel_update"))
         dt_sentinel_update = tree.get<RFloat>("dt_sentinel_update");
+    is_aligned_to_wallclock = tree.get("is_aligned_to_wallclock", is_aligned_to_wallclock);
 }
 
 void RSC_SimulationTime::_write(RS_RSCPropertyTreeWriter &tree) const {
@@ -84,6 +86,7 @@ void RSC_SimulationTime::_write(RS_RSCPropertyTreeWriter &tree) const {
     if (dt_mechanical_signal_update)
         tree.add("dt_mechanical_signal_update", dt_mechanical_signal_update.get());
     if (dt_sentinel_update) tree.add("dt_sentinel_update", dt_sentinel_update.get());
+    tree.add("is_aligned_to_wallclock", is_aligned_to_wallclock);
 }
 
 bool RSC_SimulationSoftBody::operator==(const RSC_SimulationSoftBody &other) const {

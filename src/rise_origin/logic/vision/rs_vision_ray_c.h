@@ -255,7 +255,11 @@ class RS_VisionRayCompute {
             FloatC inv_spp = FloatC(1) / FloatC(samples_per_pixel);
 
             device::RS_RandomState random_state;
-            random_state.init(k->seed, static_cast<uint64_t>(ray_id), k->getDeviceStep());
+            random_state.init(
+                k->seed,
+                static_cast<uint64_t>(ray_id),
+                static_cast<uint64_t>(CA_G(frame_count)) ^ uint64_t(0x6F92D5B13AC8E74FULL)
+            );
 
             RIndex pixel_id;
             Vec3C ray_origin, ray_direction;
@@ -380,7 +384,9 @@ class RS_VisionRayCompute {
             // Specular chain → endpoint + chain bookkeeping AOVs.
             device::RS_RandomState chain_rs;
             chain_rs.init(
-                k->seed ^ uint64_t(0xC4A1D0E5), static_cast<uint64_t>(pixel), k->getDeviceStep()
+                k->seed,
+                static_cast<uint64_t>(pixel),
+                static_cast<uint64_t>(CA_G(frame_count)) ^ uint64_t(0xB74C1E8F5A29D603ULL)
             );
 
             HitRecord endpoint_rec;
@@ -567,7 +573,11 @@ class RS_VisionRayCompute {
             Vec3C view_dir = (camera_position - hit_position).normalized();
 
             device::RS_RandomState rs;
-            rs.init(k->seed, static_cast<uint64_t>(pixel), k->getDeviceStep());
+            rs.init(
+                k->seed,
+                static_cast<uint64_t>(pixel),
+                static_cast<uint64_t>(CA_G(frame_count)) ^ uint64_t(0x13EF6B90A4D87C52ULL)
+            );
 
             // M_init initial candidates: per-camera samples_per_pixel.
             RS_ReservoirDI reservoir{};
@@ -824,7 +834,11 @@ class RS_VisionRayCompute {
             RS_ReservoirDI reservoir = ctx.camera_current_reservoir_di[camera][{ii, jj}];
 
             device::RS_RandomState rs;
-            rs.init(k->seed + uint64_t(0x517D), static_cast<uint64_t>(pixel), k->getDeviceStep());
+            rs.init(
+                k->seed,
+                static_cast<uint64_t>(pixel),
+                static_cast<uint64_t>(CA_G(frame_count)) ^ uint64_t(0xD8A4F92C7E6135B1ULL)
+            );
 
             FloatC spatial_radius = FloatC(k->vision_restir_di_spatial_radius);
             RSize neighbor_count = k->vision_restir_di_spatial_neighbors;
@@ -987,7 +1001,11 @@ class RS_VisionRayCompute {
             Vec3C view_dir = (camera_position - hit_position).normalized();
 
             device::RS_RandomState rs;
-            rs.init(k->seed ^ uint64_t(0x6122), static_cast<uint64_t>(pixel), k->getDeviceStep());
+            rs.init(
+                k->seed ^ uint64_t(0x6122),
+                static_cast<uint64_t>(pixel),
+                static_cast<uint64_t>(CA_G(frame_count))
+            );
 
             // M_init initial candidates: per-camera samples_per_pixel.
             RS_ReservoirGI reservoir{};

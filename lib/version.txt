@@ -1,10 +1,12 @@
-backward-cpp:   1.6
-fmt:            9.1.0 (modified)
-highfive:       2.8.0
-pybind11:       3.0.4
-spdlog:         1.11.0 (1.12.0 compiler error)
-refl:		    0.12.4 (modified)
-json(nlohmann): 3.11.3
-hosek-wilkie:   1.4a 2013-02-22
-openxr:         1.1.60 (release-1.1.60, loader + headers)
-imgui:          1.92.8
+backward-cpp:            1.6
+fmt:                     9.1.0 (modified)
+highfive:                2.8.0
+pybind11:                3.0.4
+spdlog:                  1.11.0 (1.12.0 compiler error)
+refl:		             0.12.4 (modified)
+json(nlohmann):          3.11.3
+hosek-wilkie:            1.4a 2013-02-22
+openxr:                  1.1.60 (release-1.1.60, loader + headers)
+imgui:                   1.92.8
+cpp-httplib:             0.49.0
+stb_image_write:         1.16

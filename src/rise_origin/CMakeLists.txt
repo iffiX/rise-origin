@@ -71,6 +71,19 @@ if (RISE_ORIGIN_BUILD_CORE_WITH_VR)
 endif ()
 
 ################################################################
+# MCP server session component
+################################################################
+# The MCP component (rs_world_session_component_mcp.cu) compiles to nothing unless
+# this macro is set. It uses the header-only cpp-httplib and stb_image_write in
+# lib/, so it links no new library except the Windows socket library.
+if (RISE_ORIGIN_BUILD_CORE_WITH_MCP)
+    target_compile_definitions(rise_origin_core PUBLIC RISE_ORIGIN_BUILD_CORE_WITH_MCP)
+    if (WIN32)
+        target_link_libraries(rise_origin_core PUBLIC ws2_32)
+    endif ()
+endif ()
+
+################################################################
 # MSVC + nvcc conformance flags
 ################################################################
 # MSVC needs explicit math constants, no Windows.h min/max macros, no Windows.h

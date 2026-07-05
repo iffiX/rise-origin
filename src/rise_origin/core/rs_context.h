@@ -362,8 +362,8 @@ struct RS_Context {
     device::RS_Vector<RSize> intersect_region_offsets;
     device::RS_Vector<logic::RS_IntersectRegionPair> intersect_region_pairs;
     device::RS_Vector<logic::RS_IntersectRegionPair> intersect_region_unique_pairs;
-    device::RS_Vector<RBigIndex> intersect_region_keys;
-    device::RS_Vector<RBigIndex> intersect_region_sorted_keys;
+    device::RS_Vector<logic::RS_IntersectRegionSortKey> intersect_region_keys;
+    device::RS_Vector<logic::RS_IntersectRegionSortKey> intersect_region_sorted_keys;
     device::RS_Vector<RIndex> intersect_region_indices;
     device::RS_Vector<RIndex> intersect_region_sorted_indices;
     device::RS_Vector<RIndex> intersect_region_flags;

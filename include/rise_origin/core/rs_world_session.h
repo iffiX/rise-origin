@@ -83,8 +83,11 @@ class RS_WorldSessionMessageBroker {
     // Per-subscriber multi-producer queue of envelopes.
     class SessionQueue {
        public:
+        explicit SessionQueue(RSize max_size) : _max_size(max_size) {}
+
         void push(MessageEnvelope envelope) {
             std::scoped_lock lock(_mutex);
+            if (_max_size != 0 && _queue.size() >= _max_size) _queue.pop_front();
             _queue.push_back(std::move(envelope));
         }
         bool pop(MessageEnvelope &out) {
@@ -96,6 +99,7 @@ class RS_WorldSessionMessageBroker {
         }
 
        private:
+        RSize _max_size;
         std::mutex _mutex;
         std::deque<MessageEnvelope> _queue;
     };
@@ -190,10 +194,13 @@ class RS_WorldSessionMessageBroker {
      * @brief Subscribe a typed callback to (T, channel); returns an RAII subscription.
      */
     template <typename T>
-    Subscription
-    subscribe(const std::string &channel, std::function<void(std::shared_ptr<const T>)> callback) {
+    Subscription subscribe(
+        const std::string &channel,
+        std::function<void(std::shared_ptr<const T>)> callback,
+        RSize max_queue_size = 10
+    ) {
         Key key{std::type_index(typeid(T)), channel};
-        auto queue = std::make_shared<SessionQueue>();
+        auto queue = std::make_shared<SessionQueue>(max_queue_size);
         RIndex id;
         {
             std::unique_lock lock(_registry_mutex);
@@ -402,9 +409,12 @@ class RS_WorldSessionAccess {
      * @brief Subscribe to cross-component messages on the broker.
      */
     template <typename T>
-    RS_WorldSessionMessageBroker::Subscription
-    subscribe(const std::string &channel, std::function<void(std::shared_ptr<const T>)> callback) {
-        return _broker.get().subscribe<T>(channel, std::move(callback));
+    RS_WorldSessionMessageBroker::Subscription subscribe(
+        const std::string &channel,
+        std::function<void(std::shared_ptr<const T>)> callback,
+        RSize max_queue_size = 10
+    ) {
+        return _broker.get().subscribe<T>(channel, std::move(callback), max_queue_size);
     }
 
    private:

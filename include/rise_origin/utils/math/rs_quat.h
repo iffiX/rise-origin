@@ -279,6 +279,36 @@ class RS_Quat3D {
     /// Returns the conjugate of this quaternion.
     HOST_DEVICE_INLINE_QUALIFIER RS_Quat3D conjugate() const { return RS_Quat3D(-x, -y, -z, w); }
 
+    /**
+     * @brief Spherical linear interpolation from this to `to` by fraction `t` in [0, 1].
+     * @details Takes the shortest arc and returns a unit quaternion; falls back to a
+     * normalized lerp when the two orientations are nearly parallel.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER RS_Quat3D slerp(const RS_Quat3D &to, T t) const {
+        T cos_theta = x * to.x + y * to.y + z * to.z + w * to.w;
+        RS_Quat3D end = to;
+        if (cos_theta < T(0)) {
+            end = RS_Quat3D(-to.x, -to.y, -to.z, -to.w);
+            cos_theta = -cos_theta;
+        }
+        if (cos_theta > T(1) - T(1e-6)) {
+            return RS_Quat3D(
+                       x + t * (end.x - x),
+                       y + t * (end.y - y),
+                       z + t * (end.z - z),
+                       w + t * (end.w - w)
+            )
+                .normalized();
+        }
+        T theta = RS_FloatIntrinsics<T>::rs_acos(cos_theta);
+        T sin_theta = RS_FloatIntrinsics<T>::rs_sqrt(T(1) - cos_theta * cos_theta);
+        T a = RS_FloatIntrinsics<T>::rs_sin((T(1) - t) * theta) / sin_theta;
+        T b = RS_FloatIntrinsics<T>::rs_sin(t * theta) / sin_theta;
+        return RS_Quat3D(
+            a * x + b * end.x, a * y + b * end.y, a * z + b * end.z, a * w + b * end.w
+        );
+    }
+
     // angle and/or axis calculations
     /// Returns the angular rotation of this quaternion in radians.
     HOST_DEVICE_INLINE_QUALIFIER T angle() const {

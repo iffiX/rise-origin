@@ -244,10 +244,14 @@ void RS_SimulationManager::_runSim(
         if (kernel.isPaused()) {
             if (sim->status != RSE_WORLD_PAUSED) {
                 sim->setStatusAndStatusInfo(RSE_WORLD_PAUSED, "");
-                RS_LOG(_sm_logger, debug, _getLogFormatter(sim->name), "paused.");
+                RS_LOG(_sm_logger, info, _getLogFormatter(sim->name), "paused.");
             }
+            exec.stepPaused();
             this_thread::sleep_for(chrono::milliseconds(10));
             continue;
+        } else if (sim->status == RSE_WORLD_PAUSED) {
+            sim->setStatusAndStatusInfo(RSE_WORLD_RUNNING, "");
+            RS_LOG(_sm_logger, info, _getLogFormatter(sim->name), "resumed.");
         }
 
         if (!exec.step()) {

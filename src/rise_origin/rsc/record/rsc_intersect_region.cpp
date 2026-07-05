@@ -80,6 +80,32 @@ void RSC_IntersectRegionSphere::_write(RS_RSCPropertyTreeWriter& tree) const {
     RSC_RecordBase::_write(tree);
 }
 
+bool RSC_IntersectRegionSphereRigidBodyLinked::operator==(
+    const RSC_IntersectRegionSphereRigidBodyLinked& other
+) const {
+    return RSC_RecordBase::operator==(other) && structure_name == other.structure_name &&
+           body_sid == other.body_sid && segment_bid == other.segment_bid &&
+           relative_anchor == other.relative_anchor && radius == other.radius;
+}
+
+void RSC_IntersectRegionSphereRigidBodyLinked::_validate(RS_RSCValidator& validator) const {
+    RSC_RecordBase::_validate(validator);
+    validator.submitValidatorIfNotExists(
+        "RSC_IntersectRegionSphereRigidBodyLinked::_validate", this, [this] {
+            RSC_EXPECT_NOT_NULL(RSC_IntersectRegionSphereRigidBodyLinked, body_sid, RS_NULL_INDEX);
+            RSC_EXPECT_GT(RSC_IntersectRegionSphereRigidBodyLinked, radius, 0);
+        }
+    );
+}
+
+void RSC_IntersectRegionSphereRigidBodyLinked::_read(const RS_RSCPropertyTreeReader& tree) {
+    RSC_RecordBase::_read(tree);
+}
+
+void RSC_IntersectRegionSphereRigidBodyLinked::_write(RS_RSCPropertyTreeWriter& tree) const {
+    RSC_RecordBase::_write(tree);
+}
+
 }  // namespace rsc
 
 }  // namespace rise

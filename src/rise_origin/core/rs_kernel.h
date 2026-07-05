@@ -109,9 +109,7 @@ struct alignas(8) RS_KernelBase {
         runtime_states.get().time += runtime_states.get().dt;
     }
 
-    HOST_DEVICE_INLINE_QUALIFIER void updateDtOnDevice(RFloat dt) {
-        runtime_states.get().dt = dt;
-    }
+    HOST_DEVICE_INLINE_QUALIFIER void updateDtOnDevice(RFloat dt) { runtime_states.get().dt = dt; }
 
     HOST_DEVICE_INLINE_QUALIFIER void updateOperationTimeOnDevice(
         RSE_KernelUpdateOperation operation
@@ -134,7 +132,7 @@ struct alignas(8) RS_KernelBase {
         if (host_data->stop_condition.empty()) return false;
         if (host_data->stop_condition[0].op == RSE_ME_END) return false;
         std::unordered_map<std::string, RFloat> variables;
-        for (auto &[key, value] : host_data->metrics.items()) {
+        for (auto& [key, value] : host_data->metrics.items()) {
             variables[key] = value.template get<RFloat>();
         }
         variables["t"] = host_data->runtime_states.time;
@@ -214,6 +212,8 @@ struct alignas(8) RS_KernelBase {
 
     // Simulation characterization.
     uint64_t seed = 0x123456789abcdef;
+
+    bool time_is_aligned_to_wallclock = false;
 
     RFloat softbody_internal_damping_z = 0;
     RFloat softbody_contact_damping_z = 0;

@@ -26,6 +26,7 @@ from rise_origin.rsc.record.intersect_region import (
     IntersectRegionCuboid,
     IntersectRegionCuboidRigidBodyLinked,
     IntersectRegionSphere,
+    IntersectRegionSphereRigidBodyLinked,
 )
 
 #: Abstract base of every record characterization (carries name + routing).
@@ -36,4 +37,5 @@ __all__ = [
     "IntersectRegionCuboid",
     "IntersectRegionCuboidRigidBodyLinked",
     "IntersectRegionSphere",
+    "IntersectRegionSphereRigidBodyLinked",
 ]

@@ -30,6 +30,7 @@
 #include "imgui.h"
 #include "rise_origin/core/rs_world_record.h"
 #include "rise_origin/core/rs_world_signal.h"
+#include "rise_origin/core/world_session_component/rs_world_session_component_vr_data.h"
 #include "rise_origin/rsc/controller/rsc_controller.h"
 #include "rise_origin/rsc/entity/rsc_camera.h"
 #include "rise_origin/rsc/entity/rsc_ray_sensor.h"
@@ -2245,7 +2246,8 @@ class RS_VRImpl {
     }
 
     // Draw a soft-edged beam strip into one atlas cell at the given column offset.
-    static void _drawControllerRayBeam(RColor4b* pixel, uint32_t width, int32_t offset, RColor4b color) {
+    static void
+    _drawControllerRayBeam(RColor4b* pixel, uint32_t width, int32_t offset, RColor4b color) {
         const float center = (RS_VR_RAY_CELL - 1) * 0.5f;
         for (int32_t y = 0; y < RS_VR_RAY_CELL; ++y) {
             for (int32_t x = 0; x < RS_VR_RAY_CELL; ++x) {
@@ -2257,7 +2259,8 @@ class RS_VRImpl {
     }
 
     // Draw a ring plus a center dot into one atlas cell at the given column offset.
-    static void _drawControllerRayReticle(RColor4b* pixel, uint32_t width, int32_t offset, RColor4b color) {
+    static void
+    _drawControllerRayReticle(RColor4b* pixel, uint32_t width, int32_t offset, RColor4b color) {
         const float center = (RS_VR_RAY_CELL - 1) * 0.5f;
         for (int32_t y = 0; y < RS_VR_RAY_CELL; ++y) {
             for (int32_t x = 0; x < RS_VR_RAY_CELL; ++x) {
@@ -2307,10 +2310,7 @@ class RS_VRImpl {
         }
         // Beam and reticle color by gesture: neutral cyan, grab green, push red.
         int beam_cell = mode == RayMode::GRAB ? 1 : mode == RayMode::PUSH ? 2 : 0;
-        int reticle_cell = mode == RayMode::GRAB   ? 5
-                           : mode == RayMode::PUSH ? 6
-                           : is_hit                ? 4
-                                                   : 3;
+        int reticle_cell = mode == RayMode::GRAB ? 5 : mode == RayMode::PUSH ? 6 : is_hit ? 4 : 3;
         if (!is_active || !_has_ctrl_ray_aim[hand] || length <= RFloat(0)) return false;
         RVec3rf direction = _ctrl_ray_dir_room[hand];
         if (direction.length() < RFloat(RS_EPS)) return false;
@@ -2360,7 +2360,11 @@ class RS_VRImpl {
 
     // Build the marker quad for one hand at its live physical grip, a ball facing the head, or
     // return false when the grip is not tracked.
-    bool _getControllerMarkerQuad(uint32_t hand, const XrPosef& head_pose, XrCompositionLayerQuad& quad) {
+    bool _getControllerMarkerQuad(
+        uint32_t hand,
+        const XrPosef& head_pose,
+        XrCompositionLayerQuad& quad
+    ) {
         if (!_has_ctrl_grip_room[hand]) return false;
         RVec3rf position = _ctrl_grip_origin_room[hand];
         RVec3rf normal = _getRiseVector(head_pose.position) - position;
@@ -2409,11 +2413,13 @@ class RS_VRImpl {
         return quad;
     }
 
-    // The OpenXR-space orientation whose local x, y, z axes point along the given world-space right,
-    // up, and normal. The axes are converted to OpenXR coordinates first so the quad is a proper
-    // world-locked billboard instead of an edge-on sliver.
+    // The OpenXR-space orientation whose local x, y, z axes point along the given world-space
+    // right, up, and normal. The axes are converted to OpenXR coordinates first so the quad is a
+    // proper world-locked billboard instead of an edge-on sliver.
     RQuat3rf _getControllerBasisOrientation(
-        const RVec3rf& right, const RVec3rf& up, const RVec3rf& normal
+        const RVec3rf& right,
+        const RVec3rf& up,
+        const RVec3rf& normal
     ) const {
         XrVector3f x = _getXrVector(right);
         XrVector3f y = _getXrVector(up);
@@ -2653,12 +2659,14 @@ void RS_WorldSessionComponentVR::onCallback(RBigFloat time, RS_ThreadPool& pool)
             RIndex body_sid = RS_NULL_INDEX;
             RIndex segment_bid = RS_NULL_INDEX;
             RFloat distance = 0;
-            _readRayHit(hand, gid, distance, body_sid, segment_bid);
+            // A miss leaves gid null, which is the wanted no-highlight value.
+            static_cast<void>(_readRayHit(hand, gid, distance, body_sid, segment_bid));
             _highlight_gid[hand] = gid;
         }
     }
 
     _updateRay();
+    if (_vr_state.load() == VRState::ENGAGED) _publishUserState();
 
     pool.detachTask([this] {
         _syncVRCharacterization();
@@ -2821,8 +2829,8 @@ void RS_WorldSessionComponentVR::_syncManipulationCharacterization(RIndex hand) 
                 // Freeze while grabbing so the transform snaps the body without gravity sag; a push
                 // keeps physics live. Freezing a foreign structure needs the full scope, so without
                 // it the grab still drags the body and only the anti-sag freeze is skipped.
-                bool want_frozen =
-                    intent.is_grab && handle->scope() == RSE_WORLD_SESSION_SCOPE_FULL;
+                bool want_frozen = intent.is_grab &&
+                                   handle->scope() == RSE_WORLD_SESSION_SCOPE_FULL;
                 if (want_frozen && !_is_target_frozen[hand]) {
                     handle->freezeEntity(_target_structure[hand]);
                     _is_target_frozen[hand] = true;
@@ -2893,8 +2901,8 @@ void RS_WorldSessionComponentVR::_convertAndWriteFrame(
                     // Blend a fixed amber tint over the pixels of either hand's highlighted
                     // structure, resolved once in onCallback.
                     bool is_tint_active =
-                        src_gid != nullptr && (_highlight_gid[0] != RS_NULL_INDEX ||
-                                               _highlight_gid[1] != RS_NULL_INDEX);
+                        src_gid != nullptr &&
+                        (_highlight_gid[0] != RS_NULL_INDEX || _highlight_gid[1] != RS_NULL_INDEX);
                     for (RIndex pixel = pixel_start; pixel < pixel_end; ++pixel) {
                         RColor4b color{src_rgb[pixel].r, src_rgb[pixel].g, src_rgb[pixel].b, 255};
                         if (is_tint_active && (src_gid[pixel] == _highlight_gid[0] ||
@@ -2985,14 +2993,15 @@ void RS_WorldSessionComponentVR::_writeRaySignal() {
         RS_WorldController& controller = controller_ref.get();
         RIndex hand = controller.name == _ray_controller_name[0]   ? 0
                       : controller.name == _ray_controller_name[1] ? 1
-                                                                    : RS_NULL_INDEX;
+                                                                   : RS_NULL_INDEX;
         if (hand == RS_NULL_INDEX) continue;
         const RS_VRImpl::HandIntent& intent = *hands[hand];
         for (auto& signal_variant : controller.signals) {
             signal_variant.visit([&](auto& signal) {
                 using Signal = std::decay_t<decltype(signal)>;
                 if constexpr (std::is_same_v<Signal, RS_WorldRaySensorSignal>) {
-                    if (signal.position_signals.object_num > 0 && signal.position_signals.position) {
+                    if (signal.position_signals.object_num > 0 &&
+                        signal.position_signals.position) {
                         signal.position_signals.position[0] = intent.aim_origin;
                     }
                     if (signal.orientation_signals.object_num > 0 &&
@@ -3013,13 +3022,12 @@ void RS_WorldSessionComponentVR::_writeManipulationSignal(RIndex hand) {
     RQuat3rf rotation = intent.is_grab
                             ? intent.orientation * _hand_prev_orientation[hand].conjugate()
                             : RQuat3rf::unit();
-    RVec3rf translation =
-        intent.is_grab ? intent.position - _hand_prev_position[hand] : RVec3rf(0, 0, 0);
+    RVec3rf translation = intent.is_grab ? intent.position - _hand_prev_position[hand]
+                                         : RVec3rf(0, 0, 0);
     RVec3rf pivot = _hand_prev_position[hand];
-    RVec3rf push =
-        intent.is_push
-            ? intent.aim_orientation.toOrthoAxisX() * (intent.push_amount * _push_force.load())
-            : RVec3rf(0, 0, 0);
+    RVec3rf push = intent.is_push ? intent.aim_orientation.toOrthoAxisX() *
+                                        (intent.push_amount * _push_force.load())
+                                  : RVec3rf(0, 0, 0);
 
     for (auto& controller_ref : _access->controllers()) {
         RS_WorldController& controller = controller_ref.get();
@@ -3087,8 +3095,42 @@ void RS_WorldSessionComponentVR::_updateInfo(RBigFloat time) {
     _xr->setHudInfo(info);
 }
 
+void RS_WorldSessionComponentVR::_publishUserState() {
+    auto [left, right] = _xr->getEyes();
+    RS_WorldSessionVRUserPosition user_position;
+    user_position.position = (left.position + right.position) * 0.5;
+    _access->publish<RS_WorldSessionVRUserPosition>(
+        RS_VR_CHANNEL_USER_POSITION,
+        std::make_shared<const RS_WorldSessionVRUserPosition>(user_position)
+    );
+
+    auto intents = _xr->getHandIntents();
+    const RS_VRImpl::HandIntent* hands[2] = {&intents.first, &intents.second};
+    RS_WorldSessionVRUserHandAims aims;
+    RS_WorldSessionVRHandAim* out[2] = {&aims.left, &aims.right};
+    for (RIndex hand = 0; hand < 2; ++hand) {
+        RIndex gid = RS_NULL_INDEX;
+        RIndex body_sid = RS_NULL_INDEX;
+        RIndex segment_bid = RS_NULL_INDEX;
+        RFloat distance = static_cast<RFloat>(_far_depth);
+        static_cast<void>(_readRayHit(hand, gid, distance, body_sid, segment_bid));
+        RVec3rf direction = hands[hand]->aim_orientation.toOrthoAxisX();
+        out[hand]->is_valid = hands[hand]->is_aim_valid;
+        out[hand]->aim_origin = hands[hand]->aim_origin;
+        out[hand]->aim_direction = direction;
+        out[hand]->aim_position = hands[hand]->aim_origin + direction * distance;
+    }
+    _access->publish<RS_WorldSessionVRUserHandAims>(
+        RS_VR_CHANNEL_USER_HAND_AIMS, std::make_shared<const RS_WorldSessionVRUserHandAims>(aims)
+    );
+}
+
 bool RS_WorldSessionComponentVR::_readRayHit(
-    RIndex hand, RIndex& gid, RFloat& distance, RIndex& body_sid, RIndex& segment_bid
+    RIndex hand,
+    RIndex& gid,
+    RFloat& distance,
+    RIndex& body_sid,
+    RIndex& segment_bid
 ) {
     gid = RS_NULL_INDEX;
     distance = static_cast<RFloat>(_far_depth);
@@ -3146,9 +3188,8 @@ rsc::RSC_EntityVariant RS_WorldSessionComponentVR::_makeCamera() const {
     return rsc::RSC_EntityVariant(camera);
 }
 
-rsc::RSC_EntityVariant RS_WorldSessionComponentVR::_makeRaySensor(
-    std::string name, std::string controller_name
-) const {
+rsc::RSC_EntityVariant
+RS_WorldSessionComponentVR::_makeRaySensor(std::string name, std::string controller_name) const {
     rsc::RSC_RaySensorFree sensor;
     sensor.name = std::move(name);
     // One ray along local +x; the signal drives the sensor orientation so it points along the aim.

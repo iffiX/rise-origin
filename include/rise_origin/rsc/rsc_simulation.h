@@ -78,6 +78,9 @@ class RSC_SimulationTime : public RSC_Base {
     /// Largest time step (s) tolerated between sentinel (divergence) checks.
     RS_Optional<RFloat> dt_sentinel_update;
 
+    /// When true, the running world is delayed so simulation time does not outrun wall-clock time.
+    bool is_aligned_to_wallclock = false;
+
     bool operator==(const RSC_SimulationTime& other) const;
 
     template <typename Serializer>
@@ -90,6 +93,7 @@ class RSC_SimulationTime : public RSC_Base {
         s("dt_contact_update", dt_contact_update);
         s("dt_mechanical_signal_update", dt_mechanical_signal_update);
         s("dt_sentinel_update", dt_sentinel_update);
+        s("is_aligned_to_wallclock", is_aligned_to_wallclock);
     }
 
    protected:

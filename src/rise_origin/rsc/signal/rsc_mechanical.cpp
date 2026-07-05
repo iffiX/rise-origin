@@ -22,11 +22,6 @@ void RSC_Force::_validate(RS_RSCValidator &validator) const {
     RSC_SignalBase::_validate(validator);
     validator.submitValidatorIfNotExists("RSC_Force::_validate", this, [this] {
         RSC_EXPECT_NOT_EMPTY(RSC_Force, structure_name);
-        if (!voxel_range.isValid()) {
-            RS_THROW(
-                RS_InvalidCharacterizationException("Invalid RSC_Force, voxel_range must be valid")
-            );
-        }
         RSC_EXPECT_NOT_NULL(RSC_Force, body_sid, RS_NULL_INDEX);
         RSC_EXPECT_NOT_NULL(RSC_Force, segment_bid, RS_NULL_INDEX);
     });

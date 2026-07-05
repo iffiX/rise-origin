@@ -250,6 +250,7 @@ class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
     void _writeManipulationSignal(RIndex hand);
     void _updateRay();
     void _updateInfo(RBigFloat time);
+    void _publishUserState();
 
     [[nodiscard]] bool
     _readRayHit(RIndex hand, RIndex &gid, RFloat &distance, RIndex &body_sid, RIndex &segment_bid);
@@ -260,6 +261,72 @@ class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
 };
 
 #endif  // RISE_ORIGIN_BUILD_CORE_WITH_VR
+
+#ifdef RISE_ORIGIN_BUILD_CORE_WITH_MCP
+
+/**
+ * @brief The server state hidden behind the MCP component's pimpl.
+ */
+class RS_MCPImpl;
+
+/**
+ * @brief The signature of a Python authored tool: full handle plus argument json in, result json out.
+ */
+using RS_MCPToolHandler =
+    std::function<std::string(std::shared_ptr<RS_WorldSessionHandle> handle, std::string arguments)>;
+
+/**
+ * @brief MCP server component that lets an AI client read, change, see, and be embodied in the world.
+ * @details It hosts an http server on its own thread that speaks the Model Context Protocol. Each tool
+ * call runs on a single executor thread and gets an id; a fast answer returns at once, otherwise the
+ * id is probed with get_result. A step task writes the buffered control signals and reads out capture
+ * frames. The tool surface has five kinds: a one to one mirror of the engine, server side helpers,
+ * signal send and capture, user communication, and Python registered tools.
+ */
+class RS_WorldSessionComponentMCP : public RS_WorldSessionComponent {
+   public:
+    RS_WorldSessionComponentMCP(
+        std::string name,
+        std::string host = "127.0.0.1",
+        int port = 8765,
+        std::string token = "",
+        bool is_python_exec_enabled = false
+    );
+    ~RS_WorldSessionComponentMCP() override;
+
+    /**
+     * @brief Register a Python authored tool served next to the built in ones.
+     */
+    void registerTool(
+        std::string name, std::string description, std::string input_schema, RS_MCPToolHandler handler
+    );
+
+    /**
+     * @brief Remove a registered tool by name.
+     */
+    void unregisterTool(const std::string &name);
+
+    /**
+     * @brief Get the names of every registered tool.
+     */
+    std::vector<std::string> getRegisteredToolNames() const;
+
+    void onAttach(RS_WorldSessionAccess access) override;
+    void onCallback(RBigFloat time, RS_ThreadPool &pool) override;
+    void onDetach() override;
+
+   private:
+    std::string _name;
+    std::string _host;
+    int _port;
+    std::string _token;
+    bool _is_python_exec_enabled;
+
+    std::optional<RS_WorldSessionAccess> _access;
+    std::unique_ptr<RS_MCPImpl> _impl;
+};
+
+#endif  // RISE_ORIGIN_BUILD_CORE_WITH_MCP
 
 }  // namespace rise
 

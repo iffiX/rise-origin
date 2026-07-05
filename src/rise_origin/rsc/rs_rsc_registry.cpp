@@ -26,55 +26,75 @@ const std::string &RS_RSCRegistry::getName(const std::type_info &type) const {
     return it->second;
 }
 
+std::map<std::string, std::vector<std::string>> RS_RSCRegistry::getCategory() const {
+    return _category_map;
+}
+
+RSC_Base::RSCRef<RSC_Base> RS_RSCRegistry::getExample(std::string_view type) const {
+    auto it = _make_map.find(std::string(type));
+    if (it == _make_map.end()) {
+        RS_THROW(RS_InvalidCharacterizationException("Unknown RSC type {}", type));
+    }
+    return it->second();
+}
+
 void RS_RSCRegistry::_registerAll() {
     // Resource
-    _register<RSC_TextureConstant>("RSC_TextureConstant");
-    _register<RSC_TextureGrid>("RSC_TextureGrid");
+    _register<RSC_TextureConstant>("RSC_TextureConstant", "resource");
+    _register<RSC_TextureGrid>("RSC_TextureGrid", "resource");
 
     // Essence
-    _register<RSC_Material>("RSC_Material");
-    _register<RSC_MaterialPhysicalPropertySoft>("RSC_MaterialPhysicalPropertySoft");
-    _register<RSC_MaterialPhysicalPropertyFixed>("RSC_MaterialPhysicalPropertyFixed");
-    _register<RSC_MaterialPhysicalPropertyRigid>("RSC_MaterialPhysicalPropertyRigid");
-    _register<RSC_MaterialPhysicalPropertyAtlas>("RSC_MaterialPhysicalPropertyAtlas");
+    _register<RSC_Material>("RSC_Material", "essence");
+    _register<RSC_MaterialPhysicalPropertySoft>("RSC_MaterialPhysicalPropertySoft", "essence");
+    _register<RSC_MaterialPhysicalPropertyFixed>("RSC_MaterialPhysicalPropertyFixed", "essence");
+    _register<RSC_MaterialPhysicalPropertyRigid>("RSC_MaterialPhysicalPropertyRigid", "essence");
+    _register<RSC_MaterialPhysicalPropertyAtlas>("RSC_MaterialPhysicalPropertyAtlas", "essence");
     _register<RSC_MaterialOpticalPropertySimpleMicrofacet>(
-        "RSC_MaterialOpticalPropertySimpleMicrofacet"
+        "RSC_MaterialOpticalPropertySimpleMicrofacet", "essence"
     );
-    _register<RSC_MaterialPairPropertyCoulombFriction>("RSC_MaterialPairPropertyCoulombFriction");
-    _register<RSC_MaterialPairPropertyRestitution>("RSC_MaterialPairPropertyRestitution");
+    _register<RSC_MaterialPairPropertyCoulombFriction>(
+        "RSC_MaterialPairPropertyCoulombFriction", "essence"
+    );
+    _register<RSC_MaterialPairPropertyRestitution>("RSC_MaterialPairPropertyRestitution", "essence");
 
     // Entity
-    _register<RSC_CosmicBackgroundUniform>("RSC_CosmicBackgroundUniform");
-    _register<RSC_CosmicBackgroundGradient>("RSC_CosmicBackgroundGradient");
-    _register<RSC_CosmicBackgroundHosekWilkie>("RSC_CosmicBackgroundHosekWilkie");
-    _register<RSC_FloorFlat>("RSC_FloorFlat");
-    _register<RSC_FloorArray>("RSC_FloorArray");
-    _register<RSC_StructureVoxel>("RSC_StructureVoxel");
-    _register<RSC_CameraPerspectiveFree>("RSC_CameraPerspectiveFree");
-    _register<RSC_CameraPerspectiveRigidBodyLinked>("RSC_CameraPerspectiveRigidBodyLinked");
-    _register<RSC_CameraStereoFree>("RSC_CameraStereoFree");
-    _register<RSC_CameraStereoRigidBodyLinked>("RSC_CameraStereoRigidBodyLinked");
-    _register<RSC_RaySensorFree>("RSC_RaySensorFree");
-    _register<RSC_RaySensorRigidBodyLinked>("RSC_RaySensorRigidBodyLinked");
+    _register<RSC_CosmicBackgroundUniform>("RSC_CosmicBackgroundUniform", "entity");
+    _register<RSC_CosmicBackgroundGradient>("RSC_CosmicBackgroundGradient", "entity");
+    _register<RSC_CosmicBackgroundHosekWilkie>("RSC_CosmicBackgroundHosekWilkie", "entity");
+    _register<RSC_FloorFlat>("RSC_FloorFlat", "entity");
+    _register<RSC_FloorArray>("RSC_FloorArray", "entity");
+    _register<RSC_StructureVoxel>("RSC_StructureVoxel", "entity");
+    _register<RSC_CameraPerspectiveFree>("RSC_CameraPerspectiveFree", "entity");
+    _register<RSC_CameraPerspectiveRigidBodyLinked>("RSC_CameraPerspectiveRigidBodyLinked", "entity");
+    _register<RSC_CameraStereoFree>("RSC_CameraStereoFree", "entity");
+    _register<RSC_CameraStereoRigidBodyLinked>("RSC_CameraStereoRigidBodyLinked", "entity");
+    _register<RSC_RaySensorFree>("RSC_RaySensorFree", "entity");
+    _register<RSC_RaySensorRigidBodyLinked>("RSC_RaySensorRigidBodyLinked", "entity");
 
     // Record
-    _register<RSC_IntersectRegionCuboid>("RSC_IntersectRegionCuboid");
-    _register<RSC_IntersectRegionCuboidRigidBodyLinked>("RSC_IntersectRegionCuboidRigidBodyLinked");
-    _register<RSC_IntersectRegionSphere>("RSC_IntersectRegionSphere");
+    _register<RSC_IntersectRegionCuboid>("RSC_IntersectRegionCuboid", "record");
+    _register<RSC_IntersectRegionCuboidRigidBodyLinked>(
+        "RSC_IntersectRegionCuboidRigidBodyLinked", "record"
+    );
+    _register<RSC_IntersectRegionSphere>("RSC_IntersectRegionSphere", "record");
+    _register<RSC_IntersectRegionSphereRigidBodyLinked>(
+        "RSC_IntersectRegionSphereRigidBodyLinked", "record"
+    );
 
     // Signal
-    _register<RSC_Force>("RSC_Force");
-    _register<RSC_Torque>("RSC_Torque");
+    _register<RSC_Force>("RSC_Force", "signal");
+    _register<RSC_Torque>("RSC_Torque", "signal");
+    _register<RSC_Transform>("RSC_Transform", "signal");
 
     // Recorder
-    _register<RSC_RecorderHDF5>("RSC_RecorderHDF5");
+    _register<RSC_RecorderHDF5>("RSC_RecorderHDF5", "recorder");
 
     // Controller
-    _register<RSC_ControllerCallback>("RSC_ControllerCallback");
+    _register<RSC_ControllerCallback>("RSC_ControllerCallback", "controller");
 
     // Simulation and World
-    _register<RSC_Simulation>("RSC_Simulation");
-    _register<RSC_World>("RSC_World");
+    _register<RSC_Simulation>("RSC_Simulation", "simulation");
+    _register<RSC_World>("RSC_World", "world");
 }
 
 }  // namespace rsc

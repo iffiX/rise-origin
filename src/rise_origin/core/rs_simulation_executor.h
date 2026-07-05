@@ -6,6 +6,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <chrono>
+
 #include "rise_origin/core/rs_world_callback.h"
 #include "rise_origin/device/algorithm/rs_reduce.h"
 #include "rise_origin/device/algorithm/rs_scan.h"
@@ -23,16 +25,35 @@ class RS_Simulation;
 
 class RS_SimulationExecutor {
    public:
+    /**
+     * @brief Construct the executor with the device and host memory providers and the world
+     * callback.
+     */
     RS_SimulationExecutor(
         RS_MemoryProvider *device_provider,
         RS_MemoryProvider *host_provider,
         RS_WorldCallback *callback
     );
 
+    /**
+     * @brief Snapshot the simulation characterization and set up the kernel and per-run state.
+     */
     void init(RS_Simulation *simulation);
+
+    /**
+     * @brief Release all per-run state acquired in init.
+     */
     void free();
 
+    /**
+     * @brief Advance the world by one base time step, running dynamics, sensing, and callbacks.
+     */
     bool step();
+
+    /**
+     * @brief Run one tick with time and dynamics frozen while sensing and callbacks keep running.
+     */
+    void stepPaused();
 
    private:
     RS_MemoryProvider *_device_provider = nullptr;
@@ -56,6 +77,11 @@ class RS_SimulationExecutor {
     RSize _contact_update_interval = 1;
     RSize _mechanical_signal_update_interval = 1;
     RSize _sentinel_update_interval = 1;
+
+    // Wall-clock pacing anchor.
+    bool _is_wallclock_anchored = false;
+    std::chrono::steady_clock::time_point _wallclock_anchor_time;
+    RBigFloat _wallclock_anchor_sim_time = 0;
 
     std::shared_ptr<spdlog::logger> _logger;
 
@@ -82,6 +108,7 @@ class RS_SimulationExecutor {
 
     // Sort setup
     device::RS_RadixSortPairs _sort;
+    device::RS_SortPairs _merge_sort;
 
     // step() phases. Physics/data phases route through _runWithCriticalDataAccessGuard; the
     // callback and sentinel route through _runWithCommandExecutionGuard.
@@ -95,8 +122,10 @@ class RS_SimulationExecutor {
     void _runRecorderRecordSaving();
     void _runControllerRecordSaving();
     void _runContactUpdate();
-    void _runMechanicalSignalUpdate();
+    void _runMechanicalSignalDynamicsUpdate();
+    bool _runMechanicalSignalTransformUpdate();
     void _performCallback();
+    void _paceToWallclock();
 
     // Launch helpers invoked inside a guarded phase (no guard of their own).
     void _updateVisionAndRay();

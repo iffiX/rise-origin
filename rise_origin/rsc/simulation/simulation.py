@@ -67,6 +67,8 @@ class Time(RSC_SimulationTime):
         dt_contact_update: Contact broad-phase update period (s).
         dt_mechanical_signal_update: Mechanical-signal update period (s).
         dt_sentinel_update: Sentinel-check period (s).
+        is_aligned_to_wallclock: When True, delay the running world so simulation
+            time does not outrun wall-clock time.
     """
 
     def __init__(
@@ -80,6 +82,7 @@ class Time(RSC_SimulationTime):
         dt_contact_update: Optional[float] = None,
         dt_mechanical_signal_update: Optional[float] = None,
         dt_sentinel_update: Optional[float] = None,
+        is_aligned_to_wallclock: bool = False,
     ) -> None:
         super().__init__()
         _apply(
@@ -92,6 +95,7 @@ class Time(RSC_SimulationTime):
             dt_contact_update=dt_contact_update,
             dt_mechanical_signal_update=dt_mechanical_signal_update,
             dt_sentinel_update=dt_sentinel_update,
+            is_aligned_to_wallclock=is_aligned_to_wallclock,
         )
 
 

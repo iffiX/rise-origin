@@ -13,6 +13,7 @@ set_property(CACHE RISE_ORIGIN_BACKEND PROPERTY STRINGS cpu cuda)
 ################################################################
 option(RISE_ORIGIN_BUILD_CORE "Build the rise_origin simulator and libraries" ON)
 option(RISE_ORIGIN_BUILD_CORE_WITH_VR "Build core with the VR session component (OpenXR + Vulkan)" ON)
+option(RISE_ORIGIN_BUILD_CORE_WITH_MCP "Build core with the MCP server session component" ON)
 option(RISE_ORIGIN_BUILD_TEST "Build the rise_origin test suite" ON)
 
 ################################################################

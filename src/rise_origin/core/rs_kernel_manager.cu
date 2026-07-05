@@ -1909,6 +1909,9 @@ void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, TaskP
     // Seed
     kernel.seed = simulation.seed;
 
+    // Time
+    kernel.time_is_aligned_to_wallclock = simulation.time.is_aligned_to_wallclock;
+
     // Environment
     kernel.world_grav_acc = simulation.environment.gravity_acceleration;
 
@@ -2360,7 +2363,8 @@ void RS_KernelManager::_addRecord(const RSC_RecordVariant& record, TaskPromise t
         name = r.name;
         if constexpr (std::is_same_v<T, RSC_IntersectRegionCuboid> ||
                       std::is_same_v<T, RSC_IntersectRegionCuboidRigidBodyLinked> ||
-                      std::is_same_v<T, RSC_IntersectRegionSphere>) {
+                      std::is_same_v<T, RSC_IntersectRegionSphere> ||
+                      std::is_same_v<T, RSC_IntersectRegionSphereRigidBodyLinked>) {
             auto mgr = std::make_unique<RS_KernelIntersectRegionManager>(
                 this, RS_KernelIntersectRegionManager::SupportedRSC(r)
             );

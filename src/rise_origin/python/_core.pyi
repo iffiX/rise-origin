@@ -422,6 +422,7 @@ class RSC_SimulationTime(RSC_Base):
     dt_contact_update: Optional[float]
     dt_mechanical_signal_update: Optional[float]
     dt_sentinel_update: Optional[float]
+    is_aligned_to_wallclock: bool
 
 
 class RSC_SimulationSoftBody(RSC_Base):
@@ -1052,6 +1053,16 @@ class RSC_IntersectRegionSphere(RSC_RecordBase):
     radius: float
 
 
+class RSC_IntersectRegionSphereRigidBodyLinked(RSC_RecordBase):
+    def __init__(self) -> None: ...
+
+    structure_name: str
+    body_sid: int
+    segment_bid: int
+    relative_anchor: RVec3rf
+    radius: float
+
+
 ################################################################################
 # Signals
 ################################################################################
@@ -1150,6 +1161,7 @@ _RSC_RecordAlt = Union[
     RSC_IntersectRegionCuboid,
     RSC_IntersectRegionCuboidRigidBodyLinked,
     RSC_IntersectRegionSphere,
+    RSC_IntersectRegionSphereRigidBodyLinked,
 ]
 
 _RSC_SignalAlt = Union[RSC_Force, RSC_Torque, RSC_Transform]
@@ -1913,6 +1925,8 @@ class RS_WorldIntersectRegionRecord:
 
         def structure_gid(self) -> np.ndarray: ...
 
+        def closest_relative_position(self) -> np.ndarray: ...
+
     def step(self) -> int: ...
 
     def time(self) -> float: ...
@@ -2647,8 +2661,43 @@ class RS_WorldSessionComponentVR(RS_WorldSessionComponent):
         boost: float = 3.0,
         hud_follow_tau: float = 0.25,
     ) -> None: ...
+
     def setPushForce(self, push_force: float) -> None:
         """Set the newtons applied along the aim ray at a full trigger pull."""
+        ...
+
+
+class RS_WorldSessionComponentMCP(RS_WorldSessionComponent):
+    """MCP server component: hosts a Model Context Protocol server so an AI client can read, change, see, and be embodied in the world.
+
+    Only present when the core is built with RISE_ORIGIN_BUILD_CORE_WITH_MCP.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        host: str = "127.0.0.1",
+        port: int = 8765,
+        token: str = "",
+        is_python_exec_enabled: bool = False,
+    ) -> None: ...
+
+    def register_tool(
+        self,
+        name: str,
+        description: str,
+        input_schema: str,
+        handler: Callable[[RS_WorldHandle, str], str],
+    ) -> None:
+        """Register a Python authored tool served next to the built in ones."""
+        ...
+
+    def unregister_tool(self, name: str) -> None:
+        """Remove a registered tool by name."""
+        ...
+
+    def list_registered_tools(self) -> List[str]:
+        """Get the names of every registered tool."""
         ...
 
 

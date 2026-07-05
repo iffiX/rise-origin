@@ -101,6 +101,17 @@ class RS_Simulation {
     }
 
     /**
+     * @brief Block until the world is live, running or paused, or ends; true while it is live.
+     */
+    bool waitForLive() {
+        std::unique_lock lock(status_mutex);
+        status_cv.wait(lock, [this] {
+            return status == RSE_WORLD_RUNNING || status == RSE_WORLD_PAUSED || isWorldEnd(status);
+        });
+        return status == RSE_WORLD_RUNNING || status == RSE_WORLD_PAUSED;
+    }
+
+    /**
      * @brief Block until the world ends.
      */
     void waitForEnd() {

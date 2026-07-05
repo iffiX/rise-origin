@@ -90,7 +90,8 @@ using RSC_EntityVariant = RS_Variant<
 using RSC_RecordVariant = RS_Variant<
     RSC_IntersectRegionCuboid,
     RSC_IntersectRegionCuboidRigidBodyLinked,
-    RSC_IntersectRegionSphere>;
+    RSC_IntersectRegionSphere,
+    RSC_IntersectRegionSphereRigidBodyLinked>;
 
 /**
  * @brief Signal variant

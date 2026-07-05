@@ -880,6 +880,12 @@ class RSPY_WorldIntersectRegionRecord {
         [[nodiscard]] py::array_t<RIndex> structure_gid() const {
             return rspyRoArray1D(record.memberships.structure_gid, size());
         }
+
+        [[nodiscard]] py::array_t<RFloat> closest_relative_position() const {
+            return rspyRoArray2D(
+                reinterpret_cast<RFloat *>(record.memberships.closest_relative_position), size(), 3
+            );
+        }
     };
 
     [[nodiscard]] RBigIndex step() const { return record.getStep(); }
@@ -1797,7 +1803,11 @@ inline void initRSPYCore(py::module &m) {
 
     py::class_<RSPY_WorldIntersectRegionRecord::Membership>(intersect_region_record, "Membership")
         .def("size", &RSPY_WorldIntersectRegionRecord::Membership::size)
-        .def("structure_gid", &RSPY_WorldIntersectRegionRecord::Membership::structure_gid);
+        .def("structure_gid", &RSPY_WorldIntersectRegionRecord::Membership::structure_gid)
+        .def(
+            "closest_relative_position",
+            &RSPY_WorldIntersectRegionRecord::Membership::closest_relative_position
+        );
 
     /*****************************************************************
      * Signals
@@ -2732,6 +2742,95 @@ inline void initRSPYCore(py::module &m) {
         )doc"
         );
 #endif  // RISE_ORIGIN_BUILD_CORE_WITH_VR
+
+#ifdef RISE_ORIGIN_BUILD_CORE_WITH_MCP
+    py::class_<
+        RS_WorldSessionComponentMCP,
+        RS_WorldSessionComponent,
+        std::shared_ptr<RS_WorldSessionComponentMCP>>(m, "RS_WorldSessionComponentMCP")
+        .def(
+            py::init([](std::string name,
+                        std::string host,
+                        int port,
+                        std::string token,
+                        bool is_python_exec_enabled) {
+                return std::make_shared<RS_WorldSessionComponentMCP>(
+                    std::move(name),
+                    std::move(host),
+                    port,
+                    std::move(token),
+                    is_python_exec_enabled
+                );
+            }),
+            py::arg("name"),
+            py::arg("host") = "127.0.0.1",
+            py::arg("port") = 8765,
+            py::arg("token") = "",
+            py::arg("is_python_exec_enabled") = false,
+            R"doc(
+            MCP server component: hosts a Model Context Protocol server so an AI client can read,
+            change, see, and be embodied in the world.
+        )doc"
+        )
+        .def(
+            "register_tool",
+            [](RS_WorldSessionComponentMCP &component,
+               std::string name,
+               std::string description,
+               std::string input_schema,
+               py::object handler) {
+                std::shared_ptr<py::object> py_handler(
+                    new py::object(std::move(handler)), [](py::object *object) {
+                        py::gil_scoped_acquire gil;
+                        delete object;
+                    }
+                );
+                RS_MCPToolHandler cpp_handler =
+                    [py_handler](
+                        std::shared_ptr<RS_WorldSessionHandle> handle, std::string arguments
+                    ) -> std::string {
+                    py::gil_scoped_acquire gil;
+                    try {
+                        py::object result = py::cast<py::function>(*py_handler)(
+                            RSPY_WorldHandle(std::move(handle)), std::move(arguments)
+                        );
+                        return py::cast<std::string>(result);
+                    } catch (const py::error_already_set &error) {
+                        throw std::runtime_error(error.what());
+                    }
+                };
+                component.registerTool(
+                    std::move(name),
+                    std::move(description),
+                    std::move(input_schema),
+                    std::move(cpp_handler)
+                );
+            },
+            py::arg("name"),
+            py::arg("description"),
+            py::arg("input_schema"),
+            py::arg("handler"),
+            R"doc(
+            Register a Python authored tool served next to the built in ones. The handler takes the
+            full world handle and the arguments json string, and returns the result json string.
+        )doc"
+        )
+        .def(
+            "unregister_tool",
+            &RS_WorldSessionComponentMCP::unregisterTool,
+            py::arg("name"),
+            R"doc(
+            Remove a registered tool by name.
+        )doc"
+        )
+        .def(
+            "list_registered_tools",
+            &RS_WorldSessionComponentMCP::getRegisteredToolNames,
+            R"doc(
+            Get the names of every registered tool.
+        )doc"
+        );
+#endif  // RISE_ORIGIN_BUILD_CORE_WITH_MCP
 
     /*****************************************************************
      * World session

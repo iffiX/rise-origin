@@ -25,38 +25,26 @@ RS_KernelIntersectRegionManager::RS_KernelIntersectRegionManager(
         RS_KernelGidRegistration(_kernel_manager, RSE_KERNEL_GID_RECORD, getRecordName());
 
     // Resolve the linked structure and rigid body anchor so a bad reference throws during
-    // construction without touching the kernel context.
+    // construction without touching the kernel context. A sphere is rotation invariant, so it has
+    // no relative orientation and passes the unit quaternion.
     if (_rsc.is<RSC_IntersectRegionCuboidRigidBodyLinked>()) {
         auto& region_linked = _rsc.as<RSC_IntersectRegionCuboidRigidBodyLinked>();
-        auto& structure_managers = _kernel_manager->getKernelStructureVoxelManagers();
-        auto sm_it = structure_managers.find(region_linked.structure_name);
-        if (sm_it == structure_managers.end())
-            RS_THROW(RS_InvalidCharacterizationException(
-                "Structure {} is not registered in the kernel manager", region_linked.structure_name
-            ));
-        auto& structure_manager = *sm_it->second;
-
-        _rigid_body_sid =
-            structure_manager.findRigidBodySID(region_linked.body_sid, region_linked.segment_bid);
-        if (_rigid_body_sid == RS_NULL_INDEX)
-            RS_THROW(RS_InvalidCharacterizationException(
-                "Rigid body in body {} segment {} of structure {} does not exist",
-                region_linked.body_sid,
-                region_linked.segment_bid,
-                region_linked.structure_name
-            ));
-
-        _rb_anchor = structure_manager.getRigidBodyPositionFromRelativeAnchor(
-            region_linked.body_sid, _rigid_body_sid, region_linked.relative_anchor
+        _resolveLinkedRigidBody(
+            region_linked.structure_name,
+            region_linked.body_sid,
+            region_linked.segment_bid,
+            region_linked.relative_anchor,
+            region_linked.relative_orientation
         );
-        auto& body_rsc =
-            structure_manager.getRSC().as<rsc::RSC_StructureVoxel>().bodies[region_linked.body_sid];
-        _rb_orientation =
-            body_rsc.relative_orientation.inverse() * region_linked.relative_orientation;
-
-        // Reference the structure so it cannot be removed while this region is alive.
-        _structure_reference =
-            RS_KernelStructureVoxelReference(_kernel_manager, region_linked.structure_name);
+    } else if (_rsc.is<RSC_IntersectRegionSphereRigidBodyLinked>()) {
+        auto& region_linked = _rsc.as<RSC_IntersectRegionSphereRigidBodyLinked>();
+        _resolveLinkedRigidBody(
+            region_linked.structure_name,
+            region_linked.body_sid,
+            region_linked.segment_bid,
+            region_linked.relative_anchor,
+            RQuat3rf::unit()
+        );
     }
 
     // Stage an empty membership record so delivery is valid before the first record step.
@@ -120,6 +108,8 @@ void RS_KernelIntersectRegionManager::setIntersectRegionRecord(
     _host_record.device = RS_DeviceLocation(RSE_DEVICE_TYPE_CPU, 0);
     for (RSize i = 0; i < size; ++i) {
         _host_record.memberships.structure_gid[i] = pairs[offset + i].structure_gid;
+        _host_record.memberships.closest_relative_position[i] =
+            RVec3rf(pairs[offset + i].closest_relative_offset);
     }
 }
 
@@ -138,8 +128,11 @@ std::string RS_KernelIntersectRegionManager::getRecordRecorderName() const {
 RIndex RS_KernelIntersectRegionManager::getRecordGid() const { return _record_registration.gid(); }
 
 std::string RS_KernelIntersectRegionManager::getStructureName() const {
-    if (!_rsc.is<RSC_IntersectRegionCuboidRigidBodyLinked>()) return "";
-    return _rsc.as<RSC_IntersectRegionCuboidRigidBodyLinked>().structure_name;
+    if (_rsc.is<RSC_IntersectRegionCuboidRigidBodyLinked>())
+        return _rsc.as<RSC_IntersectRegionCuboidRigidBodyLinked>().structure_name;
+    if (_rsc.is<RSC_IntersectRegionSphereRigidBodyLinked>())
+        return _rsc.as<RSC_IntersectRegionSphereRigidBodyLinked>().structure_name;
+    return "";
 }
 
 RIndex RS_KernelIntersectRegionManager::getStructureGid() const {
@@ -174,6 +167,12 @@ void RS_KernelIntersectRegionManager::_initKernelData() {
                 mem.half_size = RVec3f(c.size) * 0.5f;
                 mem.rigid_body_anchor_rb_position = RVec3f(_rb_anchor);
                 mem.rigid_body_anchor_rb_orientation = RQuat3f(_rb_orientation);
+            } else if constexpr (std::is_same_v<T, RSC_IntersectRegionSphereRigidBodyLinked>) {
+                mem.type = RSE_INTERSECT_REGION_SPHERE_RIGID_BODY_LINKED;
+                mem.rigid_body_sid = _rigid_body_sid;
+                mem.radius = float(c.radius);
+                mem.rigid_body_anchor_rb_position = RVec3f(_rb_anchor);
+                mem.rigid_body_anchor_rb_orientation = RQuat3f(_rb_orientation);
             }
         });
 
@@ -184,7 +183,7 @@ void RS_KernelIntersectRegionManager::_initKernelData() {
         _kernel_manager->markKernelModified();
 
         // Resolve the linked rigid body handle and seed the initial world pose.
-        if (_rsc.is<RSC_IntersectRegionCuboidRigidBodyLinked>()) {
+        if (_isRigidBodyLinked()) {
             _kernel_manager->syncKernelIfNeeded();
             castProviderPtrAndCall(_kernel_manager->getDeviceProvider(), [&](auto p_ptr) {
                 using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
@@ -215,6 +214,45 @@ void RS_KernelIntersectRegionManager::_freeKernelData() {
         // Context data is modified, needs to update kernel
         _kernel_manager->markKernelModified();
     });
+}
+
+bool RS_KernelIntersectRegionManager::_isRigidBodyLinked() const {
+    return _rsc.is<RSC_IntersectRegionCuboidRigidBodyLinked>() ||
+           _rsc.is<RSC_IntersectRegionSphereRigidBodyLinked>();
+}
+
+void RS_KernelIntersectRegionManager::_resolveLinkedRigidBody(
+    const std::string& structure_name,
+    RIndex body_sid,
+    RIndex segment_bid,
+    const RVec3rf& relative_anchor,
+    const RQuat3rf& relative_orientation
+) {
+    auto& structure_managers = _kernel_manager->getKernelStructureVoxelManagers();
+    auto sm_it = structure_managers.find(structure_name);
+    if (sm_it == structure_managers.end())
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Structure {} is not registered in the kernel manager", structure_name
+        ));
+    auto& structure_manager = *sm_it->second;
+
+    _rigid_body_sid = structure_manager.findRigidBodySID(body_sid, segment_bid);
+    if (_rigid_body_sid == RS_NULL_INDEX)
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Rigid body in body {} segment {} of structure {} does not exist",
+            body_sid,
+            segment_bid,
+            structure_name
+        ));
+
+    _rb_anchor = structure_manager.getRigidBodyPositionFromRelativeAnchor(
+        body_sid, _rigid_body_sid, relative_anchor
+    );
+    auto& body_rsc = structure_manager.getRSC().as<rsc::RSC_StructureVoxel>().bodies[body_sid];
+    _rb_orientation = body_rsc.relative_orientation.inverse() * relative_orientation;
+
+    // Reference the structure so it cannot be removed while this region is alive.
+    _structure_reference = RS_KernelStructureVoxelReference(_kernel_manager, structure_name);
 }
 
 }  // namespace rise

@@ -1367,16 +1367,21 @@ class RS_WorldIntersectRegionRecordBase : public RS_WorldRootRecord {
         /// Global id of a structure intersecting the region.
         RIndex* structure_gid = nullptr;
 
+        /// The intersecting structure's closest voxel to the region center, as a world coord offset.
+        RVec3rf* closest_relative_position = nullptr;
+
         Membership() = default;
 
-        HOST_DEVICE_INLINE_QUALIFIER explicit Membership(RIndex* structure_gid)
-            : structure_gid(structure_gid) {}
+        HOST_DEVICE_INLINE_QUALIFIER
+        Membership(RIndex* structure_gid, RVec3rf* closest_relative_position)
+            : structure_gid(structure_gid), closest_relative_position(closest_relative_position) {}
 
         [[nodiscard]] HOST_DEVICE_INLINE_QUALIFIER static RBigSize getRequiredMemorySize(
             RBigSize object_num
         ) {
             using namespace world_record_helper;
-            return align(object_num * sizeof(RIndex));  // structure_gid
+            return align(object_num * sizeof(RIndex)) +    // structure_gid
+                   align(object_num * sizeof(RVec3rf));    // closest_relative_position
         }
 
         HOST_DEVICE_INLINE_QUALIFIER void* initFromMemory(void* memory, RBigSize object_num) {
@@ -1386,10 +1391,11 @@ class RS_WorldIntersectRegionRecordBase : public RS_WorldRootRecord {
 
             // Allocate memory for each pointer
             setPtr(structure_gid, memory, 0);
+            setPtr(closest_relative_position, structure_gid, object_num * sizeof(RIndex));
 
             // Return the updated memory pointer
             void* end;
-            setPtr(end, structure_gid, object_num * sizeof(RIndex));
+            setPtr(end, closest_relative_position, object_num * sizeof(RVec3rf));
             return end;
         }
     };

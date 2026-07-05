@@ -96,6 +96,13 @@ void rspyVariantSet(RS_Variant<Alternatives...> &v, py::object arg) {
     }
 }
 
+// Register each concrete alternative as implicitly convertible to its variant, so a builder can be
+// passed wherever the variant is expected, such as handle.add_entity(StructureVoxel(...)).
+template <typename... Alternatives>
+void rspyRegisterVariantConversions(const RS_Variant<Alternatives...> *) {
+    (py::implicitly_convertible<Alternatives, RS_Variant<Alternatives...>>(), ...);
+}
+
 // Optional-property helpers: expose an RS_Optional<T> field as a Python attribute
 // that reads None when empty and accepts None to clear it.
 template <typename T>
@@ -444,6 +451,9 @@ inline void initRSPYRSC(py::module &m) {
             [](RSC_SimulationTime &self, py::object arg) {
                 rspyOptionalSet(self.dt_sentinel_update, arg);
             }
+        )
+        .def_readwrite(
+            "is_aligned_to_wallclock", &RSC_SimulationTime::is_aligned_to_wallclock
         );
 
     rspyRSC<RSC_SimulationSoftBody, RSC_Base>(m, "RSC_SimulationSoftBody")
@@ -1124,6 +1134,18 @@ inline void initRSPYRSC(py::module &m) {
         .def_readwrite("position", &RSC_IntersectRegionSphere::position)
         .def_readwrite("radius", &RSC_IntersectRegionSphere::radius);
 
+    rspyRSC<RSC_IntersectRegionSphereRigidBodyLinked, RSC_RecordBase>(
+        m, "RSC_IntersectRegionSphereRigidBodyLinked"
+    )
+        .def(py::init<>())
+        .def_readwrite("structure_name", &RSC_IntersectRegionSphereRigidBodyLinked::structure_name)
+        .def_readwrite("body_sid", &RSC_IntersectRegionSphereRigidBodyLinked::body_sid)
+        .def_readwrite("segment_bid", &RSC_IntersectRegionSphereRigidBodyLinked::segment_bid)
+        .def_readwrite(
+            "relative_anchor", &RSC_IntersectRegionSphereRigidBodyLinked::relative_anchor
+        )
+        .def_readwrite("radius", &RSC_IntersectRegionSphereRigidBodyLinked::radius);
+
     /***************************************************************
      * Signal
      ***************************************************************/
@@ -1252,6 +1274,14 @@ inline void initRSPYRSC(py::module &m) {
             [](RSC_ControllerVariant &self) { return rspyVariantGet(self); },
             [](RSC_ControllerVariant &self, py::object arg) { rspyVariantSet(self, arg); }
         );
+
+    rspyRegisterVariantConversions(static_cast<const RSC_ResourceVariant *>(nullptr));
+    rspyRegisterVariantConversions(static_cast<const RSC_EssenceVariant *>(nullptr));
+    rspyRegisterVariantConversions(static_cast<const RSC_EntityVariant *>(nullptr));
+    rspyRegisterVariantConversions(static_cast<const RSC_RecordVariant *>(nullptr));
+    rspyRegisterVariantConversions(static_cast<const RSC_SignalVariant *>(nullptr));
+    rspyRegisterVariantConversions(static_cast<const RSC_RecorderVariant *>(nullptr));
+    rspyRegisterVariantConversions(static_cast<const RSC_ControllerVariant *>(nullptr));
 
     rspyRSC<RSC_World, RSC_Base>(m, "RSC_World")
         .def(py::init<>())

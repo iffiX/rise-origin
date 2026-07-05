@@ -23,16 +23,17 @@ namespace rise {
 class RS_KernelManager;
 
 /**
- * @brief Owns one intersect-region record (world-fixed cuboid, sphere, or rigid-body-linked
- *        cuboid), publishes its source mem into the context, and stages the per-step membership
- *        record for controller / recorder delivery.
+ * @brief Owns one intersect-region record (world-fixed cuboid or sphere, or a cuboid or sphere
+ *        rigidly linked to a rigid body), publishes its source mem into the context, and stages
+ *        the per-step membership record for controller / recorder delivery.
  */
 class RS_KernelIntersectRegionManager {
    public:
     using SupportedRSC = RS_Variant<
         rsc::RSC_IntersectRegionCuboid,
         rsc::RSC_IntersectRegionCuboidRigidBodyLinked,
-        rsc::RSC_IntersectRegionSphere>;
+        rsc::RSC_IntersectRegionSphere,
+        rsc::RSC_IntersectRegionSphereRigidBodyLinked>;
 
     /**
      * @brief Register the record, build the region host data, and, for the linked variant,
@@ -156,6 +157,23 @@ class RS_KernelIntersectRegionManager {
     void _initKernelData();
 
     void _freeKernelData();
+
+    /**
+     * @brief True iff the active characterization is a rigid-body-linked cuboid or sphere.
+     */
+    bool _isRigidBodyLinked() const;
+
+    /**
+     * @brief Resolve the linked structure and rigid body, seed the anchor pose, and reference the
+     *        structure so it cannot be removed while this region is alive.
+     */
+    void _resolveLinkedRigidBody(
+        const std::string &structure_name,
+        RIndex body_sid,
+        RIndex segment_bid,
+        const RVec3rf &relative_anchor,
+        const RQuat3rf &relative_orientation
+    );
 };
 
 }  // namespace rise

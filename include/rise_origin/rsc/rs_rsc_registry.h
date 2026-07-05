@@ -5,11 +5,13 @@
 #define RS_RSC_REGISTRY_H
 
 #include <functional>
+#include <map>
 #include <string>
 #include <string_view>
 #include <typeindex>
 #include <typeinfo>
 #include <unordered_map>
+#include <vector>
 
 #include "rise_origin/utils/data/rs_variant.h"
 #include "rise_origin/utils/rs_exception.h"
@@ -72,13 +74,23 @@ class RS_RSCRegistry {
     /**
      * @brief Construct a node by type name and read it.
      */
-    RSC_Base::RSCRef<RSC_Base> make(std::string_view type, const RS_RSCPropertyTreeReader &data)
-        const;
+    RSC_Base::RSCRef<RSC_Base>
+    make(std::string_view type, const RS_RSCPropertyTreeReader &data) const;
 
     /**
      * @brief Get the registered name of a concrete RSC type.
      */
     const std::string &getName(const std::type_info &type) const;
+
+    /**
+     * @brief Get the registered type names grouped by category.
+     */
+    std::map<std::string, std::vector<std::string>> getCategory() const;
+
+    /**
+     * @brief Construct a default node of a type name, as an example to fill in.
+     */
+    RSC_Base::RSCRef<RSC_Base> getExample(std::string_view type) const;
 
     /**
      * @brief Get the process wide registry, built on first use.
@@ -90,12 +102,19 @@ class RS_RSCRegistry {
 
    private:
     using ReadFn = std::function<RSC_Base::RSCRef<RSC_Base>(const RS_RSCPropertyTreeReader &)>;
+    using MakeFn = std::function<RSC_Base::RSCRef<RSC_Base>()>;
 
     /// Maps type name -> construct and read into a base node.
     std::unordered_map<std::string, ReadFn> _read_map;
 
+    /// Maps type name -> construct a default base node.
+    std::unordered_map<std::string, MakeFn> _make_map;
+
     /// Maps type_index -> registered type name.
     std::unordered_map<std::type_index, std::string> _name_map;
+
+    /// Maps category -> its type names, in registration order.
+    std::map<std::string, std::vector<std::string>> _category_map;
 
     RS_RSCRegistry() { _registerAll(); }
 
@@ -105,16 +124,18 @@ class RS_RSCRegistry {
     void _registerAll();
 
     /**
-     * @brief Register one concrete RSC type under name.
+     * @brief Register one concrete RSC type under name and category.
      */
     template <typename T>
-    void _register(const std::string &name) {
+    void _register(const std::string &name, const std::string &category) {
         _read_map[name] = [](const RS_RSCPropertyTreeReader &data) -> RSC_Base::RSCRef<RSC_Base> {
             auto node = std::make_shared<T>();
             node->read(data);
             return node;
         };
+        _make_map[name] = []() -> RSC_Base::RSCRef<RSC_Base> { return std::make_shared<T>(); };
         _name_map[std::type_index(typeid(T))] = name;
+        _category_map[category].push_back(name);
     }
 };
 

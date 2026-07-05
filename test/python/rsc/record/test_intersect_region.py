@@ -4,11 +4,14 @@
 
 import pickle
 
+import pytest
+
 import rise_origin as rs
 from rise_origin.rsc.record import (
     IntersectRegionCuboid,
     IntersectRegionCuboidRigidBodyLinked,
     IntersectRegionSphere,
+    IntersectRegionSphereRigidBodyLinked,
 )
 
 
@@ -39,7 +42,31 @@ def test_rb_linked_explicit_target():
     assert region.body_sid == 0
 
 
+def test_sphere_rb_linked_fields():
+    region = IntersectRegionSphereRigidBodyLinked(
+        "zone",
+        structure_name="dog",
+        body_sid=0,
+        segment_bid=0,
+        relative_anchor=(0.1, 0.0, 0.0),
+        radius=0.5,
+    )
+    assert region.structure_name == "dog"
+    assert region.body_sid == 0
+    assert region.relative_anchor.x == pytest.approx(0.1)
+    assert region.radius == 0.5
+
+
 def test_region_in_record_variant_pickles():
     variant = rs.RSC_RecordVariant(IntersectRegionSphere("z", radius=1.0))
     restored = pickle.loads(pickle.dumps(variant))
     assert restored.value.name == "z"
+
+
+def test_sphere_rb_linked_in_record_variant_pickles():
+    variant = rs.RSC_RecordVariant(
+        IntersectRegionSphereRigidBodyLinked("z", structure_name="dog", radius=1.0)
+    )
+    restored = pickle.loads(pickle.dumps(variant))
+    assert restored.value.name == "z"
+    assert restored.value.structure_name == "dog"

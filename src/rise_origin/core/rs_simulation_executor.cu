@@ -6,6 +6,8 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <chrono>
+#include <thread>
 #include <utility>
 
 #include "rise_origin/device/rs_constant_memory.h"
@@ -95,6 +97,7 @@ RS_SimulationExecutor::RS_SimulationExecutor(
         _reduce_by_group = RS_ReduceByGroup(p_ptr);
         _scan = RS_Scan(p_ptr);
         _sort = RS_RadixSortPairs(p_ptr);
+        _merge_sort = RS_SortPairs(p_ptr);
     });
 }
 
@@ -132,6 +135,7 @@ void RS_SimulationExecutor::free() {
     _reduce_by_group.free();
     _scan.free();
     _sort.free();
+    _merge_sort.free();
 }
 
 bool RS_SimulationExecutor::step() {
@@ -193,13 +197,29 @@ bool RS_SimulationExecutor::step() {
     }
 
     if (_kernel->getHostStep() % _contact_update_interval == 0) _runContactUpdate();
-    if (_kernel->getHostStep() % _mechanical_signal_update_interval == 0)
-        _runMechanicalSignalUpdate();
+    if (_kernel->getHostStep() % _mechanical_signal_update_interval == 0) {
+        _runMechanicalSignalDynamicsUpdate();
+        _runMechanicalSignalTransformUpdate();
+    }
     if (is_callback_event_due) {
         _performCallback();
+        _paceToWallclock();
     }
 
     return true;
+}
+
+void RS_SimulationExecutor::stepPaused() {
+    // Refit the dynamic voxel BVH after one so a teleport is visible on this frame.
+    if (_runMechanicalSignalTransformUpdate()) {
+        _runWithCriticalDataAccessGuard([&](auto *, auto *, auto, bool) {
+            _refitDynamicVoxelBVH();
+        });
+    }
+
+    _runRecordUpdate();
+    _runControllerRecordSaving();
+    _performCallback();
 }
 
 RFloat RS_SimulationExecutor::_runDtUpdate(bool &is_dt_normal) {
@@ -1048,7 +1068,7 @@ void RS_SimulationExecutor::_runContactUpdate() {
     });
 }
 
-void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
+void RS_SimulationExecutor::_runMechanicalSignalDynamicsUpdate() {
     _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
         static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
         using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
@@ -1095,9 +1115,19 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
                 typename RS_TorqueCompute<ComputeAccuracy>::RSCF_UpdateRigidTorqueTime,
                 KernelType>>({ctx.torque_rigid.size(), RS_AUTO_BLOCK_SIZE, false});
         }
+    });
+}
+
+bool RS_SimulationExecutor::_runMechanicalSignalTransformUpdate() {
+    bool is_transform_applied = false;
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *p_ptr, auto acc_const, bool) {
+        static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
+        using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+        auto &ctx = k_ptr->ctx;
 
         // Transform signals: whole structure, applied once then reset to identity.
         if (ctx.transform_mem.size() > 0) {
+            is_transform_applied = true;
             auto voxel_handles = _getLaunchHandles("voxel");
             p_ptr->template run<RSCF_LaunchWithHandles<
                 typename RS_TransformCompute<ComputeAccuracy>::RSCF_ApplyVoxelTransformSignal,
@@ -1122,6 +1152,7 @@ void RS_SimulationExecutor::_runMechanicalSignalUpdate() {
         // Rebuild the static voxel BVH now if a transform moved static voxels; a no-op otherwise.
         _rebuildStaticVoxelBVHIfNeeded();
     });
+    return is_transform_applied;
 }
 
 void RS_SimulationExecutor::_performCallback() {
@@ -1163,6 +1194,35 @@ void RS_SimulationExecutor::_performCallback() {
         );
         timer.reset();
     });
+}
+
+void RS_SimulationExecutor::_paceToWallclock() {
+    if (!_kernel->time_is_aligned_to_wallclock) {
+        _is_wallclock_anchored = false;
+        return;
+    }
+
+    // Measure wall time after the callback so its own cost is already spent and only the remaining
+    // real time of this control interval gets slept away.
+    auto now = std::chrono::steady_clock::now();
+    if (_is_wallclock_anchored) {
+        RBigFloat sim_elapsed = _kernel->getHostTime() - _wallclock_anchor_sim_time;
+        auto target = _wallclock_anchor_time +
+                      std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+                          std::chrono::duration<double>(double(sim_elapsed))
+                      );
+        if (now < target) {
+            std::this_thread::sleep_for(target - now);
+            now = target;
+        }
+    }
+
+    // Re-anchor every callback so a slow interval never builds a debt that later bursts; a world
+    // running behind real time lands here with now past target and simply re-anchors without
+    // sleeping.
+    _wallclock_anchor_time = now;
+    _wallclock_anchor_sim_time = _kernel->getHostTime();
+    _is_wallclock_anchored = true;
 }
 
 void RS_SimulationExecutor::_updateVisionAndRay() {
@@ -1449,11 +1509,12 @@ void RS_SimulationExecutor::_updateIntersectRegionRecord() {
                     ctx.intersect_region_keys,
                     ctx.intersect_region_indices
                 );
-                _sort.template sort<RBigIndex, RIndex>(
+                _merge_sort.template sort<logic::RS_IntersectRegionSortKey, RIndex>(
                     ctx.intersect_region_keys,
                     ctx.intersect_region_indices,
                     ctx.intersect_region_sorted_keys,
-                    ctx.intersect_region_sorted_indices
+                    ctx.intersect_region_sorted_indices,
+                    logic::RS_IntersectRegionSortKeyLess{}
                 );
                 p_ptr->template run<
                     RSCF_LaunchDirect<logic::RSCF_FlagIntersectRegionPairRunStart, KernelType>>(

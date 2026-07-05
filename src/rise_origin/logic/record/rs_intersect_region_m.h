@@ -5,14 +5,13 @@
 #define RS_INTERSECT_REGION_M_H
 
 #include <functional>
-
 #include <refl.hpp>
 
 #include "rise_origin/device/data/rs_bvh.h"
 #include "rise_origin/utils/math/rs_bound.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
@@ -23,7 +22,8 @@ RS_ENUM(
     unsigned int,
     (RSE_INTERSECT_REGION_CUBOID, 0),
     (RSE_INTERSECT_REGION_SPHERE, 1),
-    (RSE_INTERSECT_REGION_CUBOID_RIGID_BODY_LINKED, 2)
+    (RSE_INTERSECT_REGION_CUBOID_RIGID_BODY_LINKED, 2),
+    (RSE_INTERSECT_REGION_SPHERE_RIGID_BODY_LINKED, 3)
 )
 
 /**
@@ -91,7 +91,8 @@ struct RS_IntersectRegionObjectIdentifier {
 
     /// True iff the world point lies inside the region.
     HOST_DEVICE_INLINE_QUALIFIER bool contains(const RVec3f& point) const {
-        if (type == RSE_INTERSECT_REGION_SPHERE) {
+        if (type == RSE_INTERSECT_REGION_SPHERE ||
+            type == RSE_INTERSECT_REGION_SPHERE_RIGID_BODY_LINKED) {
             return (point - position).length2() <= radius * radius;
         }
         RVec3f local = orientation.rotateVec3DInv(point - position).abs();
@@ -100,7 +101,8 @@ struct RS_IntersectRegionObjectIdentifier {
 
     /// World-space axis-aligned bound enclosing the region.
     HOST_DEVICE_INLINE_QUALIFIER RBound3f worldBound() const {
-        if (type == RSE_INTERSECT_REGION_SPHERE) {
+        if (type == RSE_INTERSECT_REGION_SPHERE ||
+            type == RSE_INTERSECT_REGION_SPHERE_RIGID_BODY_LINKED) {
             RVec3f r(radius, radius, radius);
             return RBound3f(position - r, position + r);
         }
@@ -127,15 +129,35 @@ using RS_IntersectRegionBVH = device::RS_BVHBase<
     RS_IntersectRegionObjectIdentifierHostHasher>;
 
 /**
- * @brief One emitted membership fact: structure `structure_gid` has a voxel inside record `record_gid`.
- * Packed record-gid-major so a sorted run of pairs is contiguous per region.
+ * @brief One emitted membership fact: structure `structure_gid` has a voxel inside record
+ * `record_gid`. Packed record-gid-major so a sorted run of pairs is contiguous per region.
  */
 struct RS_IntersectRegionPair {
     RIndex record_gid = RS_NULL_INDEX;
     RIndex structure_gid = RS_NULL_INDEX;
 
+    /// The voxel center minus the region center, in world coords.
+    RVec3f closest_relative_offset = RVec3f::zero();
+
     HOST_DEVICE_INLINE_QUALIFIER RBigIndex key() const {
         return (static_cast<RBigIndex>(record_gid) << 32) | static_cast<RBigIndex>(structure_gid);
+    }
+};
+
+/**
+ * @brief Composite sort key: groups pairs by region and structure, then orders each group by
+ * distance so the closest voxel to the region center sorts first.
+ */
+struct RS_IntersectRegionSortKey {
+    RBigIndex group_key = 0;
+    float distance_squared = 0.0f;
+};
+
+struct RS_IntersectRegionSortKeyLess {
+    HOST_DEVICE_INLINE_QUALIFIER bool
+    operator()(const RS_IntersectRegionSortKey& a, const RS_IntersectRegionSortKey& b) const {
+        if (a.group_key != b.group_key) return a.group_key < b.group_key;
+        return a.distance_squared < b.distance_squared;
     }
 };
 

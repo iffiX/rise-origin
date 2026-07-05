@@ -6,10 +6,10 @@
 
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/logic/record/rs_intersect_region_m.h"
-#include "rise_origin/utils/rs_conf.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_conf.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
@@ -24,7 +24,7 @@ class RSCF_ResolveIntersectRegionDependency
    public:
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(Kernel *k, RHandle intersect_region, RSize rigid_body_segment_offset) {
+    run(Kernel* k, RHandle intersect_region, RSize rigid_body_segment_offset) {
         auto& ctx = k->ctx;
         RIndex rigid_body_sid = IR_G(rigid_body_sid);
         RHandle rigid_body = rigid_body_sid + rigid_body_segment_offset;
@@ -33,9 +33,8 @@ class RSCF_ResolveIntersectRegionDependency
         // Use double for universal precision
         RQuat3df rb_orientation = RB_G(orientation);
         RQuat3df orientation = rb_orientation * RQuat3df(IR_G(rigid_body_anchor_rb_orientation));
-        RVec3df position =
-            RVec3df(RB_G(origin)) +
-            rb_orientation.rotateVec3D(RVec3df(IR_G(rigid_body_anchor_rb_position)));
+        RVec3df position = RVec3df(RB_G(origin)) +
+                           rb_orientation.rotateVec3D(RVec3df(IR_G(rigid_body_anchor_rb_position)));
         IR_S(position, RVec3f(position));
         IR_S(orientation, RQuat3f(orientation));
     }
@@ -54,12 +53,13 @@ class RSCF_GetIntersectRegionPairKeys
     HOST_DEVICE_INLINE_QUALIFIER static void run(
         Kernel* k,
         device::RS_Vector<RS_IntersectRegionPair> pairs,
-        device::RS_Vector<RBigIndex> keys,
+        device::RS_Vector<RS_IntersectRegionSortKey> keys,
         device::RS_Vector<RIndex> indices
     ) {
         if (k == nullptr) return;
         RIndex i = index1D();
-        keys[i] = pairs[i].key();
+        keys[i] =
+            RS_IntersectRegionSortKey{pairs[i].key(), pairs[i].closest_relative_offset.length2()};
         indices[i] = i;
     }
 };
@@ -76,14 +76,14 @@ class RSCF_FlagIntersectRegionPairRunStart
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void run(
         Kernel* k,
-        device::RS_Vector<RBigIndex> sorted_keys,
+        device::RS_Vector<RS_IntersectRegionSortKey> sorted_keys,
         device::RS_Vector<RIndex> flags,
         RIndex total
     ) {
         if (k == nullptr) return;
         RIndex i = index1D();
         if (i >= total) return;
-        bool is_run_start = (i == 0) || (sorted_keys[i] != sorted_keys[i - 1]);
+        bool is_run_start = (i == 0) || (sorted_keys[i].group_key != sorted_keys[i - 1].group_key);
         flags[i] = is_run_start ? 1 : 0;
     }
 };
@@ -151,7 +151,8 @@ class RS_IntersectRegionCompute {
             id.half_size = IR_G(half_size);
             id.radius = IR_G(radius);
 
-            if (id.type == RSE_INTERSECT_REGION_CUBOID_RIGID_BODY_LINKED) {
+            if (id.type == RSE_INTERSECT_REGION_CUBOID_RIGID_BODY_LINKED ||
+                id.type == RSE_INTERSECT_REGION_SPHERE_RIGID_BODY_LINKED) {
                 RHandle rigid_body = IR_G(rigid_body);
                 Quat3C rb_orientation = RB_G(orientation);
                 Quat3C orientation =
@@ -262,6 +263,7 @@ class RS_IntersectRegionCompute {
                         RS_IntersectRegionPair pair;
                         pair.record_gid = obj->record_gid;
                         pair.structure_gid = structure_gid;
+                        pair.closest_relative_offset = RVec3f(center) - obj->position;
                         pairs[out] = pair;
                         out++;
                     }
