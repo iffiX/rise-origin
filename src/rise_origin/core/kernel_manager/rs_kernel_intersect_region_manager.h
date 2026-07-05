@@ -88,12 +88,15 @@ class RS_KernelIntersectRegionManager {
 
     /**
      * @brief Populate this region's membership record from the contiguous slice
-     *        pairs[offset, offset + size). A zero size yields an empty record.
+     *        pairs[offset, offset + size), stamped with the record step and time. A zero size
+     *        yields an empty record.
      */
     void setIntersectRegionRecord(
         const std::vector<logic::RS_IntersectRegionPair> &pairs,
         RSize offset,
-        RSize size
+        RSize size,
+        RBigIndex step,
+        RBigFloat time
     );
 
     /**

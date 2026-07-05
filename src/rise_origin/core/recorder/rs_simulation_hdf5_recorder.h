@@ -35,10 +35,14 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         const std::vector<RS_WorldRaySensorRecord>& records
     ) override;
 
+    void syncIntersectRegionRecords(
+        const std::string& name,
+        const std::vector<RS_WorldIntersectRegionRecord>& records
+    ) override;
+
     void finish() override;
 
    private:
-    /// Per-entity HDF5 state for one structure record (voxel structure).
     struct StructureRecordData {
         RBigSize voxel_offset = 0;
         RBigSize link_offset = 0;
@@ -81,6 +85,14 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         std::shared_ptr<HighFive::Group> sensor_state_group;
     };
 
+    struct IntersectRegionRecordData {
+        RBigSize membership_offset = 0;
+
+        std::shared_ptr<HighFive::Group> root_group;
+        std::shared_ptr<HighFive::Group> time_group;
+        std::shared_ptr<HighFive::Group> memberships_group;
+    };
+
     const int chunk_size = 1024;
     std::string _name;
     RS_ThreadPool _pool{1};
@@ -95,6 +107,7 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
     std::unordered_map<std::string, StructureRecordData> _structure_record_data;
     std::unordered_map<std::string, CameraRecordData> _camera_record_data;
     std::unordered_map<std::string, RaySensorRecordData> _ray_sensor_record_data;
+    std::unordered_map<std::string, IntersectRegionRecordData> _intersect_region_record_data;
 
     StructureRecordData& _createOrGetStructureRecordData(
         const std::string& structure_name,
@@ -125,6 +138,10 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         bool has_material,
         bool has_normal,
         bool has_velocity
+    );
+
+    IntersectRegionRecordData& _createOrGetIntersectRegionRecordData(
+        const std::string& region_name
     );
 
     void
@@ -161,7 +178,8 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
         const RS_WorldCameraRecordBase::State& camera_state
     );
 
-    void _writeRaySensorHitFrame(RaySensorRecordData& d, const RS_WorldRaySensorRecordBase::Hit& hit);
+    void
+    _writeRaySensorHitFrame(RaySensorRecordData& d, const RS_WorldRaySensorRecordBase::Hit& hit);
 
     void _writeRaySensorEntityInfoFrame(
         RaySensorRecordData& d,
@@ -191,6 +209,11 @@ class RS_SimulationHDF5Recorder : public RS_SimulationRecorder {
     void _writeRaySensorStateFrame(
         RaySensorRecordData& d,
         const RS_WorldRaySensorRecordBase::State& sensor_state
+    );
+
+    void _writeIntersectRegionMembershipFrame(
+        IntersectRegionRecordData& d,
+        const RS_WorldIntersectRegionRecordBase::Membership& memberships
     );
 
     template <typename T>

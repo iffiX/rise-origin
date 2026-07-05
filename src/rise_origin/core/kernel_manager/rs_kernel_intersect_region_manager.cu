@@ -94,7 +94,9 @@ RS_WorldIntersectRegionRecord RS_KernelIntersectRegionManager::getControllerReco
 void RS_KernelIntersectRegionManager::setIntersectRegionRecord(
     const std::vector<RS_IntersectRegionPair>& pairs,
     RSize offset,
-    RSize size
+    RSize size,
+    RBigIndex step,
+    RBigFloat time
 ) {
     // Grow the host arena monotonically to the largest membership set ever seen.
     if (size > _membership_capacity) {
@@ -106,6 +108,8 @@ void RS_KernelIntersectRegionManager::setIntersectRegionRecord(
     _host_record.initFromMemory(_host_record_buffer.ptr(), size);
     _host_record.record_gid = _record_registration.gid();
     _host_record.device = RS_DeviceLocation(RSE_DEVICE_TYPE_CPU, 0);
+    if (_host_record.step != nullptr) *_host_record.step = step;
+    if (_host_record.time != nullptr) *_host_record.time = time;
     for (RSize i = 0; i < size; ++i) {
         _host_record.memberships.structure_gid[i] = pairs[offset + i].structure_gid;
         _host_record.memberships.closest_relative_position[i] =

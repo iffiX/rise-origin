@@ -856,6 +856,10 @@ void RS_KernelManager::setIntersectRegionRecords(
     // execution guard here would acquire it under the data guard and deadlock a concurrent command.
     RS_KernelManagerCriticalDataAccessGuard guard(this);
 
+    // Stamp every record delivered this step with the current world step and time.
+    RBigIndex step = kernel.getHostStep();
+    RBigFloat time = kernel.getHostTime();
+
     unordered_map<RIndex, RS_KernelIntersectRegionManager*> manager_by_gid;
     for (auto& [_, rm] : _kernel_intersect_region_managers) {
         manager_by_gid[rm->getRecordGid()] = rm.get();
@@ -870,7 +874,7 @@ void RS_KernelManager::setIntersectRegionRecords(
         RSize start = i;
         while (i < n && pairs[i].record_gid == gid) i++;
         if (auto it = manager_by_gid.find(gid); it != manager_by_gid.end()) {
-            it->second->setIntersectRegionRecord(pairs, start, i - start);
+            it->second->setIntersectRegionRecord(pairs, start, i - start, step, time);
             filled.insert(gid);
         }
     }
@@ -878,7 +882,7 @@ void RS_KernelManager::setIntersectRegionRecords(
     // Records with no membership this step get an empty set.
     for (auto& [gid, manager] : manager_by_gid) {
         if (filled.find(gid) == filled.end()) {
-            manager->setIntersectRegionRecord(pairs, 0, 0);
+            manager->setIntersectRegionRecord(pairs, 0, 0, step, time);
         }
     }
 }

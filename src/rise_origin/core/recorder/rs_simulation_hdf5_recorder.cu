@@ -124,6 +124,21 @@ void RS_SimulationHDF5Recorder::syncRaySensorRecords(
     }
 }
 
+void RS_SimulationHDF5Recorder::syncIntersectRegionRecords(
+    const std::string &name,
+    const std::vector<RS_WorldIntersectRegionRecord> &records
+) {
+    if (records.empty()) return;
+
+    IntersectRegionRecordData &d = _createOrGetIntersectRegionRecordData(name);
+
+    for (auto &record : records) {
+        _appendToGroupNd(d.time_group, "step", record.step, 1, 1);
+        _appendToGroupNd(d.time_group, "time_point", record.time, 1, 1);
+        _writeIntersectRegionMembershipFrame(d, record.memberships);
+    }
+}
+
 void RS_SimulationHDF5Recorder::finish() {
     _hdf5_file->flush();
     H5Fclose(_hdf5_file->getId());
@@ -426,6 +441,40 @@ RS_SimulationHDF5Recorder::_createOrGetRaySensorRecordData(
 
     _ray_sensor_record_data[sensor_name] = d;
     return _ray_sensor_record_data[sensor_name];
+}
+
+RS_SimulationHDF5Recorder::IntersectRegionRecordData &
+RS_SimulationHDF5Recorder::_createOrGetIntersectRegionRecordData(const std::string &region_name) {
+    if (_intersect_region_record_data.find(region_name) != _intersect_region_record_data.end()) {
+        return _intersect_region_record_data[region_name];
+    }
+    IntersectRegionRecordData d;
+    d.root_group = make_shared<HF::Group>(_entity_root_group->createGroup(region_name));
+    auto &root_group = d.root_group;
+
+    d.time_group = make_shared<HF::Group>(root_group->createGroup("frames/time"));
+    d.memberships_group = make_shared<HF::Group>(root_group->createGroup("frames/memberships"));
+
+    HF::DataSpace space_1d({0}, {HF::DataSpace::UNLIMITED});
+    HF::DataSpace space_3d({0, 3}, {HF::DataSpace::UNLIMITED, 3});
+    HF::DataSetCreateProps create_props_1d, create_props_3d;
+    create_props_1d.add(HF::Chunking(chunk_size));
+    create_props_3d.add(HF::Chunking(chunk_size, 3));
+
+    d.time_group->createDataSet<RBigIndex>("step", space_1d, create_props_1d);
+    d.time_group->createDataSet<RBigFloat>("time_point", space_1d, create_props_1d);
+
+    // Each frame appends a variable number of memberships, so the per-frame count and running
+    // offset are stored alongside the flat rows to slice the flat data back per frame.
+    d.memberships_group->createDataSet<RBigSize>("membership_num", space_1d, create_props_1d);
+    d.memberships_group->createDataSet<RBigSize>("membership_offset", space_1d, create_props_1d);
+    d.memberships_group->createDataSet<RIndex>("structure_gid", space_1d, create_props_1d);
+    d.memberships_group->createDataSet<RFloat>(
+        "closest_relative_position", space_3d, create_props_3d
+    );
+
+    _intersect_region_record_data[region_name] = d;
+    return _intersect_region_record_data[region_name];
 }
 
 void RS_SimulationHDF5Recorder::_writeStructureVoxelFrame(
@@ -924,6 +973,24 @@ void RS_SimulationHDF5Recorder::_writeRaySensorStateFrame(
         sensor_state.orientation->w
     };
     _appendToGroupNd(d.sensor_state_group, "orientation", orientation_buf, 1, 4);
+}
+
+void RS_SimulationHDF5Recorder::_writeIntersectRegionMembershipFrame(
+    RS_SimulationHDF5Recorder::IntersectRegionRecordData &d,
+    const RS_WorldIntersectRegionRecordBase::Membership &m
+) {
+    RBigSize m_num = m.object_num;
+    _appendToGroupNd(d.memberships_group, "membership_num", &m_num, 1, 1);
+    _appendToGroupNd(d.memberships_group, "membership_offset", &d.membership_offset, 1, 1);
+    _appendToGroupNd(d.memberships_group, "structure_gid", m.structure_gid, m_num, 1);
+    _appendToGroupNd(
+        d.memberships_group,
+        "closest_relative_position",
+        reinterpret_cast<RFloat *>(m.closest_relative_position),
+        m_num,
+        3
+    );
+    d.membership_offset += m_num;
 }
 
 template <typename T>
