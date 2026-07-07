@@ -599,6 +599,7 @@ inline void initRSPYRSC(py::module &m) {
 
     rspyRSC<RSC_SimulationRuntime, RSC_Base>(m, "RSC_SimulationRuntime")
         .def(py::init<>())
+        .def_readwrite("is_paused_on_start", &RSC_SimulationRuntime::is_paused_on_start)
         .def_readwrite("max_time", &RSC_SimulationRuntime::max_time)
         .def_readwrite("record_buffer_size", &RSC_SimulationRuntime::record_buffer_size)
         .def_readwrite("is_save_record", &RSC_SimulationRuntime::is_save_record)

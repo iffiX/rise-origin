@@ -139,6 +139,11 @@ bool RS_SimulationManager::_initSim(
         sim->kernel_manager->initKernel(sim->simulation_memory_accuracy);
         sim->kernel_manager->setSimulationRSC(world.simulation, true);
 
+        // Start paused when the world config asks for it.
+        if (world.simulation->runtime.is_paused_on_start) {
+            sim->kernel_manager->pauseKernel(true);
+        }
+
         // Order matters — providers before consumers:
         //   resources (textures) -> essences (materials reference textures)
         //   essences -> entities (structures/floor reference materials)

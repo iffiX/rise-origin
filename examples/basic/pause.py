@@ -79,7 +79,9 @@ def build():
             )
         )
 
-    return _common.make_world("pause", gravity=-0.1,materials=materials, structures=structures)
+    world = _common.make_world("pause", gravity=-0.1,materials=materials, structures=structures)
+    world.simulation.runtime = rsc.simulation.Runtime(is_paused_on_start=True)
+    return world
 
 
 def control(time, controllers):

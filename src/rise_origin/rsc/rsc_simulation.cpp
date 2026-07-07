@@ -549,8 +549,8 @@ void RSC_SimulationSentinel::_write(RS_RSCPropertyTreeWriter &tree) const {
 }
 
 bool RSC_SimulationRuntime::operator==(const RSC_SimulationRuntime &other) const {
-    return RSC_Base::operator==(other) && max_time == other.max_time &&
-           record_buffer_size == other.record_buffer_size &&
+    return RSC_Base::operator==(other) && is_paused_on_start == other.is_paused_on_start &&
+           max_time == other.max_time && record_buffer_size == other.record_buffer_size &&
            is_save_record == other.is_save_record && compute_accuracy == other.compute_accuracy &&
            memory_accuracy == other.memory_accuracy && log_level == other.log_level;
 }
@@ -563,6 +563,7 @@ void RSC_SimulationRuntime::_validate(RS_RSCValidator &validator) const {
 }
 
 void RSC_SimulationRuntime::_read(const RS_RSCPropertyTreeReader &tree) {
+    is_paused_on_start = tree.get("is_paused_on_start", is_paused_on_start);
     max_time = tree.get("max_time", max_time);
     record_buffer_size = tree.get("record_buffer_size", record_buffer_size);
     is_save_record = tree.get("is_save_record", is_save_record);
@@ -572,6 +573,7 @@ void RSC_SimulationRuntime::_read(const RS_RSCPropertyTreeReader &tree) {
 }
 
 void RSC_SimulationRuntime::_write(RS_RSCPropertyTreeWriter &tree) const {
+    tree.add("is_paused_on_start", is_paused_on_start);
     tree.add("max_time", max_time);
     tree.add("record_buffer_size", record_buffer_size);
     tree.add("is_save_record", is_save_record);

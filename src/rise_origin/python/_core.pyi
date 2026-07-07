@@ -547,6 +547,7 @@ class RSC_SimulationRecord(RSC_Base):
 class RSC_SimulationRuntime(RSC_Base):
     def __init__(self) -> None: ...
 
+    is_paused_on_start: bool
     max_time: float
     record_buffer_size: int
     is_save_record: bool

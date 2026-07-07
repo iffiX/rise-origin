@@ -265,6 +265,7 @@ class Runtime(RSC_SimulationRuntime):
     """Run-level limits and output settings.
 
     Args:
+        is_paused_on_start: Whether the world starts paused.
         max_time: Maximum simulated time in seconds (0 for unbounded).
         record_buffer_size: Record ring-buffer capacity.
         is_save_record: Whether records are persisted to disk.
@@ -276,6 +277,7 @@ class Runtime(RSC_SimulationRuntime):
     def __init__(
         self,
         *,
+        is_paused_on_start: Optional[bool] = None,
         max_time: Optional[float] = None,
         record_buffer_size: Optional[int] = None,
         is_save_record: Optional[bool] = None,
@@ -286,6 +288,7 @@ class Runtime(RSC_SimulationRuntime):
         super().__init__()
         _apply(
             self,
+            is_paused_on_start=is_paused_on_start,
             max_time=max_time,
             record_buffer_size=record_buffer_size,
             is_save_record=is_save_record,

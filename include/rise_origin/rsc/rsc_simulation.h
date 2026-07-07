@@ -563,6 +563,9 @@ class RSC_SimulationRecord : public RSC_Base {
  */
 class RSC_SimulationRuntime : public RSC_Base {
    public:
+    /// Whether the world starts paused.
+    bool is_paused_on_start = false;
+
     /// Hard cap on simulated time (seconds).
     RFloat max_time = 100000000;
 
@@ -585,6 +588,7 @@ class RSC_SimulationRuntime : public RSC_Base {
 
     template <typename Serializer>
     void serialize(Serializer& s) {
+        s("is_paused_on_start", is_paused_on_start);
         s("max_time", max_time);
         s("record_buffer_size", record_buffer_size);
         s("is_save_record", is_save_record);
