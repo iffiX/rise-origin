@@ -6,9 +6,9 @@
 
 #include <refl.hpp>
 
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_float.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
@@ -146,7 +146,7 @@ class RS_Color3D {
     /// Division operator for constant for color 3d
     HOST_DEVICE_INLINE_QUALIFIER RS_Color3D operator/(T f) const {
         if constexpr (std::is_integral_v<T>) {
-            return {r / f, g / f, b / f};
+            return {static_cast<T>(r / f), static_cast<T>(g / f), static_cast<T>(b / f)};
         } else {
             T f_inv = T(1) / f;
             return {r * f_inv, g * f_inv, b * f_inv};
@@ -424,7 +424,12 @@ class RS_Color4D {
     /// Division operator for constant for color 4D
     HOST_DEVICE_INLINE_QUALIFIER RS_Color4D operator/(T f) const {
         if constexpr (std::is_integral_v<T>) {
-            return {r / f, g / f, b / f, a / f};
+            return {
+                static_cast<T>(r / f),
+                static_cast<T>(g / f),
+                static_cast<T>(b / f),
+                static_cast<T>(a / f)
+            };
         } else {
             T f_inv = T(1) / f;
             return {r * f_inv, g * f_inv, b * f_inv, a * f_inv};

@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Muhan Li (iffi/iffiX)
 
-#include <pybind11/numpy.h>
-#include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
-
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -18,12 +14,29 @@
 #include <utility>
 #include <vector>
 
-#include "init_core.h"
-#include "init_def.h"
-#include "init_rsc.h"
-#include "rise_origin/rise_origin.h"
-#include "rise_origin/utils/string/rs_string.h"
-namespace py = pybind11;
+#include "core/init_world_callback.h"
+#include "core/init_world_controller.h"
+#include "core/init_world_def.h"
+#include "core/init_world_handle.h"
+#include "core/init_world_record.h"
+#include "core/init_world_session.h"
+#include "core/init_world_session_component.h"
+#include "core/init_world_signal.h"
+#include "init_common.h"
+#include "rsc/init_controller.h"
+#include "rsc/init_entity.h"
+#include "rsc/init_essence.h"
+#include "rsc/init_record.h"
+#include "rsc/init_recorder.h"
+#include "rsc/init_resource.h"
+#include "rsc/init_rsc_base.h"
+#include "rsc/init_signal.h"
+#include "rsc/init_simulation.h"
+#include "rsc/init_world.h"
+#include "utils/init_def.h"
+#include "utils/init_device.h"
+#include "utils/init_math.h"
+#include "utils/init_version.h"
 
 class RSPY_RiseOrigin {
    public:
@@ -142,9 +155,30 @@ class RSPY_RiseOrigin {
 };
 
 PYBIND11_MODULE(_core, m) {
-    initRSPYDefinitions(m);
-    initRSPYRSC(m);
-    initRSPYCore(m);
+    initRSPYDef(m);
+    initRSPYDevice(m);
+    initRSPYMath(m);
+    initRSPYVersion(m);
+
+    initRSPYRscBase(m);
+    initRSPYSimulation(m);
+    initRSPYResource(m);
+    initRSPYEssence(m);
+    initRSPYEntity(m);
+    initRSPYRecord(m);
+    initRSPYSignal(m);
+    initRSPYRecorder(m);
+    initRSPYController(m);
+    initRSPYWorld(m);
+
+    initRSPYWorldDef(m);
+    initRSPYWorldRecord(m);
+    initRSPYWorldSignal(m);
+    initRSPYWorldController(m);
+    initRSPYWorldHandle(m);
+    initRSPYWorldCallback(m);
+    initRSPYWorldSessionComponent(m);
+    initRSPYWorldSession(m);
 
     py::class_<RSPY_RiseOrigin>(
         m,

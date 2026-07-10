@@ -20,7 +20,7 @@ rise_find_sources(RS_RISE_ORIGIN_CORE_SRC RECURSIVE DIRS core EXTENSIONS cu)
 rise_find_sources(RS_RISE_ORIGIN_DEVICE_SRC RECURSIVE DIRS device EXTENSIONS cu)
 rise_find_sources(RS_RISE_ORIGIN_RSC_SRC RECURSIVE DIRS rsc EXTENSIONS cpp)
 rise_find_sources(RS_RISE_ORIGIN_INTERFACE_SRC RECURSIVE DIRS interface EXTENSIONS cpp)
-rise_find_sources(RS_RISE_ORIGIN_PYTHON_SRC DIRS python EXTENSIONS cpp)
+rise_find_sources(RS_RISE_ORIGIN_PYTHON_SRC RECURSIVE DIRS python EXTENSIONS cpp)
 
 # cpu backend compiles .cu as C++; cuda leaves them to nvcc.
 rise_adapt_sources(RS_RISE_ORIGIN_CORE_SRC BACKEND ${RISE_ORIGIN_BACKEND})
@@ -120,6 +120,8 @@ target_include_directories(rise_origin_python_core PUBLIC
         ${HDF5_INCLUDE_DIRS}
         ${Python3_INCLUDE_DIRS}
         ${PYBIND11_INCLUDE_DIR})
+target_include_directories(rise_origin_python_core PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/python)
 
 ################################################################
 # backward-cpp for debug builds

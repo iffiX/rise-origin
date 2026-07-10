@@ -1,0 +1,12 @@
+// SPDX-License-Identifier: Apache-2.0
+// Copyright 2026 Muhan Li (iffi/iffiX)
+
+#ifndef RSPY_UTILS_INIT_VERSION_H
+#define RSPY_UTILS_INIT_VERSION_H
+
+#include "init_common.h"
+
+/// Bind the RS_Version semantic-version value type.
+void initRSPYVersion(py::module &m);
+
+#endif  // RSPY_UTILS_INIT_VERSION_H

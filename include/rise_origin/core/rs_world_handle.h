@@ -29,6 +29,19 @@ RS_ENUM(
 );
 
 /**
+ * @brief Completion state of a world command task.
+ * @details A task is PENDING until its command finishes, then terminal SUCCESS or FAIL. A failure
+ * is carried as data on the task result, never thrown.
+ */
+RS_ENUM(
+    RSE_WorldTaskState,
+    unsigned int,
+    (RSE_WORLD_TASK_PENDING, 0),
+    (RSE_WORLD_TASK_SUCCESS, 1),
+    (RSE_WORLD_TASK_FAIL, 2)
+)
+
+/**
  * @brief One entry in a world's message log.
  * @details Entries live in a bounded ring keyed by a monotonic index and are never removed by
  * reads.
