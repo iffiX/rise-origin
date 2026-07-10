@@ -11,7 +11,7 @@ namespace {
 
 /// Bind the operators and member functions shared by every RS_VecND<RFloat> dimension.
 template <typename V>
-void rspyBindVecCommon(py::class_<V> &c) {
+void rspyBindVecCommon(py::class_<V> &c, int dim) {
     c.def_static("zero", &V::zero, "Return a vector of all zeros.")
         .def_static("one", &V::one, "Return a vector of all ones.")
         .def_static(
@@ -35,11 +35,24 @@ void rspyBindVecCommon(py::class_<V> &c) {
         .def(py::self != py::self);
 
     c.def(
-         "__getitem__", [](V &v, int i) { return v[i]; }, "Return the component at the given index."
+         "__len__", [dim](const V &) { return dim; }, "Number of components."
     )
         .def(
+            "__getitem__",
+            [dim](V &v, int i) {
+                if (i < 0) i += dim;
+                if (i < 0 || i >= dim) throw py::index_error();
+                return v[i];
+            },
+            "Return the component at the given index."
+        )
+        .def(
             "__setitem__",
-            [](V &v, int i, RFloat value) { v[i] = value; },
+            [dim](V &v, int i, RFloat value) {
+                if (i < 0) i += dim;
+                if (i < 0 || i >= dim) throw py::index_error();
+                v[i] = value;
+            },
             "Set the component at the given index."
         );
 
@@ -197,7 +210,7 @@ void initRSPYMath(py::module &m) {
         .def("__repr__", [](const RVec2rf &v) {
             return "RVec2rf(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")";
         });
-    rspyBindVecCommon(vec2);
+    rspyBindVecCommon(vec2, 2);
     py::implicitly_convertible<py::sequence, RVec2rf>();
 
     py::class_<RVec3rf> vec3(m, "RVec3rf", "3D float vector");
@@ -266,7 +279,7 @@ void initRSPYMath(py::module &m) {
             return "RVec3rf(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " +
                    std::to_string(v.z) + ")";
         });
-    rspyBindVecCommon(vec3);
+    rspyBindVecCommon(vec3, 3);
     py::implicitly_convertible<py::sequence, RVec3rf>();
 
     py::class_<RVec4rf> vec4(m, "RVec4rf", "4D float vector");
@@ -301,7 +314,7 @@ void initRSPYMath(py::module &m) {
             return "RVec4rf(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ", " +
                    std::to_string(v.z) + ", " + std::to_string(v.w) + ")";
         });
-    rspyBindVecCommon(vec4);
+    rspyBindVecCommon(vec4, 4);
     py::implicitly_convertible<py::sequence, RVec4rf>();
 
     py::class_<RQuat3rf>(m, "RQuat3rf", "3D float quaternion")
@@ -507,6 +520,26 @@ void initRSPYMath(py::module &m) {
             py::arg("row2"),
             "Construct from three row vectors."
         )
+        .def(
+            py::init([](const py::sequence &s) {
+                RFloat e[9];
+                if (py::len(s) == 9) {
+                    for (int i = 0; i < 9; ++i) e[i] = s[i].cast<RFloat>();
+                } else if (py::len(s) == 3) {
+                    for (int r = 0; r < 3; ++r) {
+                        py::sequence row = py::reinterpret_borrow<py::sequence>(s[r]);
+                        if (py::len(row) != 3) {
+                            throw std::runtime_error("RMat3rf rows must each have 3 values");
+                        }
+                        for (int c = 0; c < 3; ++c) e[r * 3 + c] = row[c].cast<RFloat>();
+                    }
+                } else {
+                    throw std::runtime_error("RMat3rf expects 9 values or 3 rows of 3 values");
+                }
+                return RMat3rf(e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8]);
+            }),
+            "Construct from a flat 9-element sequence or three rows of 3 values."
+        )
         .def_static("zero", &RMat3rf::zero, "Create a zero matrix.")
         .def_static("eye", &RMat3rf::eye, "Create an identity matrix.")
         .def_static(
@@ -626,7 +659,15 @@ void initRSPYMath(py::module &m) {
             "is_valid",
             [](const RMat3rf &self) { return self.isValid(); },
             "Whether all values are valid numbers."
-        );
+        )
+        .def("__repr__", [](const RMat3rf &m) {
+            return "RMat3rf([[" + std::to_string(m(0, 0)) + ", " + std::to_string(m(0, 1)) + ", " +
+                   std::to_string(m(0, 2)) + "], [" + std::to_string(m(1, 0)) + ", " +
+                   std::to_string(m(1, 1)) + ", " + std::to_string(m(1, 2)) + "], [" +
+                   std::to_string(m(2, 0)) + ", " + std::to_string(m(2, 1)) + ", " +
+                   std::to_string(m(2, 2)) + "]])";
+        });
+    py::implicitly_convertible<py::sequence, RMat3rf>();
 
     py::class_<RColor3b>(m, "RColor3b", "24-bit RGB color")
         .def(py::init<>(), "Create a zero color.")
@@ -893,7 +934,12 @@ void initRSPYMath(py::module &m) {
             [](const RBound3rf &b, const RVec3rf &point) { return b.closestPoint(point); },
             py::arg("point"),
             "Return the closest point on the bound to a point."
-        );
+        )
+        .def("__repr__", [](const RBound3rf &b) {
+            return "RBound3rf(" + std::to_string(b.min_x) + ", " + std::to_string(b.min_y) + ", " +
+                   std::to_string(b.min_z) + ", " + std::to_string(b.max_x) + ", " +
+                   std::to_string(b.max_y) + ", " + std::to_string(b.max_z) + ")";
+        });
     py::implicitly_convertible<py::sequence, RBound3rf>();
 
     auto bound_rui = py::class_<RBound3rui>(m, "RBound3rui", "3D unsigned-integer bounding box");
@@ -974,7 +1020,12 @@ void initRSPYMath(py::module &m) {
             [](RBound3rui &b, RIndex amount) { return b.expand(amount); },
             py::arg("amount"),
             "Expand the bound by a fixed amount in all directions."
-        );
+        )
+        .def("__repr__", [](const RBound3rui &b) {
+            return "RBound3rui(" + std::to_string(b.min_x) + ", " + std::to_string(b.min_y) + ", " +
+                   std::to_string(b.min_z) + ", " + std::to_string(b.max_x) + ", " +
+                   std::to_string(b.max_y) + ", " + std::to_string(b.max_z) + ")";
+        });
     py::implicitly_convertible<py::sequence, RBound3rui>();
 
     auto bound_ri = py::class_<RBound3ri>(m, "RBound3ri", "3D signed-integer bounding box");
@@ -1061,7 +1112,12 @@ void initRSPYMath(py::module &m) {
             [](RBound3ri &b, RSignedIndex amount) { return b.expand(amount); },
             py::arg("amount"),
             "Expand the bound by a fixed amount in all directions."
-        );
+        )
+        .def("__repr__", [](const RBound3ri &b) {
+            return "RBound3ri(" + std::to_string(b.min_x) + ", " + std::to_string(b.min_y) + ", " +
+                   std::to_string(b.min_z) + ", " + std::to_string(b.max_x) + ", " +
+                   std::to_string(b.max_y) + ", " + std::to_string(b.max_z) + ")";
+        });
     py::implicitly_convertible<py::sequence, RBound3ri>();
 
     py::enum_<RSE_MathExprOperator>(

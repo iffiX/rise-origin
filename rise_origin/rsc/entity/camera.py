@@ -25,7 +25,7 @@ from rise_origin import (
     RSC_CameraStereoSignal,
 )
 
-from rise_origin.rsc._utils import Quat3rf, Vec3rf
+from rise_origin import RQuat3rf, RVec3rf
 
 __all__ = [
     "CameraPerspectiveRecord",
@@ -201,8 +201,8 @@ class CameraPerspectiveFree(RSC_CameraPerspectiveFree):
         self,
         name: str = "camera",
         *,
-        origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        origin_position: RVec3rf = RVec3rf.zero(),
+        orientation: RQuat3rf = RQuat3rf.unit(),
         image_width: int = 1280,
         image_height: int = 720,
         samples_per_pixel: int = 4,
@@ -268,8 +268,8 @@ class CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveRigidBodyLinked):
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
-        relative_anchor: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_anchor: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
         image_width: int = 1280,
         image_height: int = 720,
         samples_per_pixel: int = 4,
@@ -398,8 +398,8 @@ class CameraStereoFree(RSC_CameraStereoFree):
         self,
         name: str = "camera",
         *,
-        origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        origin_position: RVec3rf = RVec3rf.zero(),
+        orientation: RQuat3rf = RQuat3rf.unit(),
         image_width: int = 1280,
         image_height: int = 720,
         samples_per_pixel: int = 4,
@@ -473,8 +473,8 @@ class CameraStereoRigidBodyLinked(RSC_CameraStereoRigidBodyLinked):
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
-        relative_anchor: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_anchor: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
         image_width: int = 1280,
         image_height: int = 720,
         samples_per_pixel: int = 4,

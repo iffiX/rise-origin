@@ -7,9 +7,11 @@ signals are produced by the controller named in ``source_controller_reference`` 
 each callback step) and applied to the targeted structure.
 """
 
+from typing import Optional
+
 from rise_origin import RS_NULL_INDEX, RSC_Force, RSC_Torque, RSC_Transform
 
-from rise_origin.rsc._utils import Bound3ri
+from rise_origin import RBound3ri
 
 __all__ = ["Force", "Torque", "Transform"]
 
@@ -37,7 +39,7 @@ class Force(RSC_Force):
         *,
         structure_name: str,
         source_controller_reference: str = "",
-        voxel_range: Bound3ri = None,
+        voxel_range: Optional[RBound3ri] = None,
         body_sid: int = RS_NULL_INDEX,
         segment_bid: int = RS_NULL_INDEX,
     ) -> None:

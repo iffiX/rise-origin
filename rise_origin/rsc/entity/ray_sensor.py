@@ -19,7 +19,7 @@ from rise_origin import (
     RSC_RaySensorSignal,
 )
 
-from rise_origin.rsc._utils import Quat3rf, Vec3rf
+from rise_origin import RQuat3rf, RVec3rf
 
 __all__ = [
     "RaySensorRecord",
@@ -31,7 +31,7 @@ __all__ = [
 
 def _apply_ray_sensor(
     sensor,
-    ray_directions: "List[Vec3rf]",
+    ray_directions: "List[RVec3rf]",
     max_range: float,
     record: "Optional[RaySensorRecord]",
     signal: "Optional[RaySensorSignal]",
@@ -132,9 +132,9 @@ class RaySensorFree(RSC_RaySensorFree):
         self,
         name: str = "ray_sensor",
         *,
-        ray_directions: List[Vec3rf] = ((1.0, 0.0, 0.0),),
-        origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        ray_directions: List[RVec3rf] = (RVec3rf(1.0, 0.0, 0.0),),
+        origin_position: RVec3rf = RVec3rf.zero(),
+        orientation: RQuat3rf = RQuat3rf.unit(),
         max_range: float = 100.0,
         record: Optional[RaySensorRecord] = None,
         signal: Optional[RaySensorSignal] = None,
@@ -172,12 +172,12 @@ class RaySensorRigidBodyLinked(RSC_RaySensorRigidBodyLinked):
         self,
         name: str = "ray_sensor",
         *,
-        ray_directions: List[Vec3rf] = ((1.0, 0.0, 0.0),),
+        ray_directions: List[RVec3rf] = (RVec3rf(1.0, 0.0, 0.0),),
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
-        relative_anchor: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_anchor: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
         max_range: float = 100.0,
         record: Optional[RaySensorRecord] = None,
         signal: Optional[RaySensorSignal] = None,

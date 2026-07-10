@@ -36,7 +36,7 @@ from rise_origin import (
     RSC_MaterialPhysicalPropertyAtlas,
 )
 
-from rise_origin.rsc._utils import Mat3rf, Vec3rf, _mat3rf
+from rise_origin import RMat3rf, RVec3rf
 
 __all__ = [
     "Material",
@@ -164,15 +164,15 @@ class MaterialPhysicalPropertyAtlas(RSC_MaterialPhysicalPropertyAtlas):
         *,
         material_reference: str,
         mass: float,
-        com_position: Vec3rf,
-        inertia: Mat3rf,
+        com_position: RVec3rf,
+        inertia: RMat3rf,
     ) -> None:
         super().__init__()
         self.name = name
         self.material_reference = material_reference
         self.mass = mass
         self.com_position = com_position
-        self.inertia = _mat3rf(inertia)
+        self.inertia = inertia
 
 
 class MaterialOpticalPropertySimpleMicrofacet(

@@ -18,7 +18,7 @@ from rise_origin import (
     RSC_IntersectRegionSphereRigidBodyLinked,
 )
 
-from rise_origin.rsc._utils import Quat3rf, Vec3rf
+from rise_origin import RQuat3rf, RVec3rf
 
 __all__ = [
     "IntersectRegionCuboid",
@@ -50,9 +50,9 @@ class IntersectRegionCuboid(RSC_IntersectRegionCuboid):
         self,
         name: str,
         *,
-        position: Vec3rf = (0.0, 0.0, 0.0),
-        orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
-        size: Vec3rf = (1.0, 1.0, 1.0),
+        position: RVec3rf = RVec3rf.zero(),
+        orientation: RQuat3rf = RQuat3rf.unit(),
+        size: RVec3rf = RVec3rf.one(),
         target_controller_reference: str = "",
         target_recorder_reference: str = "",
     ) -> None:
@@ -97,9 +97,9 @@ class IntersectRegionCuboidRigidBodyLinked(RSC_IntersectRegionCuboidRigidBodyLin
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
-        relative_anchor: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
-        size: Vec3rf = (1.0, 1.0, 1.0),
+        relative_anchor: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
+        size: RVec3rf = RVec3rf.one(),
         target_controller_reference: str = "",
         target_recorder_reference: str = "",
     ) -> None:
@@ -136,7 +136,7 @@ class IntersectRegionSphere(RSC_IntersectRegionSphere):
         self,
         name: str,
         *,
-        position: Vec3rf = (0.0, 0.0, 0.0),
+        position: RVec3rf = RVec3rf.zero(),
         radius: float = 1.0,
         target_controller_reference: str = "",
         target_recorder_reference: str = "",
@@ -180,7 +180,7 @@ class IntersectRegionSphereRigidBodyLinked(RSC_IntersectRegionSphereRigidBodyLin
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
-        relative_anchor: Vec3rf = (0.0, 0.0, 0.0),
+        relative_anchor: RVec3rf = RVec3rf.zero(),
         radius: float = 1.0,
         target_controller_reference: str = "",
         target_recorder_reference: str = "",

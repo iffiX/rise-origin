@@ -35,7 +35,7 @@ from rise_origin import (
     RSE_StructureVoxelRecordVoxelRange,
 )
 
-from rise_origin.rsc._utils import Quat3rf, Vec3rf
+from rise_origin import RQuat3rf, RVec3rf
 
 __all__ = [
     "VoxelSizeSpec",
@@ -134,8 +134,8 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
     def __init__(
         self,
         *,
-        relative_origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_origin_position: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
         x_voxels: int = 0,
         y_voxels: int = 0,
         z_voxels: int = 0,
@@ -170,8 +170,8 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         material_sid: int = 0,
         segment_sid: int = 0,
         voxel_size: float,
-        relative_origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_origin_position: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
         """A solid rectangular block of voxels.
 
@@ -207,8 +207,8 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         material_sid: int = 0,
         segment_sid: int = 0,
         voxel_size: float,
-        relative_origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_origin_position: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
         """A solid sphere of the given voxel radius.
 
@@ -243,8 +243,8 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         material_sid: int = 0,
         segment_sid: int = 0,
         voxel_size: float,
-        relative_origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_origin_position: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
         """A solid cylinder of ``height_voxels`` along ``axis``.
 
@@ -281,8 +281,8 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         material_sid: int = 0,
         segment_sid: int = 0,
         voxel_size: float,
-        relative_origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_origin_position: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
         """A solid capsule: a cylinder of ``height_voxels`` with hemispherical caps.
 
@@ -323,8 +323,8 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         material_grid=None,
         segment_grid=None,
         expansion_signal_grid=None,
-        relative_origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_origin_position: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
         """Build a body from an occupancy grid (the kernel every generator uses).
 
@@ -373,7 +373,11 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         present = occ | (mats != RS_NULL_INDEX) | (segs != RS_NULL_INDEX)
         if present.any():
             present_x, present_y, present_z = np.nonzero(present)
-            x0, y0, z0 = int(present_x.min()), int(present_y.min()), int(present_z.min())
+            x0, y0, z0 = (
+                int(present_x.min()),
+                int(present_y.min()),
+                int(present_z.min()),
+            )
             x1 = int(present_x.max()) + 1
             y1 = int(present_y.max()) + 1
             z1 = int(present_z.max()) + 1
@@ -384,10 +388,14 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
                 exp = exp[box]
             shift = cls._rotate_vector(
                 relative_orientation,
-                (x0 * voxel_size, y0 * voxel_size, z0 * voxel_size),
+                RVec3rf(x0 * voxel_size, y0 * voxel_size, z0 * voxel_size),
             )
-            base = np.asarray(relative_origin_position, dtype=np.float64) + shift
-            relative_origin_position = (float(base[0]), float(base[1]), float(base[2]))
+            origin = (
+                relative_origin_position
+                if isinstance(relative_origin_position, RVec3rf)
+                else RVec3rf(relative_origin_position)
+            )
+            relative_origin_position = origin + shift
 
         nx, ny, nz = mats.shape
         expansion = cls._flatten(exp) if exp is not None else ()
@@ -408,11 +416,11 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         cls,
         fn: Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray],
         *,
-        bounds: Tuple[Vec3rf, Vec3rf],
+        bounds: Tuple[RVec3rf, RVec3rf],
         voxel_size: float,
         material_sid: int = 0,
         segment_sid: int = 0,
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
         """A body filled where a signed-distance function is non-positive.
 
@@ -435,7 +443,9 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         Returns:
             A populated :class:`StructureVoxelBody`.
         """
-        (min_x, min_y, min_z), (max_x, max_y, max_z) = bounds
+        min_corner, max_corner = bounds
+        min_x, min_y, min_z = min_corner[0], min_corner[1], min_corner[2]
+        max_x, max_y, max_z = max_corner[0], max_corner[1], max_corner[2]
         nx = max(1, int(round((max_x - min_x) / voxel_size)))
         ny = max(1, int(round((max_y - min_y) / voxel_size)))
         nz = max(1, int(round((max_z - min_z) / voxel_size)))
@@ -449,7 +459,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             material_sid=material_sid,
             segment_sid=segment_sid,
             voxel_size=voxel_size,
-            relative_origin_position=(min_x, min_y, min_z),
+            relative_origin_position=RVec3rf(min_x, min_y, min_z),
             relative_orientation=relative_orientation,
         )
 
@@ -461,7 +471,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         voxel_size: float,
         material_sid: int = 0,
         segment_sid: int = 0,
-        relative_orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
         """A body voxelized from an in-memory triangle mesh.
 
@@ -500,13 +510,12 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         return np.asarray(grid).transpose(order).ravel(order="C")
 
     @staticmethod
-    def _rotate_vector(orientation, vector) -> np.ndarray:
-        """Rotate a 3-vector by a quaternion given as (x, y, z, w)."""
-        quat = np.asarray(orientation, dtype=np.float64)
-        vec = np.asarray(vector, dtype=np.float64)
-        q_vec, q_w = quat[:3], quat[3]
-        crossed = 2.0 * np.cross(q_vec, vec)
-        return vec + q_w * crossed + np.cross(q_vec, crossed)
+    def _rotate_vector(orientation: RQuat3rf, vector: RVec3rf) -> RVec3rf:
+        """Rotate a 3-vector by an orientation quaternion."""
+        quat = (
+            orientation if isinstance(orientation, RQuat3rf) else RQuat3rf(orientation)
+        )
+        return quat.rotate_vec3d(RVec3rf(vector))
 
     @staticmethod
     def _make_sphere_mask(radius: int) -> np.ndarray:
@@ -608,11 +617,11 @@ class StructureVoxelConstraint(RSC_StructureVoxelConstraint):
         a_segment_bid: int = RS_NULL_INDEX,
         b_body_sid: int = RS_NULL_INDEX,
         b_segment_bid: int = RS_NULL_INDEX,
-        relative_anchor: Vec3rf = (0.0, 0.0, 0.0),
+        relative_anchor: RVec3rf = RVec3rf.zero(),
         hinge_control_mode: int = (
             RSE_StructureVoxelHingeControlMode.RSE_STRUCTURE_VOXEL_HINGE_CONTROL_BASIC_POSITION
         ),
-        hinge_relative_axis: Vec3rf = (0.0, 0.0, 0.0),
+        hinge_relative_axis: RVec3rf = RVec3rf.zero(),
         hinge_min: float = -math.pi,
         hinge_max: float = math.pi,
         hinge_position_control_kp: float = 0.0,
@@ -623,7 +632,7 @@ class StructureVoxelConstraint(RSC_StructureVoxelConstraint):
         prismatic_control_mode: int = (
             RSE_StructureVoxelPrismaticControlMode.RSE_STRUCTURE_VOXEL_PRISMATIC_CONTROL_BASIC_POSITION
         ),
-        prismatic_relative_axis: Vec3rf = (0.0, 0.0, 0.0),
+        prismatic_relative_axis: RVec3rf = RVec3rf.zero(),
         prismatic_min: float = -1.0,
         prismatic_max: float = 1.0,
         prismatic_position_control_kp: float = 0.0,
@@ -784,8 +793,8 @@ class StructureVoxel(RSC_StructureVoxel):
         self,
         name: str,
         *,
-        origin_position: Vec3rf = (0.0, 0.0, 0.0),
-        orientation: Quat3rf = (0.0, 0.0, 0.0, 1.0),
+        origin_position: RVec3rf = RVec3rf.zero(),
+        orientation: RQuat3rf = RQuat3rf.unit(),
         material_references: Sequence[str] = (),
         is_fixed: bool = False,
         bodies: Sequence[StructureVoxelBody] = (),
