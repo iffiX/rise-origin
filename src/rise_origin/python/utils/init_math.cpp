@@ -564,6 +564,19 @@ void initRSPYMath(py::module &m) {
             "Return the element at the (row, col) index pair."
         )
         .def(
+            "__getitem__",
+            [](const RMat3rf &self, int row) {
+                if (row < 0) row += 3;
+                if (row < 0 || row >= 3) {
+                    throw py::index_error("RMat3rf row index out of range");
+                }
+                py::list out;
+                for (int c = 0; c < 3; ++c) out.append(self(row, c));
+                return out;
+            },
+            "Return the given row as a list of three floats."
+        )
+        .def(
             "__setitem__",
             [](RMat3rf &self, std::pair<int, int> idx, RFloat v) {
                 if (idx.first < 0 || idx.first >= 3 || idx.second < 0 || idx.second >= 3) {
@@ -588,24 +601,31 @@ void initRSPYMath(py::module &m) {
         .def(
             "to_list",
             [](const RMat3rf &self) {
-                std::vector<std::vector<RFloat>> rows(3, std::vector<RFloat>(3));
-                for (int r = 0; r < 3; ++r)
-                    for (int c = 0; c < 3; ++c) rows[r][c] = self[r][c];
+                py::list rows;
+                for (int r = 0; r < 3; ++r) {
+                    py::list row;
+                    for (int c = 0; c < 3; ++c) row.append(self(r, c));
+                    rows.append(row);
+                }
                 return rows;
             },
-            "Return the matrix as a 3x3 nested list."
+            "Return the matrix as a 3x3 nested list of floats."
         )
         .def(
             "from_list",
-            [](RMat3rf &self, const std::vector<std::vector<RFloat>> &rows) {
-                if (rows.size() != 3) throw py::value_error("RMat3rf.from_list expects 3 rows");
+            [](RMat3rf &self, const py::sequence &rows) {
+                if (py::len(rows) != 3) {
+                    throw py::value_error("RMat3rf.from_list expects 3 rows");
+                }
                 for (int r = 0; r < 3; ++r) {
-                    if (rows[r].size() != 3)
+                    py::sequence row = py::reinterpret_borrow<py::sequence>(rows[r]);
+                    if (py::len(row) != 3) {
                         throw py::value_error("RMat3rf.from_list expects 3 columns per row");
-                    for (int c = 0; c < 3; ++c) self[r][c] = rows[r][c];
+                    }
+                    for (int c = 0; c < 3; ++c) self[r][c] = row[c].cast<RFloat>();
                 }
             },
-            "Set the matrix from a 3x3 nested list."
+            "Set the matrix from three rows of three values (plain lists, tuples, or RVec3rf)."
         )
         .def(py::self + py::self)
         .def(py::self - py::self)
