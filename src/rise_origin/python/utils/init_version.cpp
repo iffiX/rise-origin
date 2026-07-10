@@ -11,41 +11,71 @@ void initRSPYVersion(py::module &m) {
     py::class_<RS_Version>(
         m, "RS_Version", "A semantic version with major, minor, and patch parts."
     )
-        .def(py::init<>())
+        .def(py::init<>(), "Create version 0.0.0.")
         .def(
             py::init<RIndex, RIndex, RIndex>(),
             py::arg("major"),
             py::arg("minor") = 0,
-            py::arg("patch") = 0
+            py::arg("patch") = 0,
+            "Construct a version from its components."
         )
-        .def_readwrite("major", &RS_Version::major)
-        .def_readwrite("minor", &RS_Version::minor)
-        .def_readwrite("patch", &RS_Version::patch)
+        .def_readwrite("major", &RS_Version::major, "Major version number (breaking changes).")
+        .def_readwrite(
+            "minor", &RS_Version::minor, "Minor version number (backwards-compatible features)."
+        )
+        .def_readwrite(
+            "patch", &RS_Version::patch, "Patch version number (backwards-compatible fixes)."
+        )
         .def(py::self == py::self)
         .def(py::self != py::self)
         .def(py::self < py::self)
         .def(py::self <= py::self)
         .def(py::self > py::self)
         .def(py::self >= py::self)
-        .def("to_string", &RS_Version::toString)
+        .def("to_string", &RS_Version::toString, "Return a string representation of the version.")
         .def(
             "from_string",
             [](RS_Version &self, const std::string &version_str) { self.fromString(version_str); },
             py::arg("version_str"),
-            "Parse major.minor.patch into this version, raising RS_DataException on a bad string."
+            "Parse a version string into this version, raising RS_DataException on a bad string."
         )
         .def(
             "matches",
             &RS_Version::matches,
             py::arg("specifier"),
-            "Whether this version satisfies a specifier such as '>=1.2', '~=1.4', or '^2.0'."
+            "Check if this version matches a version specifier such as '>=1.2', '~=1.4', or '^2.0'."
         )
-        .def("is_compatible_with", &RS_Version::isCompatibleWith, py::arg("other"))
-        .def("next_major", &RS_Version::nextMajor)
-        .def("next_minor", &RS_Version::nextMinor)
-        .def("next_patch", &RS_Version::nextPatch)
-        .def("is_pre_release", &RS_Version::isPreRelease)
-        .def("is_stable", &RS_Version::isStable)
+        .def(
+            "is_compatible_with",
+            &RS_Version::isCompatibleWith,
+            py::arg("other"),
+            "Check if this version is compatible with another version."
+        )
+        .def(
+            "next_major",
+            &RS_Version::nextMajor,
+            "Return the next major version (increments major, resets minor and patch to 0)."
+        )
+        .def(
+            "next_minor",
+            &RS_Version::nextMinor,
+            "Return the next minor version (increments minor, resets patch to 0)."
+        )
+        .def(
+            "next_patch",
+            &RS_Version::nextPatch,
+            "Return the next patch version (increments patch)."
+        )
+        .def(
+            "is_pre_release",
+            &RS_Version::isPreRelease,
+            "Check if this is a pre-release version (0.x.y)."
+        )
+        .def(
+            "is_stable",
+            &RS_Version::isStable,
+            "Check if this is a stable release version (x.y.z where x > 0)."
+        )
         .def("__str__", &RS_Version::toString)
         .def(
             "__repr__",

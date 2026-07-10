@@ -22,47 +22,71 @@ void initRSPYWorldHandle(py::module &m) {
     /*****************************************************************
      * World messages
      *****************************************************************/
-    py::class_<RS_WorldMessage>(m, "RS_WorldMessage")
+    py::class_<RS_WorldMessage>(m, "RS_WorldMessage", "One entry in a world's message log.")
         .def(py::init<>())
-        .def_readonly("index", &RS_WorldMessage::index)
-        .def_readonly("time", &RS_WorldMessage::time)
-        .def_readonly("level", &RS_WorldMessage::level)
-        .def_readonly("text", &RS_WorldMessage::text);
+        .def_readonly(
+            "index", &RS_WorldMessage::index, "Monotonic index of this message in the log."
+        )
+        .def_readonly("time", &RS_WorldMessage::time, "Timestamp when this message was recorded.")
+        .def_readonly("level", &RS_WorldMessage::level, "Severity level of this message.")
+        .def_readonly("text", &RS_WorldMessage::text, "Text content of this message.");
 
     /*****************************************************************
      * World tasks
      *****************************************************************/
-    py::class_<RS_WorldTaskDataCreated>(m, "RS_WorldTaskDataCreated")
+    py::class_<RS_WorldTaskDataCreated>(
+        m, "RS_WorldTaskDataCreated", "Task result carrying the gid a world add operation assigned."
+    )
         .def(py::init<>())
-        .def_readwrite("gid", &RS_WorldTaskDataCreated::gid)
-        .def_readwrite("name", &RS_WorldTaskDataCreated::name);
+        .def_readwrite(
+            "gid", &RS_WorldTaskDataCreated::gid, "Global id the add operation assigned."
+        )
+        .def_readwrite("name", &RS_WorldTaskDataCreated::name, "Name of the created object.");
 
-    py::class_<RS_WorldTaskDataSuccess>(m, "RS_WorldTaskDataSuccess").def(py::init<>());
+    py::class_<RS_WorldTaskDataSuccess>(
+        m,
+        "RS_WorldTaskDataSuccess",
+        "Task result for a command that succeeded without producing an object."
+    )
+        .def(py::init<>());
 
-    py::class_<RS_WorldTaskDataFailed>(m, "RS_WorldTaskDataFailed")
+    py::class_<RS_WorldTaskDataFailed>(
+        m, "RS_WorldTaskDataFailed", "Task result for a command that failed."
+    )
         .def(py::init<>())
-        .def_readwrite("error", &RS_WorldTaskDataFailed::error);
+        .def_readwrite(
+            "error", &RS_WorldTaskDataFailed::error, "Error message describing the failure."
+        );
 
-    py::class_<RS_WorldTaskData>(m, "RS_WorldTaskData")
+    py::class_<RS_WorldTaskData>(m, "RS_WorldTaskData", "Result body carried by a world task.")
         .def(py::init<>())
-        .def_property_readonly("value", [](const RS_WorldTaskData &self) -> py::object {
-            if (self.index() == RS_NULL_INDEX) return py::none();
-            py::object result = py::none();
-            self.visit([&](auto &held) { result = py::cast(held); });
-            return result;
-        });
+        .def_property_readonly(
+            "value",
+            [](const RS_WorldTaskData &self) -> py::object {
+                if (self.index() == RS_NULL_INDEX) return py::none();
+                py::object result = py::none();
+                self.visit([&](auto &held) { result = py::cast(held); });
+                return result;
+            },
+            "The held task result, or None when empty."
+        );
 
-    py::class_<RS_WorldTask>(m, "RS_WorldTask")
+    py::class_<RS_WorldTask>(m, "RS_WorldTask", "Completion of a single deferred world command.")
         .def(py::init<>())
-        .def("state", &RS_WorldTask::state)
-        .def("is_finished", &RS_WorldTask::isFinished)
-        .def("is_valid", &RS_WorldTask::isValid)
+        .def("state", &RS_WorldTask::state, "Completion state without blocking.")
+        .def(
+            "is_finished",
+            &RS_WorldTask::isFinished,
+            "Whether the command has finished without blocking."
+        )
+        .def("is_valid", &RS_WorldTask::isValid, "Whether this task refers to a command.")
         .def(
             "wait",
             [](const RS_WorldTask &self) {
                 py::gil_scoped_release release;
                 self.wait();
-            }
+            },
+            "Block until the command finishes."
         )
         .def(
             "wait_for",
@@ -70,12 +94,17 @@ void initRSPYWorldHandle(py::module &m) {
                 py::gil_scoped_release release;
                 return self.waitFor(std::chrono::duration<double>(timeout_seconds));
             },
-            py::arg("timeout_seconds")
+            py::arg("timeout_seconds"),
+            "Block until the command finishes or the timeout elapses."
         )
-        .def("get", [](const RS_WorldTask &self) {
-            py::gil_scoped_release release;
-            return self.get();
-        });
+        .def(
+            "get",
+            [](const RS_WorldTask &self) {
+                py::gil_scoped_release release;
+                return self.get();
+            },
+            "Block until the command finishes and return its result."
+        );
 
     /*****************************************************************
      * World handle

@@ -4,7 +4,7 @@
 #include "core/init_world_def.h"
 
 void initRSPYWorldDef(py::module &m) {
-    py::enum_<RSE_WorldStatus>(m, "RSE_WorldStatus")
+    py::enum_<RSE_WorldStatus>(m, "RSE_WorldStatus", "Lifecycle status of a world.")
         .value("RSE_WORLD_END_SUCCESS", RSE_WORLD_END_SUCCESS)
         .value("RSE_WORLD_END_TERMINATED", RSE_WORLD_END_TERMINATED)
         .value("RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG", RSE_WORLD_END_FAILED_WITH_INVALID_CONFIG)
@@ -24,7 +24,7 @@ void initRSPYWorldDef(py::module &m) {
         .value("RSE_WORLD_MAX_NORMAL_STATE", RSE_WORLD_MAX_NORMAL_STATE)
         .export_values();
 
-    py::enum_<RSE_WorldEntityType>(m, "RSE_WorldEntityType")
+    py::enum_<RSE_WorldEntityType>(m, "RSE_WorldEntityType", "Kind of a world entity.")
         .value("RSE_WORLD_ENTITY_TYPE_COSMIC_BACKGROUND", RSE_WORLD_ENTITY_TYPE_COSMIC_BACKGROUND)
         .value("RSE_WORLD_ENTITY_TYPE_FLOOR", RSE_WORLD_ENTITY_TYPE_FLOOR)
         .value("RSE_WORLD_ENTITY_TYPE_STRUCTURE_VOXEL", RSE_WORLD_ENTITY_TYPE_STRUCTURE_VOXEL)

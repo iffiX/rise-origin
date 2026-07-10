@@ -9,7 +9,9 @@ void initRSPYWorldSessionComponent(py::module &m) {
      *****************************************************************/
 
     py::class_<RS_WorldSessionComponent, std::shared_ptr<RS_WorldSessionComponent>>(
-        m, "RS_WorldSessionComponent"
+        m,
+        "RS_WorldSessionComponent",
+        "A session participant that manifests presence, pushes work each step, and tears down."
     );
 
     py::class_<

@@ -8,7 +8,9 @@ void initRSPYWorldCallback(py::module &m) {
      * World callback
      *****************************************************************/
 
-    py::class_<RSPY_WorldCallback>(m, "RS_WorldCallback")
+    py::class_<RSPY_WorldCallback>(
+        m, "RS_WorldCallback", "The rebindable per-control-step callback for a world."
+    )
         .def(
             "get_world_name",
             &RSPY_WorldCallback::get_world_name,

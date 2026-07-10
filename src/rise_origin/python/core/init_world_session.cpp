@@ -7,12 +7,16 @@ void initRSPYWorldSession(py::module &m) {
     /*****************************************************************
      * World session
      *****************************************************************/
-    py::enum_<RSE_WorldSessionScope>(m, "RSE_WorldSessionScope")
+    py::enum_<RSE_WorldSessionScope>(
+        m, "RSE_WorldSessionScope", "Access scope a session grants to a component."
+    )
         .value("RSE_WORLD_SESSION_SCOPE_OWNED", RSE_WORLD_SESSION_SCOPE_OWNED)
         .value("RSE_WORLD_SESSION_SCOPE_FULL", RSE_WORLD_SESSION_SCOPE_FULL)
         .export_values();
 
-    py::class_<RS_WorldSession>(m, "RS_WorldSession")
+    py::class_<RS_WorldSession>(
+        m, "RS_WorldSession", "A session over a running world's handle and callback."
+    )
         .def(
             py::init([](RSPY_WorldHandle &handle, RSPY_WorldCallback &callback) {
                 return std::make_unique<RS_WorldSession>(handle.handle, callback.callback);

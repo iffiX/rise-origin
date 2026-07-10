@@ -8,8 +8,12 @@ void initRSPYWorldController(py::module &m) {
      * Controller
      *****************************************************************/
 
-    py::class_<RSPY_WorldController>(m, "RS_WorldController")
-        .def("name", &RSPY_WorldController::name)
-        .def("records", &RSPY_WorldController::records)
-        .def("signals", &RSPY_WorldController::signals);
+    py::class_<RSPY_WorldController>(
+        m,
+        "RS_WorldController",
+        "A controller: a general, named I/O container reading records and driving signals."
+    )
+        .def("name", &RSPY_WorldController::name, "Controller name.")
+        .def("records", &RSPY_WorldController::records, "Runtime records the controller observes.")
+        .def("signals", &RSPY_WorldController::signals, "Runtime signals the controller drives.");
 }
