@@ -37,19 +37,23 @@ class RS_LinkMaterialCompute : public RS_VoxelMaterialCompute<FloatComputeAccura
         m.voxel_neg_internal_damping_c = voxel_neg_material.internal_damping_c;
         m.voxel_pos_internal_damping_c = voxel_pos_material.internal_damping_c;
 
-        // a link is two half links in series, one per end voxel. a rigid or fixed
-        // voxel does not deform and is the infinitely stiff limit, so it contributes
-        // zero compliance and the soft side governs the coupling. a link always has at
-        // least one soft end, so the summed compliance is never zero.
-        FloatC neg_compliance = is_neg_rigid_or_fixed ? FloatC(0) : FloatC(1) / voxel_neg_material.E;
-        FloatC pos_compliance = is_pos_rigid_or_fixed ? FloatC(0) : FloatC(1) / voxel_pos_material.E;
+        // A link is two half links in series, one per end voxel. A rigid or fixed voxel
+        // carries no valid elastic data, so mirror the soft neighbor onto that half. The
+        // coupling then behaves with the soft material, matching the legacy model where
+        // the rigid half was given the soft elastic modulus. A link always has at least
+        // one soft end.
+        FloatC neg_E = is_neg_rigid_or_fixed ? voxel_pos_material.E : voxel_neg_material.E;
+        FloatC pos_E = is_pos_rigid_or_fixed ? voxel_neg_material.E : voxel_pos_material.E;
+        FloatC neg_E_hat = is_neg_rigid_or_fixed ? voxel_pos_material.E_hat
+                                                 : voxel_neg_material.E_hat;
+        FloatC pos_E_hat = is_pos_rigid_or_fixed ? voxel_neg_material.E_hat
+                                                 : voxel_pos_material.E_hat;
+        FloatC neg_nu = is_neg_rigid_or_fixed ? voxel_pos_material.nu : voxel_neg_material.nu;
+        FloatC pos_nu = is_pos_rigid_or_fixed ? voxel_neg_material.nu : voxel_pos_material.nu;
 
-        // linear, E, nu, and fail_stress are computed later
-        // strain partitions to the softer half, so a rigid or fixed half takes none
-        // and the soft half carries the full link strain
-        m.strain_ratio = (is_neg_rigid_or_fixed || is_pos_rigid_or_fixed)
-                             ? FloatC(0)
-                             : voxel_pos_material.E / voxel_neg_material.E;
+        // strain partitions between the two halves by their stiffness ratio, which is one
+        // at a soft to rigid interface since the halves then share the soft modulus
+        m.strain_ratio = pos_E / neg_E;
         m.rho = 0.5 * (voxel_neg_material.rho + voxel_pos_material.rho);
         m.zeta_internal =
             0.5 * (voxel_neg_material.zeta_internal + voxel_pos_material.zeta_internal);
@@ -67,22 +71,16 @@ class RS_LinkMaterialCompute : public RS_VoxelMaterialCompute<FloatComputeAccura
         else
             m.fail_stress = f1 < f2 ? f1 : f2;  // the lesser stress denotes failure
 
-        // series of the two half link compliances, equal to the harmonic mean of E
-        // for a soft to soft link and to twice the soft E at a rigid or fixed interface
-        m.E = FloatC(2) / (neg_compliance + pos_compliance);
+        // series of the two half link compliances, equal to the harmonic mean of E and
+        // to the soft E at a rigid or fixed interface where the rigid half is mirrored
+        m.E = FloatC(2) / (FloatC(1) / neg_E + FloatC(1) / pos_E);
 
-        // poissons ratio: a rigid or fixed half does not contract, so the soft side
-        // governs. otherwise choose such that Ehat ends up according to spring in
-        // series of Ehat1 and EHat2
-        if (is_neg_rigid_or_fixed)
-            m.nu = voxel_pos_material.nu;
-        else if (is_pos_rigid_or_fixed)
-            m.nu = voxel_neg_material.nu;
-        else if (voxel_neg_material.nu == 0 && voxel_pos_material.nu == 0)
+        // poissons ratio: choose nu such that Ehat ends up according to spring in series
+        // of Ehat1 and EHat2
+        if (neg_nu == 0 && pos_nu == 0)
             m.nu = 0;
         else {
-            FloatC tmp_E_hat = 2 * voxel_neg_material.E_hat * voxel_pos_material.E_hat /
-                               (voxel_neg_material.E_hat + voxel_pos_material.E_hat);
+            FloatC tmp_E_hat = 2 * neg_E_hat * pos_E_hat / (neg_E_hat + pos_E_hat);
             // completing the square algorithm to solve for nu.
             // eHat = E/((1-2nu)(1+nu)) -> E/EHat = -2nu^2-nu+1 -> nu^2+0.5nu =
             // (EHat+E)/(2EHat)
