@@ -24,6 +24,10 @@ RS_Version RS_RSCFile::engineVersion() {
     return version;
 }
 
+void RS_RSCFile::saveAny(const RSC_Base &node, const std::string &path) {
+    _writeFile(path, _toBytes(node, _formatOfPath(path)));
+}
+
 RSC_Base::RSCRef<RSC_Base> RS_RSCFile::loadAny(const std::string &path) {
     RS_JSON root = _decode(_readFile(path), _formatOfPath(path));
     RS_RSCPropertyTreeReader root_reader(root);

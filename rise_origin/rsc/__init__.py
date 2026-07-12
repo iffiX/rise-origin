@@ -38,7 +38,17 @@ from rise_origin.rsc import (
     recorder,
     controller,
 )
+from rise_origin import RS_RSCFile
 from rise_origin.rsc.world import World
+
+#: Save any RSC node to a .rsct or .rscb file.
+save = RS_RSCFile.save
+#: Load any RSC node from a .rsct or .rscb file.
+load = RS_RSCFile.load
+#: Getter of the RSC schema version this build writes.
+current_version = RS_RSCFile.current_version
+#: Getter of the engine build version.
+engine_version = RS_RSCFile.engine_version
 
 __all__ = [
     "simulation",
@@ -50,4 +60,8 @@ __all__ = [
     "recorder",
     "controller",
     "World",
+    "save",
+    "load",
+    "current_version",
+    "engine_version",
 ]

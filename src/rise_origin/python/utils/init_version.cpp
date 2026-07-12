@@ -40,8 +40,8 @@ void initRSPYVersion(py::module &m) {
             "Parse a version string into this version, raising RS_DataException on a bad string."
         )
         .def(
-            "matches",
-            &RS_Version::matches,
+            "is_matching",
+            &RS_Version::isMatching,
             py::arg("specifier"),
             "Check if this version matches a version specifier such as '>=1.2', '~=1.4', or '^2.0'."
         )

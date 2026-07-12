@@ -189,7 +189,7 @@ class RS_Version {
      * @return True if this version matches the specifier
      * @throw RS_InvalidVersionException if specifier format is invalid
      */
-    bool matches(const std::string& specifier) const {
+    bool isMatching(const std::string& specifier) const {
         if (specifier.empty()) {
             RS_THROW(RS_InvalidVersionException("Version specifier cannot be empty"));
         }
@@ -266,6 +266,18 @@ class RS_Version {
     }
 
     /**
+     * @brief Checks if this is a pre-release version (0.x.y)
+     * @return True if major version is 0
+     */
+    bool isPreRelease() const { return major == 0; }
+
+    /**
+     * @brief Checks if this is a stable release version (x.y.z where x > 0)
+     * @return True if major version is greater than 0
+     */
+    bool isStable() const { return major > 0; }
+
+    /**
      * @brief Returns the next major version (increments major, resets minor and patch to 0)
      * @return New version with incremented major number
      */
@@ -282,18 +294,6 @@ class RS_Version {
      * @return New version with incremented patch number
      */
     RS_Version nextPatch() const { return RS_Version(major, minor, patch + 1); }
-
-    /**
-     * @brief Checks if this is a pre-release version (0.x.y)
-     * @return True if major version is 0
-     */
-    bool isPreRelease() const { return major == 0; }
-
-    /**
-     * @brief Checks if this is a stable release version (x.y.z where x > 0)
-     * @return True if major version is greater than 0
-     */
-    bool isStable() const { return major > 0; }
 
     /// Generic serialization
     template <class Serializer>

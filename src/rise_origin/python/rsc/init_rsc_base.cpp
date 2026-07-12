@@ -3,7 +3,7 @@
 
 #include "rsc/init_rsc_base.h"
 
-void initRSPYRscBase(py::module &m) {
+void initRSPYRSCBase(py::module &m) {
     /***************************************************************
      * Exceptions
      ***************************************************************/

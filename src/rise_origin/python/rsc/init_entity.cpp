@@ -246,7 +246,7 @@ void initRSPYEntity(py::module &m) {
 
     rspyRSC<RSC_StructureVoxel, RSC_StructureBase>(m, "RSC_StructureVoxel")
         .def(py::init<>())
-        .def_readwrite("is_static", &RSC_StructureVoxel::is_fixed)
+        .def_readwrite("is_fixed", &RSC_StructureVoxel::is_fixed)
         .def_readwrite("bodies", &RSC_StructureVoxel::bodies)
         .def_readwrite("constraints", &RSC_StructureVoxel::constraints)
         .def_readwrite("record", &RSC_StructureVoxel::record)

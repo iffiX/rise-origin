@@ -30,6 +30,7 @@
 #include "rsc/init_recorder.h"
 #include "rsc/init_resource.h"
 #include "rsc/init_rsc_base.h"
+#include "rsc/init_rsc_file.h"
 #include "rsc/init_signal.h"
 #include "rsc/init_simulation.h"
 #include "rsc/init_world.h"
@@ -160,7 +161,8 @@ PYBIND11_MODULE(_core, m) {
     initRSPYMath(m);
     initRSPYVersion(m);
 
-    initRSPYRscBase(m);
+    initRSPYRSCBase(m);
+    initRSPYRSCFile(m);
     initRSPYSimulation(m);
     initRSPYResource(m);
     initRSPYEssence(m);

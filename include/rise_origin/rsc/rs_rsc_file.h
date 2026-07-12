@@ -93,7 +93,12 @@ class RS_RSCFile {
     }
 
     /**
-     * @brief Load a node from path, dispatching the root type by name.
+     * @brief Save a node to path.
+     */
+    static void saveAny(const RSC_Base &node, const std::string &path);
+
+    /**
+     * @brief Load a node from path.
      */
     static RSC_Base::RSCRef<RSC_Base> loadAny(const std::string &path);
 

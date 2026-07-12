@@ -4,6 +4,7 @@
 #include "utils/init_def.h"
 
 void initRSPYDef(py::module &m) {
+    m.attr("RS_ENGINE_VERSION") = RS_ENGINE_VERSION;
     m.attr("RS_NULL_INDEX") = RS_NULL_INDEX;
     m.attr("RS_NULL_BIG_INDEX") = RS_NULL_BIG_INDEX;
 

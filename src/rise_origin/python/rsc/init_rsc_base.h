@@ -7,6 +7,6 @@
 #include "init_common.h"
 
 /// Bind RSC_Base, the RSCVec containers, and the abstract component bases.
-void initRSPYRscBase(py::module &m);
+void initRSPYRSCBase(py::module &m);
 
 #endif  // RSPY_RSC_INIT_RSC_BASE_H
