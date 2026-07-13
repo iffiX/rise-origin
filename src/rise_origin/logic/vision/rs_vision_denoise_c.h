@@ -94,12 +94,13 @@ class RS_VisionDenoiseCompute {
             Vec3C center_normal = Vec3C(ctx.camera_aux_normal[camera][{i, j}]);
             FloatC center_depth = FloatC(ctx.camera_aux_depth_z[camera][{i, j}]);
             RS_CameraPixelObjectKey center_object_key = ctx.camera_aux_object_key[camera][{i, j}];
-            // Material-based edge stop: compare object category + material_gid only.
+            // Material-based edge stop: compare object category + vision material key only.
             // Same material across different structures still smooths together.
-            RIndex center_kind = center_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
-                                     ? RIndex(0)
-                                     : center_object_key.entity_gid;
-            RIndex center_material_gid = center_object_key.material_gid;
+            RIndex center_kind =
+                center_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
+                    ? RIndex(0)
+                    : center_object_key.entity_gid;
+            RIndex center_vision_material_key = center_object_key.vision_material_key;
             FloatC sigma_color = FloatC(k->vision_denoise_sigma_color);
             FloatC sigma_normal = FloatC(k->vision_denoise_sigma_normal);
             FloatC sigma_depth = FloatC(k->vision_denoise_sigma_depth);
@@ -127,11 +128,12 @@ class RS_VisionDenoiseCompute {
                     RS_CameraPixelObjectKey n_object_key =
                         ctx.camera_aux_object_key[camera][{ni, nj}];
 
-                    // Hard binary edge stop on object category + material_gid.
+                    // Hard binary edge stop on object category + vision material key.
                     RIndex n_kind = n_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
                                         ? RIndex(0)
                                         : n_object_key.entity_gid;
-                    if (n_kind != center_kind || n_object_key.material_gid != center_material_gid)
+                    if (n_kind != center_kind ||
+                        n_object_key.vision_material_key != center_vision_material_key)
                         continue;
 
                     FloatC w_k = kernel_w[di + 2] * kernel_w[dj + 2];
@@ -392,10 +394,11 @@ class RS_VisionDenoiseCompute {
             Vec3C center_normal = Vec3C(ctx.camera_aux_normal[camera][{i, j}]);
             FloatC center_depth = FloatC(ctx.camera_aux_depth_z[camera][{i, j}]);
             RS_CameraPixelObjectKey center_object_key = ctx.camera_aux_object_key[camera][{i, j}];
-            RIndex center_kind = center_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
-                                     ? RIndex(0)
-                                     : center_object_key.entity_gid;
-            RIndex center_material_gid = center_object_key.material_gid;
+            RIndex center_kind =
+                center_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
+                    ? RIndex(0)
+                    : center_object_key.entity_gid;
+            RIndex center_vision_material_key = center_object_key.vision_material_key;
             FloatC sigma_color = FloatC(k->vision_denoise_sigma_color);
             FloatC sigma_normal = FloatC(k->vision_denoise_sigma_normal);
             FloatC sigma_depth = FloatC(k->vision_denoise_sigma_depth);
@@ -429,7 +432,8 @@ class RS_VisionDenoiseCompute {
                     RIndex n_kind = n_object_key.entity_gid >= RS_WORLD_RSC_ENTITY_RESERVED_GID_NUM
                                         ? RIndex(0)
                                         : n_object_key.entity_gid;
-                    if (n_kind != center_kind || n_object_key.material_gid != center_material_gid)
+                    if (n_kind != center_kind ||
+                        n_object_key.vision_material_key != center_vision_material_key)
                         continue;
 
                     FloatC w_k = kernel_w[di + 2] * kernel_w[dj + 2];

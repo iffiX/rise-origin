@@ -461,6 +461,10 @@ class RS_KernelStructureVoxelManager {
         // Structure scope material reference index (index into _mat_resolved_data)
         RIndex material_sid;
 
+        // Material scope material optical reference index (index into the voxel material's
+        // material_optical_references list)
+        RIndex material_optical_reference_mid;
+
         // Material physical type
         RSE_StructureVoxelMaterialType material_type;
 
@@ -519,6 +523,7 @@ class RS_KernelStructureVoxelManager {
             data.index_z = 0;
             data.array_index = RS_NULL_INDEX;
             data.material_sid = RS_NULL_INDEX;
+            data.material_optical_reference_mid = RS_NULL_INDEX;
             data.material_type = RSE_STRUCTURE_VOXEL_MATERIAL_UNKNOWN;
             data.expansion_signal_sid = RS_NULL_INDEX;
             data.expansion_control_mode = rsc::RSE_STRUCTURE_EXPANSION_CONTROL_MODE_BASIC_POSITION;

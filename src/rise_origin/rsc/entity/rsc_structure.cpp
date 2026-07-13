@@ -31,6 +31,7 @@ bool RSC_StructureVoxelBody::operator==(const RSC_StructureVoxelBody &other) con
            relative_orientation == other.relative_orientation && x_voxels == other.x_voxels &&
            y_voxels == other.y_voxels && z_voxels == other.z_voxels &&
            material_reference_sid == other.material_reference_sid &&
+           material_optical_reference_mid == other.material_optical_reference_mid &&
            segment_bid == other.segment_bid && expansion_signal_sid == other.expansion_signal_sid &&
            expansion_control_mode == other.expansion_control_mode && link == other.link &&
            voxel_size == other.voxel_size;
@@ -47,6 +48,13 @@ void RSC_StructureVoxelBody::_validate(RS_RSCValidator &validator) const {
         if (material_reference_sid.size() != voxel_num) {
             RS_THROW(RS_InvalidCharacterizationException(
                 "RSC_StructureVoxelBody material_reference_sid size mismatch"
+            ));
+        }
+        if (!material_optical_reference_mid.empty() &&
+            material_optical_reference_mid.size() != voxel_num) {
+            RS_THROW(RS_InvalidCharacterizationException(
+                "RSC_StructureVoxelBody material_optical_reference_mid must be empty or match voxel "
+                "count"
             ));
         }
         if (segment_bid.size() != voxel_num) {
@@ -89,6 +97,14 @@ void RSC_StructureVoxelBody::_read(const RS_RSCPropertyTreeReader &tree) {
     readIndexLayers(
         tree, "material_reference_sid", voxel_num, voxel_per_layer_num, material_reference_sid, true
     );
+    readIndexLayers(
+        tree,
+        "material_optical_reference_mid",
+        voxel_num,
+        voxel_per_layer_num,
+        material_optical_reference_mid,
+        false
+    );
     readIndexLayers(tree, "segment_bid", voxel_num, voxel_per_layer_num, segment_bid, true);
     readIndexLayers(
         tree, "expansion_signal_sid", voxel_num, voxel_per_layer_num, expansion_signal_sid, false
@@ -117,6 +133,9 @@ void RSC_StructureVoxelBody::_write(RS_RSCPropertyTreeWriter &tree) const {
     RSize voxel_per_layer_num = x_voxels * y_voxels;
 
     writeIndexLayers(tree, "material_reference_sid", voxel_per_layer_num, material_reference_sid);
+    writeIndexLayers(
+        tree, "material_optical_reference_mid", voxel_per_layer_num, material_optical_reference_mid
+    );
     writeIndexLayers(tree, "segment_bid", voxel_per_layer_num, segment_bid);
     writeIndexLayers(tree, "expansion_signal_sid", voxel_per_layer_num, expansion_signal_sid);
     writeEnumLayers(tree, "expansion_control_mode", voxel_per_layer_num, expansion_control_mode);
@@ -445,16 +464,22 @@ void RSC_StructureVoxel::_validate(RS_RSCValidator &validator) const {
     for (auto &body : bodies) body.validate(validator);
     for (auto &constraint : constraints) constraint.validate(validator);
 
-    _validateMaterialSIDExist(validator);
+    _validateMaterialReferences(validator);
     _validateExpansionSignals(validator);
     _validateConstraints(validator);
     _validateConstraintSignals(validator);
 }
 
-void RSC_StructureVoxel::_validateMaterialSIDExist(RS_RSCValidator &validator) const {
-    RSize limit = material_references.size();
+void RSC_StructureVoxel::_validateMaterialReferences(RS_RSCValidator &validator) const {
+    RSize material_limit = material_references.size();
     RSize thread_num = validator.getThreadPool().size();
-    std::string job = format("RSC_StructureVoxel::_validateMaterialSIDExist:limit={:d}", limit);
+    std::string job =
+        format("RSC_StructureVoxel::_validateMaterialReferences:limit={:d}", material_limit);
+    std::vector<RSize> optical_counts;
+    optical_counts.reserve(material_optical_references.size());
+    for (const auto &material_opticals : material_optical_references) {
+        optical_counts.push_back(material_opticals.size());
+    }
     for (auto &&[body_sid, body_rsc] : enumerate(bodies)) {
         const RSC_StructureVoxelBody *bp = &body_rsc;
         RSize voxel_num = body_rsc.material_reference_sid.size();
@@ -468,19 +493,40 @@ void RSC_StructureVoxel::_validateMaterialSIDExist(RS_RSCValidator &validator) c
             validator.getThreadPool().submitTaskSequence(
                 0,
                 num_blocks,
-                [bp, body_sid, limit, voxel_num, block_size](RIndex block)
-                    -> std::pair<bool, std::string> {
+                [bp, body_sid, material_limit, voxel_num, block_size, optical_counts](
+                    RIndex block
+                ) -> std::pair<bool, std::string> {
                     RSize lo = block * block_size;
                     RSize hi = RS_MIN(lo + block_size, voxel_num);
                     for (RSize i = lo; i < hi; i++) {
                         RIndex m = bp->material_reference_sid[i];
-                        if (m != RS_NULL_INDEX && m >= limit) {
+                        if (m != RS_NULL_INDEX && m >= material_limit) {
                             return {
                                 false,
                                 format(
                                     "Material SID {:d} referenced in body with SID {:d} doesn't "
                                     "exist",
                                     m,
+                                    body_sid
+                                )
+                            };
+                        }
+                        // The optical mid, when given, indexes the voxel's material's optical list.
+                        if (bp->material_optical_reference_mid.empty()) continue;
+                        RIndex o = bp->material_optical_reference_mid[i];
+                        if (o == RS_NULL_INDEX || m == RS_NULL_INDEX ||
+                            m >= optical_counts.size()) {
+                            continue;
+                        }
+                        // A material with no declared optical list still admits mid 0 (its default).
+                        RSize optical_limit = optical_counts[m] > 0 ? optical_counts[m] : 1;
+                        if (o >= optical_limit) {
+                            return {
+                                false,
+                                format(
+                                    "Material optical MID {:d} referenced in body with SID {:d} "
+                                    "doesn't exist for its material",
+                                    o,
                                     body_sid
                                 )
                             };
@@ -492,7 +538,14 @@ void RSC_StructureVoxel::_validateMaterialSIDExist(RS_RSCValidator &validator) c
         );
         // Use body pointer as key and dedup with limit as key so structures sharing
         // same body does not need duplicate validation.
-        validator.submitValidator(job, bp, [futures] {
+        validator.submitValidator(job, bp, [this, futures] {
+            if (!material_optical_references.empty() &&
+                material_optical_references.size() != material_references.size()) {
+                RS_THROW(RS_InvalidCharacterizationException(
+                    "RSC_StructureVoxel material_optical_references size must be empty or match "
+                    "material_references size"
+                ));
+            }
             for (auto &[is_valid, message] : futures->get()) {
                 if (!is_valid) RS_THROW(RS_InvalidCharacterizationException(message));
             }
@@ -680,6 +733,10 @@ void RSC_StructureVoxel::_read(const RS_RSCPropertyTreeReader &tree) {
     origin_position = readVec3rf(tree, "origin_position");
     orientation = readQuat3rf(tree, "orientation");
     material_references = tree.get<std::vector<std::string>>("material_references");
+    if (tree.isChildExist("material_optical_references")) {
+        material_optical_references =
+            tree.get<std::vector<std::vector<std::string>>>("material_optical_references");
+    }
 
     for (auto &element : tree.getArray("bodies")) {
         RSC_StructureVoxelBody body;
@@ -707,6 +764,9 @@ void RSC_StructureVoxel::_write(RS_RSCPropertyTreeWriter &tree) const {
     writeVec3rf(tree, "origin_position", origin_position);
     writeQuat3rf(tree, "orientation", orientation);
     tree.add("material_references", material_references);
+    if (!material_optical_references.empty()) {
+        tree.add("material_optical_references", material_optical_references);
+    }
 
     {
         auto bodies_array = tree.addArray("bodies");

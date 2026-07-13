@@ -167,15 +167,16 @@ class RS_CameraMem {
     RBigSize frame_count = 0;
 };
 
-/// Identity of the hit object at a pixel: entity_gid + material_gid.
+/// Identity of the hit object at a pixel: entity_gid + packed vision material key.
 /// entity_gid: cosmic background = 0, floor = 1, structure voxel = its entity gid.
-/// material_gid: material gid for voxel hits; 0 for floor; ~0u for a sky miss.
+/// vision_material_key: packed material gid and optical mid for voxel hits; 0 for floor; sentinel
+/// sky miss. See RS_VisionMaterialKeyUnion.
 struct RS_CameraPixelObjectKey {
     RIndex entity_gid = RS_WORLD_RSC_COSMIC_BACKGROUND_GID;
-    RIndex material_gid = 0;
+    RIndex vision_material_key = 0;
 
     HOST_DEVICE_INLINE_QUALIFIER bool operator==(const RS_CameraPixelObjectKey& other) const {
-        return entity_gid == other.entity_gid && material_gid == other.material_gid;
+        return entity_gid == other.entity_gid && vision_material_key == other.vision_material_key;
     }
 
     HOST_DEVICE_INLINE_QUALIFIER bool operator!=(const RS_CameraPixelObjectKey& other) const {

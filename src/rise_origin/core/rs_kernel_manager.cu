@@ -1205,11 +1205,16 @@ RS_WorldTask RS_KernelManager::removeEssence(const std::string& name, bool sync)
 
 RSC_EssenceVariant RS_KernelManager::findEssence(const std::string& name) {
     RS_KernelManagerCommandExecutionGuard guard(this);
-    // Material essence is the only kind of essence currently materialised on
-    // the kernel; the material manager owns the name->data lookup.
-    if (_kernel_material_manager.findMaterial(name) != RS_NULL_INDEX) {
-        const auto* mat = _kernel_material_manager.getMaterialByName(name);
-        if (mat != nullptr) return RSC_EssenceVariant(*mat);
+    // Materials and their unary and pair properties are the essences materialised on the kernel;
+    // the material manager owns the name->data lookup for each.
+    if (const auto* mat = _kernel_material_manager.getMaterialRSCByName(name)) {
+        return RSC_EssenceVariant(*mat);
+    }
+    if (const auto* unary = _kernel_material_manager.getMaterialUnaryPropertyRSCByName(name)) {
+        return unary->visit([](const auto& p) { return RSC_EssenceVariant(p); });
+    }
+    if (const auto* pair = _kernel_material_manager.getMaterialPairPropertyRSCByName(name)) {
+        return pair->visit([](const auto& p) { return RSC_EssenceVariant(p); });
     }
     RS_THROW(RS_NotFoundException("Essence '{}' not found", name));
 }

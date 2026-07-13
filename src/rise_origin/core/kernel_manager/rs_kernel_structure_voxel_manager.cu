@@ -520,6 +520,23 @@ void RS_KernelStructureVoxelManager::_resolveMaterials() {
             resolved.is_emissive = mat_mgr.query(name, "is_emissive").as<bool>();
         }
 
+        // Every optical reference of this material must be one of its own optical properties, so a
+        // voxel cannot select another material's optical.
+        if (material_sid < _structure().material_optical_references.size()) {
+            for (auto &optical_name : _structure().material_optical_references[material_sid]) {
+                if (!mat_mgr.isMaterialPropertyBelongTo(name, optical_name)) {
+                    RS_THROW(RS_InvalidCharacterizationException(
+                        "Material optical reference \"{}\" does not belong to material \"{}\" "
+                        "(index "
+                        "{}) in structure characterization",
+                        optical_name,
+                        name,
+                        material_sid
+                    ));
+                }
+            }
+        }
+
         if (_dependent_material_gid_set.insert(material_gid).second) {
             _material_references.emplace_back(_kernel_manager, material_reference);
         }
@@ -711,6 +728,11 @@ void RS_KernelStructureVoxelManager::_addBody(
                         voxel.index_z = voxel_coord.z;
 
                         voxel.material_sid = body_rsc.material_reference_sid[array_index];
+                        voxel.material_optical_reference_mid =
+                            voxel.material_sid == RS_NULL_INDEX ? RS_NULL_INDEX
+                            : body_rsc.material_optical_reference_mid.empty()
+                                ? 0u
+                                : body_rsc.material_optical_reference_mid[array_index];
 
                         voxel.segment_bid = body_rsc.segment_bid[array_index];
 
@@ -2014,12 +2036,23 @@ RS_KernelStructureVoxelManager::_getAll() const {
 
     map<RS_OrderedPair<RIndex, RIndex>, RIndex> voxel_material_map;
 
-    // Resolve each dependent material's vision-material handle now that the material vision slots
-    // are committed, indexed by material_sid.
+    // Resolve each material's optical references to vision-material handles.
     auto &mat_mgr = _kernel_manager->getKernelMaterialManager();
-    std::vector<RHandle> vision_material_by_sid(_mat_resolved_data.size());
+    std::vector<std::vector<RHandle>> vision_material_by_optical_mid(_mat_resolved_data.size());
     for (auto &&[material_sid, resolved] : enumerate(_mat_resolved_data)) {
-        vision_material_by_sid[material_sid] = mat_mgr.findVisionMaterialHandle(resolved.name);
+        auto &handles = vision_material_by_optical_mid[material_sid];
+        const bool has_optical_references =
+            material_sid < _structure().material_optical_references.size() &&
+            !_structure().material_optical_references[material_sid].empty();
+        if (!has_optical_references) {
+            handles.push_back(mat_mgr.findVisionMaterialHandle(resolved.name));
+            continue;
+        }
+        auto &optical_names = _structure().material_optical_references[material_sid];
+        handles.reserve(optical_names.size());
+        for (auto &optical_name : optical_names) {
+            handles.push_back(mat_mgr.findVisionMaterialHandle(resolved.name, optical_name));
+        }
     }
 
     // print("alloc {}\n", timer.elapsedTimeString());
@@ -2114,9 +2147,11 @@ RS_KernelStructureVoxelManager::_getAll() const {
                         voxel_out.link_sid[j] = voxel.link_sid[j];
                         voxel_out.neighbor_voxel_sid[j] = voxel.neighbor_voxel_sid[j];
                     }
-                    voxel_out.vision_material = voxel.material_sid == RS_NULL_INDEX
-                                                    ? RS_NULL_HANDLE
-                                                    : vision_material_by_sid[voxel.material_sid];
+                    voxel_out.vision_material =
+                        voxel.material_sid == RS_NULL_INDEX
+                            ? RS_NULL_HANDLE
+                            : vision_material_by_optical_mid[voxel.material_sid]
+                                                            [voxel.material_optical_reference_mid];
                     voxel_out.position = voxel.g_position;
                     voxel_out.orientation = voxel.g_orientation;
 
@@ -3134,9 +3169,9 @@ void RS_KernelStructureVoxelManager::_freezeKernelData(bool is_freeze) {
         });
 
         // Pause the compute, signal and record layouts while frozen; the voxel, voxel material and
-        // rigid body layouts stay active so the structure remains collidable, rendered and reachable
-        // by the transform, while the per-body static flag keeps the frozen bodies out of the
-        // dynamic subset that the integration launches iterate.
+        // rigid body layouts stay active so the structure remains collidable, rendered and
+        // reachable by the transform, while the per-body static flag keeps the frozen bodies out of
+        // the dynamic subset that the integration launches iterate.
         bool is_active = !is_freeze;
         ctx.host_data->structure_link_material_layout.setSegmentIsActive(
             ctx.host_data->structure_link_material_layout.find(_structure_gid), is_active

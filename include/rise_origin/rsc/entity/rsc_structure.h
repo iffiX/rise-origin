@@ -35,9 +35,15 @@ class RSC_StructureBase : public RSC_EntityBase {
     /// Dependent material references (names).
     std::vector<std::string> material_references;
 
+    /// Dependent material optical property references (names), one inner list per material
+    /// reference, parallel to material_references.
+    std::vector<std::vector<std::string>> material_optical_references;
+
     bool operator==(const RSC_StructureBase& other) const {
         return RSC_EntityBase::operator==(other) && origin_position == other.origin_position &&
-               orientation == other.orientation && material_references == other.material_references;
+               orientation == other.orientation &&
+               material_references == other.material_references &&
+               material_optical_references == other.material_optical_references;
     }
 
     template <typename Serializer>
@@ -46,6 +52,7 @@ class RSC_StructureBase : public RSC_EntityBase {
         s("origin_position", origin_position);
         s("orientation", orientation);
         s("material_references", material_references);
+        s("material_optical_references", material_optical_references);
     }
 
    protected:
@@ -103,6 +110,10 @@ class RSC_StructureVoxelBody : public RSC_Base {
     /// use RS_NULL_INDEX for an empty voxel.
     std::vector<RIndex> material_reference_sid;
 
+    /// Array of material optical reference material scope IDs of each voxel, use RS_NULL_INDEX for
+    /// an empty voxel. If not specified, all voxels use their material's default optical property.
+    std::vector<RIndex> material_optical_reference_mid;
+
     /// Array of segment body scope IDs, starting from 0, use RS_NULL_INDEX for unspecified
     /// values.
     std::vector<RIndex> segment_bid;
@@ -133,6 +144,7 @@ class RSC_StructureVoxelBody : public RSC_Base {
         s("y_voxels", y_voxels);
         s("z_voxels", z_voxels);
         s("material_reference_sid", material_reference_sid);
+        s("material_optical_reference_mid", material_optical_reference_mid);
         s("segment_bid", segment_bid);
         s("expansion_signal_sid", expansion_signal_sid);
         s("expansion_control_mode", expansion_control_mode);
@@ -522,7 +534,7 @@ class RSC_StructureVoxel : public RSC_StructureBase {
     void _deepCopyShared(MemoRef memo) override;
 
    private:
-    void _validateMaterialSIDExist(RS_RSCValidator& validator) const;
+    void _validateMaterialReferences(RS_RSCValidator& validator) const;
     void _validateExpansionSignals(RS_RSCValidator& validator) const;
     void _validateConstraints(RS_RSCValidator& validator) const;
     void _validateConstraintSignals(RS_RSCValidator& validator) const;

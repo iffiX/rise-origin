@@ -167,17 +167,18 @@ class RS_KernelMaterialManager {
     RIndex findMaterial(const std::string &name) const;
 
     /**
-     * @brief Resolve a material's vision-material array handle (offset into
-     *        ctx.vision_materials).
-     * @return The vision-material array handle, RS_NULL_HANDLE if the material
-     *         is unknown or not referenced.
+     * @brief Resolve a material optical property's vision-material array handle
+     *        (offset into ctx.vision_materials).
+     * @param name Material name.
+     * @param material_optical_name Optical property name, empty selects the
+     *        material's first optical property.
+     * @return The vision-material array handle, RS_NULL_HANDLE if the material or
+     *         optical property is unknown or not referenced.
      */
-    RHandle findVisionMaterialHandle(const std::string &name) const;
-
-    /**
-     * @brief Get a material by name.
-     */
-    const rsc::RSC_Material *getMaterialByName(const std::string &name) const;
+    RHandle findVisionMaterialHandle(
+        const std::string &name,
+        const std::string &material_optical_name = ""
+    ) const;
 
     /**
      * @brief Remove a material.
@@ -223,9 +224,38 @@ class RS_KernelMaterialManager {
     bool hasMaterialProperty(const std::string &property_name) const;
 
     /**
+     * @brief Check whether a unary material property belongs to a material.
+     * @param material_name Material name.
+     * @param material_property_name Unary property name.
+     * @return True if the property exists and its parent material is material_name.
+     */
+    bool isMaterialPropertyBelongTo(
+        const std::string &material_name,
+        const std::string &material_property_name
+    ) const;
+
+    /**
      * @brief Remove a material property.
      */
     void removeMaterialProperty(const std::string &property_name);
+
+    /**
+     * @brief Get a material characterization by name.
+     * @return The material, nullptr if not found.
+     */
+    const rsc::RSC_Material *getMaterialRSCByName(const std::string &name) const;
+
+    /**
+     * @brief Get a unary property characterization by name (variant-wrapped).
+     * @return The unary property, nullptr if not found.
+     */
+    const UnaryPropertyVariant *getMaterialUnaryPropertyRSCByName(const std::string &name) const;
+
+    /**
+     * @brief Get a pair property characterization by name (variant-wrapped).
+     * @return The pair property, nullptr if not found.
+     */
+    const PairPropertyVariant *getMaterialPairPropertyRSCByName(const std::string &name) const;
 
     /**
      * @brief Get the snapshot of every registered material characterization, for getWorld().
@@ -273,7 +303,10 @@ class RS_KernelMaterialManager {
     ) const;
 
    private:
-    using UnaryPropertiesMap = std::unordered_map<std::type_index, UnaryPropertyVariant>;
+    /// Per-type unary property map, a type with several instances keeps them in registration order.
+    using UnaryPropertiesMap =
+        std::unordered_map<std::type_index, std::vector<UnaryPropertyVariant>>;
+    /// Per-type pair property map.
     using PairPropertiesMap = std::unordered_map<std::type_index, PairPropertyVariant>;
 
     using PairKey = std::pair<RIndex, RIndex>;
@@ -300,11 +333,17 @@ class RS_KernelMaterialManager {
         RS_KernelTextureReference texture_reference;
     };
 
-    struct MaterialVisionSlot {
-        RHandle vision_material = RS_NULL_HANDLE;
+    /// One optical property's channels resolved host side.
+    struct MaterialVisionOptical {
         MaterialVisionTextureReference albedo;
         MaterialVisionTextureReference roughness_metalness;
         MaterialVisionTextureReference emission;
+    };
+
+    struct MaterialVisionSlot {
+        RHandle vision_material_base = RS_NULL_HANDLE;
+        RSize optical_count = 0;
+        std::vector<MaterialVisionOptical> opticals;
     };
 
     RS_KernelManager *_kernel_manager = nullptr;
@@ -323,7 +362,7 @@ class RS_KernelMaterialManager {
     std::unordered_map<std::string, std::pair<PairKey, std::type_index>> _pair_property_name_to_loc;
 
     std::unordered_map<RIndex, UnaryPropertiesMap> _material_unary_properties;
-    std::unordered_map<PairKey, PairPropertiesMap, PairKeyHash> _pair_properties;
+    std::unordered_map<PairKey, PairPropertiesMap, PairKeyHash> _material_pair_properties;
 
     std::unordered_map<RIndex, MaterialVisionSlot> _vision_slots;
 

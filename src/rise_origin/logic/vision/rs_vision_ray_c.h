@@ -147,7 +147,7 @@ class RS_VisionRayCompute {
 
         RHandle voxel = RS_NULL_HANDLE;
         RIndex structure_gid = RS_NULL_INDEX;
-        RIndex material_gid = RS_NULL_INDEX;
+        RIndex vision_material_key = 0;
 
         HitStateUnion state;
     };
@@ -2327,7 +2327,7 @@ class RS_VisionRayCompute {
         rec_out.metalness = metalness;
         rec_out.ior = FloatC(VSM_G(vision_material, ior));
         rec_out.intensity = FloatC(VSM_G(vision_material, emission_intensity));
-        rec_out.material_gid = VSM_G(vision_material, material_gid);
+        rec_out.vision_material_key = VSM_G(vision_material, vision_material_key);
         rec_out.state.hit_state.vision_material_type = render_type;
     }
 
@@ -2392,7 +2392,7 @@ class RS_VisionRayCompute {
         rec_in_out.metalness = metalness;
         rec_in_out.ior = FloatC(VSM_G(vision_material, ior));
         rec_in_out.intensity = FloatC(VSM_G(vision_material, emission_intensity));
-        rec_in_out.material_gid = VSM_G(vision_material, material_gid);
+        rec_in_out.vision_material_key = VSM_G(vision_material, vision_material_key);
         rec_in_out.state.hit_state.vision_material_type = render_type;
     }
 
@@ -4482,7 +4482,8 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Pack the per-pixel object-identity key for the denoiser edge stop.
-     *        Voxel: the structure entity gid with its material gid. Floor: the reserved floor gid.
+     *        Voxel: the structure entity gid with its vision material key. Floor: the reserved
+     *        floor gid.
      */
     HOST_DEVICE_INLINE_QUALIFIER static RS_CameraPixelObjectKey _packObjectKey(
         const HitRecord& rec
@@ -4490,10 +4491,10 @@ class RS_VisionRayCompute {
         RS_CameraPixelObjectKey key{};
         if (rec.state.hit_state.is_floor_hit) {
             key.entity_gid = RS_WORLD_RSC_FLOOR_GID;
-            key.material_gid = 0;
+            key.vision_material_key = 0;
         } else {
             key.entity_gid = rec.structure_gid;
-            key.material_gid = rec.material_gid;
+            key.vision_material_key = rec.vision_material_key;
         }
         return key;
     }

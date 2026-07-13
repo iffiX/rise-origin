@@ -27,10 +27,10 @@ void RS_KernelMaterialManager::_createLutTables() {
         {"density",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertyRigid)); it != m.end()) {
-                  return it->second.as<RSC_MaterialPhysicalPropertyRigid>().density;
+                  return it->second.front().as<RSC_MaterialPhysicalPropertyRigid>().density;
               }
               if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertySoft)); it != m.end()) {
-                  return it->second.as<RSC_MaterialPhysicalPropertySoft>().density;
+                  return it->second.front().as<RSC_MaterialPhysicalPropertySoft>().density;
               }
               return RS_NONE;
           },
@@ -65,7 +65,7 @@ void RS_KernelMaterialManager::_createLutTables() {
         {"soft",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertySoft)); it != m.end()) {
-                  const auto& p = it->second.as<RSC_MaterialPhysicalPropertySoft>();
+                  const auto& p = it->second.front().as<RSC_MaterialPhysicalPropertySoft>();
                   return std::make_tuple(
                       p.min_expansion,
                       p.max_expansion,
@@ -82,7 +82,7 @@ void RS_KernelMaterialManager::_createLutTables() {
         {"mass",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)); it != m.end()) {
-                  return it->second.as<RSC_MaterialPhysicalPropertyAtlas>().mass;
+                  return it->second.front().as<RSC_MaterialPhysicalPropertyAtlas>().mass;
               }
               return RS_NONE;
           },
@@ -92,7 +92,7 @@ void RS_KernelMaterialManager::_createLutTables() {
         {"com_position",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)); it != m.end()) {
-                  return it->second.as<RSC_MaterialPhysicalPropertyAtlas>().com_position;
+                  return it->second.front().as<RSC_MaterialPhysicalPropertyAtlas>().com_position;
               }
               return RS_NONE;
           },
@@ -102,7 +102,7 @@ void RS_KernelMaterialManager::_createLutTables() {
         {"inertia",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialPhysicalPropertyAtlas)); it != m.end()) {
-                  return it->second.as<RSC_MaterialPhysicalPropertyAtlas>().inertia;
+                  return it->second.front().as<RSC_MaterialPhysicalPropertyAtlas>().inertia;
               }
               return RS_NONE;
           },
@@ -113,7 +113,8 @@ void RS_KernelMaterialManager::_createLutTables() {
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet));
                   it != m.end()) {
-                  return it->second.as<RSC_MaterialOpticalPropertySimpleMicrofacet>()
+                  return it->second.front()
+                      .as<RSC_MaterialOpticalPropertySimpleMicrofacet>()
                       .is_transparent;
               }
               return false;
@@ -125,7 +126,8 @@ void RS_KernelMaterialManager::_createLutTables() {
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet));
                   it != m.end()) {
-                  const auto& p = it->second.as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
+                  const auto& p =
+                      it->second.front().as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
                   return !p.emission_texture_reference.empty() && p.emission_intensity > 0;
               }
               return false;
@@ -195,7 +197,7 @@ void RS_KernelMaterialManager::free() {
     _pair_property_name_to_loc.clear();
     _material_unary_properties.clear();
     _material_is_emissive_at_init.clear();
-    _pair_properties.clear();
+    _material_pair_properties.clear();
     _vision_slots.clear();
     _dirty_vision_materials.clear();
     _is_tables_dirty = false;
@@ -214,6 +216,14 @@ void RS_KernelMaterialManager::addMaterial(const RSC_Material& material) {
 
     RS_KernelGidRegistration registration(_kernel_manager, RSE_KERNEL_GID_ESSENCE, material.name);
     const RIndex material_gid = registration.gid();
+    if (material_gid >= RS_WORLD_RSC_MATERIAL_MAX_NUM) {
+        RS_THROW(RS_SimulationException(
+            "Material \"{}\" gid {} is over limit {}",
+            material.name,
+            material_gid,
+            RS_WORLD_RSC_MATERIAL_MAX_NUM
+        ));
+    }
     _materials[material_gid] = material;
     _material_registrations.emplace(material.name, std::move(registration));
     _material_use_count[material_gid] = 0;
@@ -229,19 +239,33 @@ RIndex RS_KernelMaterialManager::findMaterial(const string& name) const {
     return it == _material_registrations.end() ? RS_NULL_INDEX : it->second.gid();
 }
 
-RHandle RS_KernelMaterialManager::findVisionMaterialHandle(const string& name) const {
+RHandle RS_KernelMaterialManager::findVisionMaterialHandle(
+    const string& name,
+    const string& material_optical_name
+) const {
     auto it = _material_registrations.find(name);
     if (it == _material_registrations.end()) return RS_NULL_HANDLE;
-    auto sit = _vision_slots.find(it->second.gid());
+    const RIndex material_gid = it->second.gid();
+    auto sit = _vision_slots.find(material_gid);
     if (sit == _vision_slots.end()) return RS_NULL_HANDLE;
-    return sit->second.vision_material;
-}
+    const RHandle base = sit->second.vision_material_base;
+    if (base == RS_NULL_HANDLE || material_optical_name.empty()) return base;
 
-const rsc::RSC_Material* RS_KernelMaterialManager::getMaterialByName(const string& name) const {
-    auto it = _material_registrations.find(name);
-    if (it == _material_registrations.end()) return nullptr;
-    auto mit = _materials.find(it->second.gid());
-    return mit == _materials.end() ? nullptr : &mit->second;
+    // Resolve the named optical property to its slot within this material's optical list. Only
+    // this material's optical properties are searched, so no other material can be reached.
+    auto pit = _material_unary_properties.find(material_gid);
+    if (pit == _material_unary_properties.end()) return RS_NULL_HANDLE;
+    auto oit =
+        pit->second.find(std::type_index(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet)));
+    if (oit == pit->second.end()) return RS_NULL_HANDLE;
+    const auto& opticals = oit->second;
+    for (RSize slot = 0; slot < opticals.size(); ++slot) {
+        if (opticals[slot].as<RSC_MaterialOpticalPropertySimpleMicrofacet>().name ==
+            material_optical_name) {
+            return static_cast<RHandle>(base + slot);
+        }
+    }
+    return RS_NULL_HANDLE;
 }
 
 void RS_KernelMaterialManager::removeMaterial(const string& name) {
@@ -279,9 +303,9 @@ void RS_KernelMaterialManager::removeMaterial(const string& name) {
             ++p_it;
         }
     }
-    for (auto p_it = _pair_properties.begin(); p_it != _pair_properties.end();) {
+    for (auto p_it = _material_pair_properties.begin(); p_it != _material_pair_properties.end();) {
         if (p_it->first.first == material_gid || p_it->first.second == material_gid) {
-            p_it = _pair_properties.erase(p_it);
+            p_it = _material_pair_properties.erase(p_it);
         } else {
             ++p_it;
         }
@@ -331,11 +355,13 @@ void RS_KernelMaterialManager::dereferenceMaterial(const string& name) {
     uc_it->second -= 1;
     if (uc_it->second == 0 && _vision_slots.count(material_gid) > 0) {
         // Drop the texture references now so the texture commit sees the lower use_count; the
-        // device slot is freed at the next commit.
+        // device slots are freed at the next commit.
         auto& slot = _vision_slots.at(material_gid);
-        slot.albedo = MaterialVisionTextureReference{};
-        slot.roughness_metalness = MaterialVisionTextureReference{};
-        slot.emission = MaterialVisionTextureReference{};
+        for (auto& optical : slot.opticals) {
+            optical.albedo = MaterialVisionTextureReference{};
+            optical.roughness_metalness = MaterialVisionTextureReference{};
+            optical.emission = MaterialVisionTextureReference{};
+        }
         _dirty_vision_materials.insert(material_gid);
     }
 }
@@ -347,7 +373,7 @@ void RS_KernelMaterialManager::commit() {
     if (_is_tables_dirty) {
         _resizeKernelTablesData(_pending_table_dim);
         // Reapply every pair property over the resized tables.
-        for (auto& [key, props_map] : _pair_properties) {
+        for (auto& [key, props_map] : _material_pair_properties) {
             // Note: Structured bindings cannot be captured by a lambda
             // before C++20, so bind to a plain variable first.
             const auto& pair_key = key;
@@ -407,20 +433,18 @@ void RS_KernelMaterialManager::addMaterialProperty(const UnaryPropertyVariant& p
         }
         const RIndex material_gid = mat_it->second.gid();
 
-        // Reject physical-property add when material is already in use.
-        // Optical SimpleMicrofacet is updatable live (vision slot rebuilt on the fly).
-        if constexpr (!std::is_same_v<T, RSC_MaterialOpticalPropertySimpleMicrofacet>) {
-            const RSize uc =
-                _material_use_count.count(material_gid) ? _material_use_count.at(material_gid) : 0;
-            if (uc > 0) {
-                RS_THROW(RS_SimulationException(
-                    "Cannot add physical property '{}' on material '{}': material is already in "
-                    "use ({} reference(s))",
-                    prop_name,
-                    mat_ref,
-                    uc
-                ));
-            }
+        // Reject property add when the material is already in use. A live vision slot holds one
+        // device slot per optical property, so its optical count cannot change under placed voxels.
+        const RSize uc =
+            _material_use_count.count(material_gid) ? _material_use_count.at(material_gid) : 0;
+        if (uc > 0) {
+            RS_THROW(RS_SimulationException(
+                "Cannot add unary property '{}' on material '{}': material is already in use ({} "
+                "reference(s))",
+                prop_name,
+                mat_ref,
+                uc
+            ));
         }
 
         if (_unary_property_name_to_loc.count(prop_name) > 0 ||
@@ -432,12 +456,43 @@ void RS_KernelMaterialManager::addMaterialProperty(const UnaryPropertyVariant& p
 
         auto& props_map = _material_unary_properties[material_gid];
         const std::type_index ti{typeid(T)};
-        if (props_map.find(ti) != props_map.end()) {
+        auto type_it = props_map.find(ti);
+        const bool has_type = type_it != props_map.end() && !type_it->second.empty();
+        if constexpr (std::is_same_v<T, RSC_MaterialOpticalPropertySimpleMicrofacet>) {
+            // Every optical property of a material must share one category, since face roles and
+            // the emissive voxel set are classified per material, not per voxel.
+            if (has_type) {
+                const auto& first =
+                    type_it->second.front().as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
+                const bool first_emissive = !first.emission_texture_reference.empty() &&
+                                            first.emission_intensity > 0;
+                const bool this_emissive = !p.emission_texture_reference.empty() &&
+                                           p.emission_intensity > 0;
+                if (first.is_transparent != p.is_transparent || first_emissive != this_emissive) {
+                    RS_THROW(RS_InvalidCharacterizationException(
+                        "Material optical property '{}' category differs from the first optical "
+                        "property of material '{}'; all optical properties of a material must "
+                        "share "
+                        "one category (opaque, transparent or emissive)",
+                        prop_name,
+                        mat_ref
+                    ));
+                }
+                if (type_it->second.size() >= RS_WORLD_RSC_MATERIAL_MAX_OPTICAL_PROPERTY_NUM) {
+                    RS_THROW(RS_InvalidCharacterizationException(
+                        "Material '{}' optical property '{}' is over per material limit {}",
+                        mat_ref,
+                        prop_name,
+                        RS_WORLD_RSC_MATERIAL_MAX_OPTICAL_PROPERTY_NUM
+                    ));
+                }
+            }
+        } else if (has_type) {
             RS_THROW(RS_InvalidCharacterizationException(
                 "Material '{}' already has a property of type '{}'", mat_ref, ti.name()
             ));
         }
-        props_map.emplace(ti, property);
+        props_map[ti].push_back(property);
         _unary_property_name_to_loc.emplace(prop_name, std::make_pair(material_gid, ti));
 
         if constexpr (std::is_same_v<T, RSC_MaterialOpticalPropertySimpleMicrofacet>) {
@@ -518,7 +573,7 @@ void RS_KernelMaterialManager::addMaterialProperty(const PairPropertyVariant& pr
         }
 
         const PairKey key = makePairKey(a_gid, b_gid);
-        auto& props_map = _pair_properties[key];
+        auto& props_map = _material_pair_properties[key];
         const std::type_index ti{typeid(T)};
         if (props_map.find(ti) != props_map.end()) {
             RS_THROW(RS_InvalidCharacterizationException(
@@ -541,30 +596,47 @@ bool RS_KernelMaterialManager::hasMaterialProperty(const string& property_name) 
            _pair_property_name_to_loc.count(property_name) > 0;
 }
 
+bool RS_KernelMaterialManager::isMaterialPropertyBelongTo(
+    const string& material_name,
+    const string& material_property_name
+) const {
+    auto loc_it = _unary_property_name_to_loc.find(material_property_name);
+    if (loc_it == _unary_property_name_to_loc.end()) return false;
+    auto mat_it = _material_registrations.find(material_name);
+    if (mat_it == _material_registrations.end()) return false;
+    return loc_it->second.first == mat_it->second.gid();
+}
+
 void RS_KernelMaterialManager::removeMaterialProperty(const string& property_name) {
     if (auto it = _unary_property_name_to_loc.find(property_name);
         it != _unary_property_name_to_loc.end()) {
         const auto [material_gid, ti] = it->second;
         const bool was_optical =
             (ti == std::type_index(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet)));
-        // Reject physical-property remove when material is in use.
-        if (!was_optical) {
-            const RSize uc =
-                _material_use_count.count(material_gid) ? _material_use_count.at(material_gid) : 0;
-            if (uc > 0) {
-                RS_THROW(RS_SimulationException(
-                    "Cannot remove physical property '{}': parent material is in use ({} "
-                    "reference(s))",
-                    property_name,
-                    uc
-                ));
-            }
+        // Reject property remove when the parent material is in use.
+        const RSize uc =
+            _material_use_count.count(material_gid) ? _material_use_count.at(material_gid) : 0;
+        if (uc > 0) {
+            RS_THROW(RS_SimulationException(
+                "Cannot remove unary property '{}': parent material is in use ({} reference(s))",
+                property_name,
+                uc
+            ));
         }
         auto& props_map = _material_unary_properties.at(material_gid);
-        props_map.erase(ti);
+        auto& props_of_type = props_map.at(ti);
+        for (auto vit = props_of_type.begin(); vit != props_of_type.end(); ++vit) {
+            bool is_match = false;
+            vit->visit([&](auto& q) { is_match = (q.name == property_name); });
+            if (is_match) {
+                props_of_type.erase(vit);
+                break;
+            }
+        }
+        if (props_of_type.empty()) props_map.erase(ti);
         _unary_property_name_to_loc.erase(it);
         if (was_optical && _vision_slots.count(material_gid) > 0) {
-            // Re-resolve to the default (black) channels; commit() writes it.
+            // Re-resolve the remaining optical properties; commit() writes it.
             _resolveVisionSlot(material_gid);
             _dirty_vision_materials.insert(material_gid);
         }
@@ -587,12 +659,46 @@ void RS_KernelMaterialManager::removeMaterialProperty(const string& property_nam
                 uc_b
             ));
         }
-        _pair_properties.at(key).erase(ti);
+        _material_pair_properties.at(key).erase(ti);
         _pair_property_name_to_loc.erase(it);
         // Device 2D-table cell stays until overwritten by a fresh pair property.
         return;
     }
     RS_THROW(RS_NotFoundException("Material property '{}' not found", property_name));
+}
+
+const rsc::RSC_Material* RS_KernelMaterialManager::getMaterialRSCByName(const string& name) const {
+    auto it = _material_registrations.find(name);
+    if (it == _material_registrations.end()) return nullptr;
+    auto mit = _materials.find(it->second.gid());
+    return mit == _materials.end() ? nullptr : &mit->second;
+}
+
+const RS_KernelMaterialManager::UnaryPropertyVariant*
+RS_KernelMaterialManager::getMaterialUnaryPropertyRSCByName(const string& name) const {
+    auto loc_it = _unary_property_name_to_loc.find(name);
+    if (loc_it == _unary_property_name_to_loc.end()) return nullptr;
+    auto pit = _material_unary_properties.find(loc_it->second.first);
+    if (pit == _material_unary_properties.end()) return nullptr;
+    auto tit = pit->second.find(loc_it->second.second);
+    if (tit == pit->second.end()) return nullptr;
+    for (const auto& property : tit->second) {
+        bool is_match = false;
+        property.visit([&](auto& p) { is_match = (p.name == name); });
+        if (is_match) return &property;
+    }
+    return nullptr;
+}
+
+const RS_KernelMaterialManager::PairPropertyVariant*
+RS_KernelMaterialManager::getMaterialPairPropertyRSCByName(const string& name) const {
+    auto loc_it = _pair_property_name_to_loc.find(name);
+    if (loc_it == _pair_property_name_to_loc.end()) return nullptr;
+    auto pit = _material_pair_properties.find(loc_it->second.first);
+    if (pit == _material_pair_properties.end()) return nullptr;
+    auto tit = pit->second.find(loc_it->second.second);
+    if (tit == pit->second.end()) return nullptr;
+    return &tit->second;
 }
 
 /*****************************************************************
@@ -609,7 +715,9 @@ vector<RS_KernelMaterialManager::UnaryPropertyVariant>
 RS_KernelMaterialManager::getMaterialUnaryPropertyRSCs() const {
     vector<UnaryPropertyVariant> out;
     for (auto& [_, props_map] : _material_unary_properties) {
-        for (auto& [__, prop_variant] : props_map) out.push_back(prop_variant);
+        for (auto& [__, props_of_type] : props_map) {
+            for (auto& prop_variant : props_of_type) out.push_back(prop_variant);
+        }
     }
     return out;
 }
@@ -617,7 +725,7 @@ RS_KernelMaterialManager::getMaterialUnaryPropertyRSCs() const {
 vector<RS_KernelMaterialManager::PairPropertyVariant>
 RS_KernelMaterialManager::getMaterialPairPropertyRSCs() const {
     vector<PairPropertyVariant> out;
-    for (auto& [_, props_map] : _pair_properties) {
+    for (auto& [_, props_map] : _material_pair_properties) {
         for (auto& [__, prop_variant] : props_map) out.push_back(prop_variant);
     }
     return out;
@@ -652,8 +760,9 @@ RS_Any RS_KernelMaterialManager::query(
     if (a_it == _material_registrations.end() || b_it == _material_registrations.end()) {
         return RS_NONE;
     }
-    auto props_it = _pair_properties.find(makePairKey(a_it->second.gid(), b_it->second.gid()));
-    if (props_it == _pair_properties.end()) return RS_NONE;
+    auto props_it =
+        _material_pair_properties.find(makePairKey(a_it->second.gid(), b_it->second.gid()));
+    if (props_it == _material_pair_properties.end()) return RS_NONE;
     return lut_it->second.query_fn(props_it->second);
 }
 
@@ -682,8 +791,9 @@ bool RS_KernelMaterialManager::has(
     auto b_it = _material_registrations.find(second_material);
     if (a_it == _material_registrations.end() || b_it == _material_registrations.end())
         return false;
-    auto props_it = _pair_properties.find(makePairKey(a_it->second.gid(), b_it->second.gid()));
-    if (props_it == _pair_properties.end()) return false;
+    auto props_it =
+        _material_pair_properties.find(makePairKey(a_it->second.gid(), b_it->second.gid()));
+    if (props_it == _material_pair_properties.end()) return false;
     return lut_it->second.has_fn(props_it->second);
 }
 
@@ -695,21 +805,25 @@ void RS_KernelMaterialManager::_resolveVisionSlot(RIndex material_gid) {
     if (slot_it == _vision_slots.end()) return;
     auto& slot = slot_it->second;
 
-    // Resolve current optical property (may be absent).
-    const RSC_MaterialOpticalPropertySimpleMicrofacet* optical = nullptr;
+    // The material's optical properties in registration order (may be absent).
+    const std::vector<UnaryPropertyVariant>* opticals = nullptr;
     if (auto pit = _material_unary_properties.find(material_gid);
         pit != _material_unary_properties.end()) {
         if (auto oit = pit->second.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet));
-            oit != pit->second.end()) {
-            optical = &oit->second.as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
+            oit != pit->second.end() && !oit->second.empty()) {
+            opticals = &oit->second;
         }
     }
 
-    // Forbid post-init changes to emissive status. Structure managers cache their emissive
-    // voxel set at structure init and would not observe a flip here.
-    const bool current_is_emissive = optical != nullptr &&
-                                     !optical->emission_texture_reference.empty() &&
-                                     optical->emission_intensity > 0;
+    // Forbid post-init changes to emissive status. Structure managers cache their emissive voxel
+    // set at structure init and would not observe a flip here. Optical properties of a material
+    // share one category, so the first one carries the material's emissive status.
+    const RSC_MaterialOpticalPropertySimpleMicrofacet* first =
+        opticals != nullptr ? &opticals->front().as<RSC_MaterialOpticalPropertySimpleMicrofacet>()
+                            : nullptr;
+    const bool current_is_emissive = first != nullptr &&
+                                     !first->emission_texture_reference.empty() &&
+                                     first->emission_intensity > 0;
     auto init_it = _material_is_emissive_at_init.find(material_gid);
     if (init_it == _material_is_emissive_at_init.end()) {
         _material_is_emissive_at_init.emplace(material_gid, current_is_emissive);
@@ -719,32 +833,38 @@ void RS_KernelMaterialManager::_resolveVisionSlot(RIndex material_gid) {
         ));
     }
 
-    // Reassigning each channel releases the previously-held texture reference.
-    if (optical != nullptr) {
-        slot.albedo = _resolveVisionSampleInput(
-            optical->albedo_texture_reference,
+    // A material with no optical property still gets one default vision slot. Reassigning each
+    // channel releases the previously-held texture reference.
+    slot.optical_count = opticals != nullptr ? static_cast<RSize>(opticals->size()) : 1;
+    slot.opticals.clear();
+    slot.opticals.resize(slot.optical_count);
+    for (RSize k = 0; k < slot.optical_count; ++k) {
+        auto& out = slot.opticals[k];
+        if (opticals == nullptr) {
+            out.roughness_metalness = MaterialVisionTextureReference{
+                RSE_VISION_SAMPLE_INPUT_CONSTANT, RColor3f(1.0f, 0.0f, 0.0f), {}
+            };
+            continue;
+        }
+        const auto& optical = (*opticals)[k].as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
+        out.albedo = _resolveVisionSampleInput(
+            optical.albedo_texture_reference,
             RColor3f::zero(),
             RSE_TEXTURE_COLOR_SPACE_SRGB,
             RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
         );
-        slot.roughness_metalness = _resolveVisionSampleInput(
-            optical->roughness_metalness_texture_reference,
+        out.roughness_metalness = _resolveVisionSampleInput(
+            optical.roughness_metalness_texture_reference,
             RColor3f(1.0f, 0.0f, 0.0f),
             RSE_TEXTURE_COLOR_SPACE_LINEAR,
             RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
         );
-        slot.emission = _resolveVisionSampleInput(
-            optical->emission_texture_reference,
+        out.emission = _resolveVisionSampleInput(
+            optical.emission_texture_reference,
             RColor3f::zero(),
             RSE_TEXTURE_COLOR_SPACE_SRGB,
             RSE_TEXTURE_STORAGE_FORMAT_CONSTANT
         );
-    } else {
-        slot.albedo = MaterialVisionTextureReference{};
-        slot.roughness_metalness = MaterialVisionTextureReference{
-            RSE_VISION_SAMPLE_INPUT_CONSTANT, RColor3f(1.0f, 0.0f, 0.0f), {}
-        };
-        slot.emission = MaterialVisionTextureReference{};
     }
 }
 
@@ -787,87 +907,101 @@ void RS_KernelMaterialManager::_initKernelVisionSlotData(RIndex material_gid) {
     if (slot_it == _vision_slots.end()) return;
     auto& slot = slot_it->second;
 
-    const RSC_MaterialOpticalPropertySimpleMicrofacet* optical = nullptr;
+    // The material's optical properties in registration order (may be absent).
+    const std::vector<UnaryPropertyVariant>* opticals = nullptr;
     if (auto pit = _material_unary_properties.find(material_gid);
         pit != _material_unary_properties.end()) {
         if (auto oit = pit->second.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet));
-            oit != pit->second.end()) {
-            optical = &oit->second.as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
+            oit != pit->second.end() && !oit->second.empty()) {
+            opticals = &oit->second;
         }
     }
 
-    // Read each channel's device payload host side; grid handles resolve by name post texture
-    // commit.
     auto& tex_mgr = _kernel_manager->getKernelTextureManager();
-    RS_VisionSampleInputMem<RColor3f> albedo =
-        slot.albedo.input_type == RSE_VISION_SAMPLE_INPUT_CONSTANT
-            ? RS_VisionSampleInputMem<RColor3f>(slot.albedo.constant_value)
-            : RS_VisionSampleInputMem<RColor3f>(
-                  tex_mgr.findTextureHandle(slot.albedo.texture_reference.name())
-              );
-    RS_VisionSampleInputMem<RColor3f> roughness_metalness =
-        slot.roughness_metalness.input_type == RSE_VISION_SAMPLE_INPUT_CONSTANT
-            ? RS_VisionSampleInputMem<RColor3f>(slot.roughness_metalness.constant_value)
-            : RS_VisionSampleInputMem<RColor3f>(
-                  tex_mgr.findTextureHandle(slot.roughness_metalness.texture_reference.name())
-              );
-    RS_VisionSampleInputMem<RColor3f> emission_color =
-        slot.emission.input_type == RSE_VISION_SAMPLE_INPUT_CONSTANT
-            ? RS_VisionSampleInputMem<RColor3f>(slot.emission.constant_value)
-            : RS_VisionSampleInputMem<RColor3f>(
-                  tex_mgr.findTextureHandle(slot.emission.texture_reference.name())
-              );
-
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
         auto& ctx = k_ptr->ctx;
         using ContextType = decltype(k_ptr->ctx);
         using FloatM = typename RS_VisionMaterialMem<ContextType::FloatMemAccuracy>::FloatM;
 
-        // Allocate the device slot on first commit; the pooled offset is stable afterwards.
-        if (slot.vision_material == RS_NULL_HANDLE) {
-            ctx.host_data->vision_material_layout.add(1, material_gid);
+        // Allocate the material's device slots on first commit, one per optical property; the
+        // pooled offset is stable afterwards.
+        if (slot.vision_material_base == RS_NULL_HANDLE) {
+            ctx.host_data->vision_material_layout.add(slot.optical_count, material_gid);
             ctx.host_data->vision_material_layout.syncDeviceLayout(ctx.vision_material_layout);
             ctx.vision_materials.resize(ctx.host_data->vision_material_layout.capacity());
-            slot.vision_material =
+            slot.vision_material_base =
                 static_cast<RHandle>(ctx.host_data->vision_material_layout.segmentOffset(
                     ctx.host_data->vision_material_layout.find(material_gid)
                 ));
         }
 
-        RS_VisionMaterialMem<ContextType::FloatMemAccuracy> vm{};
-        vm.material_gid = material_gid;
-        vm.albedo = albedo;
-        vm.roughness_metalness = roughness_metalness;
-        vm.emission_color = emission_color;
+        // Build every optical's device payload host side, then write the slots in one slice.
+        std::vector<RS_VisionMaterialMem<ContextType::FloatMemAccuracy>> vms(slot.optical_count);
+        for (RSize k = 0; k < slot.optical_count; ++k) {
+            const auto& channels = slot.opticals[k];
+            // Grid handles resolve by name post texture commit.
+            RS_VisionSampleInputMem<RColor3f> albedo =
+                channels.albedo.input_type == RSE_VISION_SAMPLE_INPUT_CONSTANT
+                    ? RS_VisionSampleInputMem<RColor3f>(channels.albedo.constant_value)
+                    : RS_VisionSampleInputMem<RColor3f>(
+                          tex_mgr.findTextureHandle(channels.albedo.texture_reference.name())
+                      );
+            RS_VisionSampleInputMem<RColor3f> roughness_metalness =
+                channels.roughness_metalness.input_type == RSE_VISION_SAMPLE_INPUT_CONSTANT
+                    ? RS_VisionSampleInputMem<RColor3f>(channels.roughness_metalness.constant_value)
+                    : RS_VisionSampleInputMem<RColor3f>(tex_mgr.findTextureHandle(
+                          channels.roughness_metalness.texture_reference.name()
+                      ));
+            RS_VisionSampleInputMem<RColor3f> emission_color =
+                channels.emission.input_type == RSE_VISION_SAMPLE_INPUT_CONSTANT
+                    ? RS_VisionSampleInputMem<RColor3f>(channels.emission.constant_value)
+                    : RS_VisionSampleInputMem<RColor3f>(
+                          tex_mgr.findTextureHandle(channels.emission.texture_reference.name())
+                      );
 
-        if (optical != nullptr) {
-            vm.ior = static_cast<FloatM>(optical->ior);
-            vm.emission_intensity = static_cast<FloatM>(optical->emission_intensity);
+            RS_VisionMaterialKeyUnion key_union{0};
+            key_union.vision_material_key.material_gid = material_gid;
+            key_union.vision_material_key.optical_mid = static_cast<RIndex>(k);
+
+            auto& vm = vms[k];
+            vm.vision_material_key = key_union.vision_material_key_packed;
+            vm.albedo = albedo;
+            vm.roughness_metalness = roughness_metalness;
+            vm.emission_color = emission_color;
+
+            const RSC_MaterialOpticalPropertySimpleMicrofacet* optical =
+                opticals != nullptr
+                    ? &(*opticals)[k].as<RSC_MaterialOpticalPropertySimpleMicrofacet>()
+                    : nullptr;
+            if (optical != nullptr) {
+                vm.ior = static_cast<FloatM>(optical->ior);
+                vm.emission_intensity = static_cast<FloatM>(optical->emission_intensity);
+            }
+
+            // Emission precedence over transparency over opaque, because
+            // emission required special data flow in the vision system.
+            RSE_VisionMaterialType inferred_type;
+            if (optical != nullptr && optical->emission_intensity > 0) {
+                inferred_type = RSE_VISION_MATERIAL_EMISSIVE;
+            } else if (optical != nullptr && optical->is_transparent) {
+                inferred_type = RSE_VISION_MATERIAL_TRANSPARENT;
+            } else {
+                inferred_type = RSE_VISION_MATERIAL_OPAQUE;
+            }
+
+            RS_VisionMaterialStateUnion state_union{0};
+            state_union.vision_material_state.render_type = inferred_type;
+            state_union.vision_material_state.albedo_input_type = channels.albedo.input_type;
+            state_union.vision_material_state.roughness_metalness_input_type =
+                channels.roughness_metalness.input_type;
+            state_union.vision_material_state.emission_input_type = channels.emission.input_type;
+            vm.state = state_union.vision_material_state_packed;
         }
 
-        // Emission precedence over transparency over opaque, because
-        // emission required special data flow in the vision system.
-        RSE_VisionMaterialType inferred_type;
-        if (optical != nullptr && optical->emission_intensity > 0) {
-            inferred_type = RSE_VISION_MATERIAL_EMISSIVE;
-        } else if (optical != nullptr && optical->is_transparent) {
-            inferred_type = RSE_VISION_MATERIAL_TRANSPARENT;
-        } else {
-            inferred_type = RSE_VISION_MATERIAL_OPAQUE;
-        }
-
-        RS_VisionMaterialStateUnion state_union{0};
-        state_union.vision_material_state.render_type = inferred_type;
-        state_union.vision_material_state.albedo_input_type = slot.albedo.input_type;
-        state_union.vision_material_state.roughness_metalness_input_type =
-            slot.roughness_metalness.input_type;
-        state_union.vision_material_state.emission_input_type = slot.emission.input_type;
-        vm.state = state_union.vision_material_state_packed;
-
-        const RSize offset = ctx.host_data->vision_material_layout.segmentOffset(
+        const RSize base = ctx.host_data->vision_material_layout.segmentOffset(
             ctx.host_data->vision_material_layout.find(material_gid)
         );
-        ctx.vision_materials.writeSlice(&vm, 1, offset);
+        ctx.vision_materials.writeSlice(vms.data(), slot.optical_count, base);
 
         // Context data is modified, needs to update kernel.
         _kernel_manager->markKernelModified();

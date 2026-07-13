@@ -107,6 +107,16 @@
 #define RS_WORLD_RSC_FLOOR_GID 1
 #endif
 
+// Hard limit on optical properties per material, set by the 10-bit optical mid packed into the
+// camera pixel object key alongside the material gid.
+#ifndef RS_WORLD_RSC_MATERIAL_MAX_NUM
+#define RS_WORLD_RSC_MATERIAL_MAX_NUM (1u << 22)
+#endif
+
+#ifndef RS_WORLD_RSC_MATERIAL_MAX_OPTICAL_PROPERTY_NUM
+#define RS_WORLD_RSC_MATERIAL_MAX_OPTICAL_PROPERTY_NUM 1024
+#endif
+
 // Per-structure-voxel limits.
 /// Hard limit on total bodies, set by the 20-bit body_sid contact filter field.
 #ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM

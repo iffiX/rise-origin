@@ -8,8 +8,8 @@
 
 #include "rise_origin/logic/vision/rs_vision_texture_m.h"
 #include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_float.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
@@ -33,13 +33,24 @@ union RS_VisionMaterialStateUnion {
     } vision_material_state;
 };
 
+/// Packed material identity of an optical: material gid in the high bits, optical mid in the low
+/// bits, so one RIndex read yields both. Widths track RS_WORLD_RSC_MATERIAL_MAX_NUM (22 bits) and
+/// RS_WORLD_RSC_MATERIAL_MAX_OPTICAL_PROPERTY_NUM (10 bits).
+union RS_VisionMaterialKeyUnion {
+    RIndex vision_material_key_packed;
+    struct RS_VisionMaterialKey {
+        RIndex optical_mid : 10;
+        RIndex material_gid : 22;
+    } vision_material_key;
+};
+
 template <RSE_FloatType FloatMemAccuracy>
 class RS_VisionMaterialMem {
    public:
     using FloatM = typename RS_FloatDataType<FloatMemAccuracy>::DataType;
 
-    /// Global ID of the source material
-    RIndex material_gid = RS_NULL_INDEX;
+    /// Packed source material gid and optical mid, see RS_VisionMaterialKeyUnion.
+    RIndex vision_material_key = 0;
 
     /// Packed render type + per-channel is_texture discriminators.
     RState state = 0;
@@ -67,7 +78,7 @@ class RS_VisionMaterialMem {
 #define REFLECT_VISION_MATERIAL_MEM(vision_material_mem_type) \
     REFL_AUTO(                                                \
         type(vision_material_mem_type),                       \
-        field(material_gid),                                  \
+        field(vision_material_key),                           \
         field(state),                                         \
         field(albedo),                                        \
         field(roughness_metalness),                           \

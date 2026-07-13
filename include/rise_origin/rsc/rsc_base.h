@@ -254,7 +254,7 @@ class RSC_Base {
         copy->_deepCopyShared(memo);
         return copy;
     }
-    
+
     /**
      * @brief Read the characterization from a reader.
      */

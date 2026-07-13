@@ -173,6 +173,11 @@ void initRSPYEntity(py::module &m) {
     rspyBindArray(
         cls_body, "material_reference_sid", &RSC_StructureVoxelBody::material_reference_sid
     );
+    rspyBindArray(
+        cls_body,
+        "material_optical_reference_mid",
+        &RSC_StructureVoxelBody::material_optical_reference_mid
+    );
     rspyBindArray(cls_body, "segment_bid", &RSC_StructureVoxelBody::segment_bid);
     rspyBindArray(cls_body, "expansion_signal_sid", &RSC_StructureVoxelBody::expansion_signal_sid);
     rspyBindArray(
@@ -242,7 +247,31 @@ void initRSPYEntity(py::module &m) {
     rspyRSC<RSC_StructureBase, RSC_EntityBase>(m, "RSC_StructureBase")
         .def_readwrite("origin_position", &RSC_StructureBase::origin_position)
         .def_readwrite("orientation", &RSC_StructureBase::orientation)
-        .def_readwrite("material_references", &RSC_StructureBase::material_references);
+        .def_readwrite("material_references", &RSC_StructureBase::material_references)
+        .def_property(
+            "material_optical_references",
+            [](const RSC_StructureBase &s) {
+                py::list outer;
+                for (const auto &inner : s.material_optical_references) {
+                    py::list names;
+                    for (const auto &name : inner) names.append(name);
+                    outer.append(std::move(names));
+                }
+                return outer;
+            },
+            [](RSC_StructureBase &s, const py::sequence &outer) {
+                std::vector<std::vector<std::string>> value;
+                value.reserve(py::len(outer));
+                for (const auto &inner : outer) {
+                    std::vector<std::string> names;
+                    for (const auto &name : py::cast<py::sequence>(inner)) {
+                        names.push_back(py::cast<std::string>(name));
+                    }
+                    value.push_back(std::move(names));
+                }
+                s.material_optical_references = std::move(value);
+            }
+        );
 
     rspyRSC<RSC_StructureVoxel, RSC_StructureBase>(m, "RSC_StructureVoxel")
         .def(py::init<>())

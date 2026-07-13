@@ -590,7 +590,9 @@ class RS_RaySensorRayCompute {
         rec_out.voxel = voxel;
         rec_out.structure_gid = V_G(voxel, structure_gid);
         RHandle vision_material = V_G(voxel, vision_material);
-        rec_out.material_gid = VSM_G(vision_material, material_gid);
+        rec_out.material_gid =
+            RS_VisionMaterialKeyUnion{VSM_G(vision_material, vision_material_key)}
+                .vision_material_key.material_gid;
         rec_out.emission = FloatC(VSM_G(vision_material, emission_intensity));
     }
 

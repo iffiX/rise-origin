@@ -116,6 +116,9 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         z_voxels: Voxel count along Z.
         material_reference_sid: Per-voxel material reference id; use
             ``RS_NULL_INDEX`` for an empty voxel.
+        material_optical_reference_mid: Per-voxel material optical reference id;
+            ``RS_NULL_INDEX`` for an empty voxel, empty for each material's
+            default optical property.
         segment_bid: Per-voxel rigid segment id; ``RS_NULL_INDEX`` if
             unspecified.
         expansion_signal_sid: Per-voxel expansion signal id; ``RS_NULL_INDEX``
@@ -140,6 +143,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         y_voxels: int = 0,
         z_voxels: int = 0,
         material_reference_sid: Sequence[int] = (),
+        material_optical_reference_mid: Sequence[int] = (),
         segment_bid: Sequence[int] = (),
         expansion_signal_sid: Sequence[int] = (),
         expansion_control_mode: Sequence[int] = (),
@@ -153,6 +157,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         self.y_voxels = y_voxels
         self.z_voxels = z_voxels
         self.material_reference_sid = material_reference_sid
+        self.material_optical_reference_mid = material_optical_reference_mid
         self.segment_bid = segment_bid
         self.expansion_signal_sid = expansion_signal_sid
         if expansion_control_mode:
@@ -321,6 +326,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         segment_sid: int = 0,
         voxel_size: float,
         material_grid=None,
+        material_optical_reference_mid_grid=None,
         segment_grid=None,
         expansion_signal_grid=None,
         relative_origin_position: RVec3rf = RVec3rf.zero(),
@@ -339,6 +345,9 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             voxel_size: Edge length of one voxel, in meters.
             material_grid: Optional ``(X, Y, Z)`` per-voxel material id grid;
                 overrides ``material_sid``.
+            material_optical_reference_mid_grid: Optional ``(X, Y, Z)`` per-voxel
+                material optical reference id grid; empty uses each material's
+                default optical property.
             segment_grid: Optional ``(X, Y, Z)`` per-voxel segment id grid;
                 overrides ``segment_sid``.
             expansion_signal_grid: Optional ``(X, Y, Z)`` per-voxel expansion
@@ -360,6 +369,11 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             np.asarray(segment_grid)
             if segment_grid is not None
             else np.where(occ, segment_sid, RS_NULL_INDEX)
+        )
+        optical = (
+            np.asarray(material_optical_reference_mid_grid)
+            if material_optical_reference_mid_grid is not None
+            else None
         )
         exp = (
             np.asarray(expansion_signal_grid)
@@ -384,6 +398,8 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             box = (slice(x0, x1), slice(y0, y1), slice(z0, z1))
             mats = mats[box]
             segs = segs[box]
+            if optical is not None:
+                optical = optical[box]
             if exp is not None:
                 exp = exp[box]
             shift = cls._rotate_vector(
@@ -398,6 +414,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             relative_origin_position = origin + shift
 
         nx, ny, nz = mats.shape
+        optical_mid = cls._flatten(optical) if optical is not None else ()
         expansion = cls._flatten(exp) if exp is not None else ()
         return cls(
             relative_origin_position=relative_origin_position,
@@ -406,6 +423,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             y_voxels=int(ny),
             z_voxels=int(nz),
             material_reference_sid=cls._flatten(mats),
+            material_optical_reference_mid=optical_mid,
             segment_bid=cls._flatten(segs),
             expansion_signal_sid=expansion,
             voxel_size=voxel_size,
@@ -764,6 +782,9 @@ class StructureVoxel(RSC_StructureVoxel):
         orientation: Initial world orientation ``(x, y, z, w)``.
         material_references: Material names referenced by this structure's
             per-voxel ``material_reference_sid`` indices, in id order.
+        material_optical_references: Per-material optical property name lists,
+            parallel to ``material_references``; a voxel's
+            ``material_optical_reference_mid`` indexes its material's list.
         is_fixed: If true, the structure is static and never moves.
         bodies: The voxel-grid blocks composing the structure.
         constraints: The joints between rigid segments of the structure.
@@ -796,6 +817,7 @@ class StructureVoxel(RSC_StructureVoxel):
         origin_position: RVec3rf = RVec3rf.zero(),
         orientation: RQuat3rf = RQuat3rf.unit(),
         material_references: Sequence[str] = (),
+        material_optical_references: Sequence[Sequence[str]] = (),
         is_fixed: bool = False,
         bodies: Sequence[StructureVoxelBody] = (),
         constraints: Sequence[StructureVoxelConstraint] = (),
@@ -807,6 +829,8 @@ class StructureVoxel(RSC_StructureVoxel):
         self.origin_position = origin_position
         self.orientation = orientation
         self.material_references.extend(material_references)
+        if material_optical_references:
+            self.material_optical_references = material_optical_references
         self.is_fixed = is_fixed
         self.bodies = list(bodies)
         self.constraints = list(constraints)
@@ -958,6 +982,7 @@ class StructureVoxel(RSC_StructureVoxel):
         bodies = []
         body_of_link = {}
         material_references = []
+        material_optical_references = []
         for link_name, link in robot.link_map.items():
             mesh = cls._get_urdf_link_mesh(link, resolve, is_prefer_visual_mesh)
             if mesh is None:
@@ -975,39 +1000,18 @@ class StructureVoxel(RSC_StructureVoxel):
                 body_of_link[link_name] = body
                 continue
 
-            occupancy, min_corner = _voxelize_mesh(placed, link_voxel_size)
-            occupied_min = np.argwhere(occupancy).min(axis=0)
-            com_corner = np.asarray(min_corner) + occupied_min * link_voxel_size
-            inertial = cls._get_urdf_inertial(robot, link_name, base)
-            if is_mimic_visual_signature:
-                palette, index_grid = cls._get_voxel_signatures(
-                    placed,
-                    occupancy,
-                    min_corner,
-                    link_voxel_size,
-                    cls._get_urdf_signature(robot, link),
-                    visual_signature_num,
-                )
-            else:
-                palette = [cls._WHITE_SIGNATURE]
-                index_grid = np.zeros(occupancy.shape, dtype=np.int64)
-            base_id = len(material_references)
-            material_references.extend(
-                cls._make_signature_materials(
-                    f"{structure_name}/{link_name}",
-                    inertial,
-                    com_corner,
-                    palette,
-                    essence_outputs,
-                    resource_outputs,
-                )
-            )
-            material_grid = np.where(occupancy, base_id + index_grid, RS_NULL_INDEX)
-            body = StructureVoxelBody.from_grid(
-                occupancy,
-                material_grid=material_grid,
-                voxel_size=link_voxel_size,
-                relative_origin_position=min_corner,
+            body = cls._make_signature_body(
+                placed,
+                link_voxel_size,
+                cls._get_urdf_signature(robot, link) if is_mimic_visual_signature else None,
+                cls._get_urdf_inertial(robot, link_name, base),
+                f"{structure_name}/{link_name}",
+                essence_outputs,
+                resource_outputs,
+                material_references,
+                material_optical_references,
+                is_mimic_visual_signature,
+                visual_signature_num,
             )
             bodies.append(body)
             body_of_link[link_name] = body
@@ -1107,6 +1111,7 @@ class StructureVoxel(RSC_StructureVoxel):
         return cls(
             structure_name,
             material_references=material_references,
+            material_optical_references=material_optical_references,
             bodies=bodies,
             constraints=constraints,
             signal=signal,
@@ -1179,6 +1184,7 @@ class StructureVoxel(RSC_StructureVoxel):
         bodies = []
         body_of_id = {}
         material_references = []
+        material_optical_references = []
         for body_id in range(1, model.nbody):  # body 0 is the world
             mesh, geom_ids = cls._get_mjcf_body_mesh(
                 model, data, body_id, is_prefer_visual_mesh
@@ -1194,39 +1200,18 @@ class StructureVoxel(RSC_StructureVoxel):
                 body_of_id[body_id] = body
                 continue
 
-            occupancy, min_corner = _voxelize_mesh(mesh, body_voxel_size)
-            occupied_min = np.argwhere(occupancy).min(axis=0)
-            com_corner = np.asarray(min_corner) + occupied_min * body_voxel_size
-            inertial = cls._get_mjcf_inertial(model, data, body_id)
-            if is_mimic_visual_signature:
-                palette, index_grid = cls._get_voxel_signatures(
-                    mesh,
-                    occupancy,
-                    min_corner,
-                    body_voxel_size,
-                    cls._get_mjcf_signature(model, geom_ids),
-                    visual_signature_num,
-                )
-            else:
-                palette = [cls._WHITE_SIGNATURE]
-                index_grid = np.zeros(occupancy.shape, dtype=np.int64)
-            base_id = len(material_references)
-            material_references.extend(
-                cls._make_signature_materials(
-                    f"{name}/{body_name}",
-                    inertial,
-                    com_corner,
-                    palette,
-                    essence_outputs,
-                    resource_outputs,
-                )
-            )
-            material_grid = np.where(occupancy, base_id + index_grid, RS_NULL_INDEX)
-            body = StructureVoxelBody.from_grid(
-                occupancy,
-                material_grid=material_grid,
-                voxel_size=body_voxel_size,
-                relative_origin_position=min_corner,
+            body = cls._make_signature_body(
+                mesh,
+                body_voxel_size,
+                cls._get_mjcf_signature(model, geom_ids) if is_mimic_visual_signature else None,
+                cls._get_mjcf_inertial(model, data, body_id),
+                f"{name}/{body_name}",
+                essence_outputs,
+                resource_outputs,
+                material_references,
+                material_optical_references,
+                is_mimic_visual_signature,
+                visual_signature_num,
             )
             bodies.append(body)
             body_of_id[body_id] = body
@@ -1343,6 +1328,7 @@ class StructureVoxel(RSC_StructureVoxel):
         return cls(
             name,
             material_references=material_references,
+            material_optical_references=material_optical_references,
             bodies=bodies,
             constraints=constraints,
             signal=signal,
@@ -1406,6 +1392,7 @@ class StructureVoxel(RSC_StructureVoxel):
         scene = trimesh.load(path, force="scene")
         bodies = []
         material_references = []
+        material_optical_references = []
         for node_name in scene.graph.nodes_geometry:
             transform, geometry_name = scene.graph[node_name]
             mesh = scene.geometry[geometry_name].copy()
@@ -1418,40 +1405,27 @@ class StructureVoxel(RSC_StructureVoxel):
                 )
                 continue
 
-            occupancy, min_corner = _voxelize_mesh(mesh, node_voxel_size)
-            if is_mimic_visual_signature:
-                palette, index_grid = cls._get_voxel_signatures(
+            bodies.append(
+                cls._make_signature_body(
                     mesh,
-                    occupancy,
-                    min_corner,
                     node_voxel_size,
-                    cls._get_gltf_signature(mesh),
-                    visual_signature_num,
-                )
-            else:
-                palette = [cls._WHITE_SIGNATURE]
-                index_grid = np.zeros(occupancy.shape, dtype=np.int64)
-            base_id = len(material_references)
-            material_references.extend(
-                cls._make_signature_materials(
+                    cls._get_gltf_signature(mesh) if is_mimic_visual_signature else None,
+                    None,
                     f"{name}/{node_name}",
-                    None,
-                    None,
-                    palette,
                     essence_outputs,
                     resource_outputs,
+                    material_references,
+                    material_optical_references,
+                    is_mimic_visual_signature,
+                    visual_signature_num,
                 )
             )
-            material_grid = np.where(occupancy, base_id + index_grid, RS_NULL_INDEX)
-            bodies.append(
-                StructureVoxelBody.from_grid(
-                    occupancy,
-                    material_grid=material_grid,
-                    voxel_size=node_voxel_size,
-                    relative_origin_position=min_corner,
-                )
-            )
-        return cls(name, material_references=material_references, bodies=bodies)
+        return cls(
+            name,
+            material_references=material_references,
+            material_optical_references=material_optical_references,
+            bodies=bodies,
+        )
 
     @classmethod
     def from_step(
@@ -1864,66 +1838,140 @@ class StructureVoxel(RSC_StructureVoxel):
         return palette, index_grid
 
     @staticmethod
+    def _make_signature_body(
+        placed,
+        voxel_size,
+        signature,
+        inertial,
+        name,
+        essence_outputs,
+        resource_outputs,
+        material_references,
+        material_optical_references,
+        is_mimic_visual_signature,
+        visual_signature_num,
+    ) -> "StructureVoxelBody":
+        """Voxelize a placed mesh into a body, releasing one material with one optical property
+        per visual signature and pointing each voxel at its signature.
+
+        Appends the material name to ``material_references`` and its optical property names to
+        ``material_optical_references`` (parallel lists), so the caller threads both into the
+        assembled structure.
+
+        Args:
+            placed: Mesh already transformed into the structure frame.
+            voxel_size: Edge length of one voxel, in meters.
+            signature: Per-format visual signature source, unused when signatures are off.
+            inertial: ``(mass, com, inertia)`` for an atlas body, or None for a rigid body.
+            name: Material name for this body.
+            essence_outputs: Out-list the released material and property essences append to.
+            resource_outputs: Out-list the released texture resources append to.
+            material_references: Structure material name list this body appends to.
+            material_optical_references: Structure per-material optical name lists this body
+                appends to.
+            is_mimic_visual_signature: Whether to sample per-voxel signatures from the mesh.
+            visual_signature_num: Number of signatures to quantize the texture into.
+
+        Returns:
+            A populated :class:`StructureVoxelBody`.
+        """
+        occupancy, min_corner = _voxelize_mesh(placed, voxel_size)
+        com_corner = None
+        if inertial is not None:
+            occupied_min = np.argwhere(occupancy).min(axis=0)
+            com_corner = np.asarray(min_corner) + occupied_min * voxel_size
+        if is_mimic_visual_signature:
+            palette, index_grid = StructureVoxel._get_voxel_signatures(
+                placed, occupancy, min_corner, voxel_size, signature, visual_signature_num
+            )
+        else:
+            palette = [StructureVoxel._WHITE_SIGNATURE]
+
+        material_sid = len(material_references)
+        material_name, optical_names = StructureVoxel._make_signature_materials(
+            name, inertial, com_corner, palette, essence_outputs, resource_outputs
+        )
+        material_references.append(material_name)
+
+        material_grid = np.where(occupancy, material_sid, RS_NULL_INDEX)
+        # Without signature mimicry every voxel takes the material's default optical, so no
+        # optical references or per-voxel ids are needed.
+        optical_mid_grid = None
+        if is_mimic_visual_signature:
+            material_optical_references.append(optical_names)
+            optical_mid_grid = np.where(occupancy, index_grid, RS_NULL_INDEX)
+        return StructureVoxelBody.from_grid(
+            occupancy,
+            material_grid=material_grid,
+            material_optical_reference_mid_grid=optical_mid_grid,
+            voxel_size=voxel_size,
+            relative_origin_position=min_corner,
+        )
+
+    @staticmethod
     def _make_signature_materials(
         name, inertial, com_corner, palette, essence_outputs, resource_outputs
     ):
-        """Append one material per signature to the out-lists and return the names.
+        """Append one material with one optical property per signature and return their names.
 
-        Every signature of a body shares the same atlas (or rigid) physical
-        property, so the voxels fuse into one rigid segment, while each gets its
-        own albedo and roughness/metalness texture.
+        The material carries a single atlas (or rigid) physical property so its
+        voxels fuse into one rigid segment, and one optical property per signature,
+        each with its own albedo and roughness/metalness texture.
+
+        Returns:
+            A ``(material_name, optical_names)`` pair, where ``optical_names`` lists
+            the material's optical property names in signature order.
         """
         from rise_origin.rsc import essence, resource
 
-        names = []
-        is_multi = len(palette) > 1
+        essence_outputs.append(essence.Material(name))
+        if inertial is not None:
+            mass, com, inertia = inertial
+            com_local = com - com_corner
+            essence_outputs.append(
+                essence.MaterialPhysicalPropertyAtlas(
+                    name + "#phys",
+                    material_reference=name,
+                    mass=mass,
+                    com_position=(
+                        float(com_local[0]),
+                        float(com_local[1]),
+                        float(com_local[2]),
+                    ),
+                    inertia=inertia,
+                )
+            )
+        else:
+            essence_outputs.append(
+                essence.MaterialPhysicalPropertyRigid(
+                    name + "#phys",
+                    material_reference=name,
+                    density=1000.0,
+                )
+            )
+        optical_names = []
         for index, (albedo, roughness, metalness) in enumerate(palette):
-            material_name = f"{name}#{index}" if is_multi else name
-            names.append(material_name)
-            essence_outputs.append(essence.Material(material_name))
-            if inertial is not None:
-                mass, com, inertia = inertial
-                com_local = com - com_corner
-                essence_outputs.append(
-                    essence.MaterialPhysicalPropertyAtlas(
-                        material_name + "#phys",
-                        material_reference=material_name,
-                        mass=mass,
-                        com_position=(
-                            float(com_local[0]),
-                            float(com_local[1]),
-                            float(com_local[2]),
-                        ),
-                        inertia=inertia,
-                    )
-                )
-            else:
-                essence_outputs.append(
-                    essence.MaterialPhysicalPropertyRigid(
-                        material_name + "#phys",
-                        material_reference=material_name,
-                        density=1000.0,
-                    )
-                )
-            albedo_texture = material_name + "#albedo"
+            albedo_texture = f"{name}#albedo{index}"
             resource_outputs.append(
                 resource.TextureConstant(albedo_texture, value=tuple(albedo))
             )
-            roughness_metalness_texture = material_name + "#rm"
+            roughness_metalness_texture = f"{name}#rm{index}"
             resource_outputs.append(
                 resource.TextureConstant(
                     roughness_metalness_texture, value=(roughness, metalness, 0.0)
                 )
             )
+            optical_name = f"{name}#optic{index}"
+            optical_names.append(optical_name)
             essence_outputs.append(
                 essence.MaterialOpticalPropertySimpleMicrofacet(
-                    material_name + "#optic",
-                    material_reference=material_name,
+                    optical_name,
+                    material_reference=name,
                     albedo_texture_reference=albedo_texture,
                     roughness_metalness_texture_reference=roughness_metalness_texture,
                 )
             )
-        return names
+        return name, optical_names
 
     @staticmethod
     def _make_pose_matrix(position, quat_wxyz) -> np.ndarray:
