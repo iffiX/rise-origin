@@ -60,6 +60,10 @@ struct RS_KernelHostData {
     // Event counter
     std::unordered_map<std::string, RBigSize> event_count;
 
+    // Executor status fields
+    std::unordered_map<std::string, std::string> executor_info;
+    mutable std::mutex executor_info_mutex;
+
     // For determining PGS steps
     RSize constraint_joint_max_colors = 0;
 
@@ -187,6 +191,18 @@ struct alignas(8) RS_KernelBase {
 
     void clearExecutionCountOfEvent(const std::string& event_name) const {
         host_data->event_count[event_name] = 0;
+    }
+
+    void setExecutorInfo(const std::string& field, const std::string& info) const {
+        std::lock_guard<std::mutex> lock(host_data->executor_info_mutex);
+        host_data->executor_info[field] = info;
+    }
+
+    [[nodiscard]] std::string getExecutorInfo(const std::string& field) const {
+        std::lock_guard<std::mutex> lock(host_data->executor_info_mutex);
+        auto it = host_data->executor_info.find(field);
+        if (it == host_data->executor_info.end()) return "";
+        return it->second;
     }
 
     void terminate() { is_terminated = true; }

@@ -78,6 +78,14 @@ class RS_SimulationExecutor {
     RSize _mechanical_signal_update_interval = 1;
     RSize _sentinel_update_interval = 1;
 
+    // World load: smoothed wall-clock time spent per second of advanced sim time, measured over the
+    // interval between two control callbacks.
+    bool _is_world_load_measured = false;
+    bool _has_world_load = false;
+    RBigFloat _world_load = 0;
+    std::chrono::steady_clock::time_point _world_load_measured_wallclock_time;
+    RBigFloat _world_load_measured_sim_time = 0;
+
     // Wall-clock pacing anchor.
     bool _is_wallclock_anchored = false;
     std::chrono::steady_clock::time_point _wallclock_anchor_time;
@@ -125,6 +133,8 @@ class RS_SimulationExecutor {
     void _runMechanicalSignalDynamicsUpdate();
     bool _runMechanicalSignalTransformUpdate();
     void _performCallback();
+    void _measureWorldLoad();
+    void _syncExecutorInfo();
     void _paceToWallclock();
 
     // Launch helpers invoked inside a guarded phase (no guard of their own).

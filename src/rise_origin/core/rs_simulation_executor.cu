@@ -203,6 +203,8 @@ bool RS_SimulationExecutor::step() {
     }
     if (is_callback_event_due) {
         _performCallback();
+        _measureWorldLoad();
+        _syncExecutorInfo();
         _paceToWallclock();
     }
 
@@ -220,6 +222,8 @@ void RS_SimulationExecutor::stepPaused() {
     _runRecordUpdate();
     _runControllerRecordSaving();
     _performCallback();
+    _measureWorldLoad();
+    _syncExecutorInfo();
 }
 
 RFloat RS_SimulationExecutor::_runDtUpdate(bool &is_dt_normal) {
@@ -1193,6 +1197,68 @@ void RS_SimulationExecutor::_performCallback() {
             _logger, debug, "Callback sync controller signal takes: {}.", timer.elapsedTimeString()
         );
         timer.reset();
+    });
+}
+
+void RS_SimulationExecutor::_measureWorldLoad() {
+    // Measure before the pace sleep so the ratio reflects the compute cost of the control interval.
+    auto now = std::chrono::steady_clock::now();
+    RBigFloat sim_now = _kernel->getHostTime();
+    if (_is_world_load_measured) {
+        RBigFloat sim_elapsed = sim_now - _world_load_measured_sim_time;
+        if (sim_elapsed > 0) {
+            RBigFloat sample =
+                std::chrono::duration<double>(now - _world_load_measured_wallclock_time).count() /
+                sim_elapsed;
+            _world_load = _has_world_load ? 0.8 * _world_load + 0.2 * sample : sample;
+            _has_world_load = true;
+            _kernel->setExecutorInfo("world_load", std::to_string(_world_load));
+        } else {
+            // Sim time is frozen while paused, so the load is undefined; report it as empty and
+            // reset the smoothing so the next running sample starts clean.
+            _has_world_load = false;
+            _kernel->setExecutorInfo("world_load", "");
+        }
+    }
+    _world_load_measured_wallclock_time = now;
+    _world_load_measured_sim_time = sim_now;
+    _is_world_load_measured = true;
+}
+
+void RS_SimulationExecutor::_syncExecutorInfo() {
+    _runWithCriticalDataAccessGuard([&](auto *k_ptr, auto *, auto, bool) {
+        auto &ctx = k_ptr->ctx;
+        auto handle_count = [&](const std::string &name) -> RBigSize {
+            auto it = _handles.find(name);
+            return it == _handles.end() ? 0 : RBigSize(it->second.size());
+        };
+        RBigSize dynamic_rigid_body_num = handle_count("dynamic_rigid_body");
+        RBigSize rigid_body_num = ctx.host_data->structure_rigid_body_layout.size();
+        _kernel->setExecutorInfo(
+            "world_dynamic_voxel_num", std::to_string(handle_count("dynamic_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_bvh_dynamic_voxel_num", std::to_string(handle_count("bvh_dynamic_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_static_voxel_num", std::to_string(handle_count("static_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_dynamic_rigid_body_num", std::to_string(dynamic_rigid_body_num)
+        );
+        _kernel->setExecutorInfo(
+            "world_static_rigid_body_num", std::to_string(rigid_body_num - dynamic_rigid_body_num)
+        );
+        _kernel->setExecutorInfo(
+            "world_link_num", std::to_string(ctx.host_data->structure_link_layout.size())
+        );
+        _kernel->setExecutorInfo(
+            "world_constraint_joint_num",
+            std::to_string(ctx.host_data->structure_constraint_joint_layout.size())
+        );
+        _kernel->setExecutorInfo(
+            "world_contact_num", std::to_string(ctx.structure_rigid_contacts.size())
+        );
     });
 }
 

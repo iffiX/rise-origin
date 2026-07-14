@@ -1047,6 +1047,7 @@ std::string RS_KernelManager::getInfo(const std::string& info_name) {
             type_name = "cpu";
         return std::string(type_name) + ":" + std::to_string(location.id);
     }
+    if (kernel.host_data) return kernel.getExecutorInfo(info_name);
     return "";
 }
 

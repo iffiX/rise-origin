@@ -165,6 +165,8 @@ class RS_VRImpl {
      */
     struct HudInfo {
         RFloat sim_time = 0;
+        RFloat world_load = 0;
+        bool is_world_load_valid = false;
         RBigSize device_used = 0;
         RBigSize device_total = 0;
         RBigSize host_used = 0;
@@ -2013,6 +2015,7 @@ class RS_VRImpl {
         const ImVec4 accent_color(0.25f, 0.85f, 0.95f, 1.0f);
         const ImVec4 dim_color(0.55f, 0.70f, 0.78f, 1.0f);
         const ImVec4 good_color(0.35f, 0.92f, 0.55f, 1.0f);
+        const ImVec4 warn_color(0.95f, 0.55f, 0.25f, 1.0f);
         const ImU32 accent = IM_COL32(64, 217, 242, 255);
         const ImU32 rule = IM_COL32(64, 217, 242, 90);
         const ImU32 gauge_dim = IM_COL32(40, 60, 70, 120);
@@ -2026,7 +2029,7 @@ class RS_VRImpl {
 
         const float width = RS_VR_HUD_REFERENCE_WIDTH;
         const float height = RS_VR_HUD_REFERENCE_HEIGHT;
-        const float column_width = width / 3.0f;
+        const float column_width = width / 4.0f;
         const float margin = 48.0f;
 
         ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -2045,7 +2048,7 @@ class RS_VRImpl {
             accent,
             3.0f
         );
-        for (int i = 1; i < 3; ++i) {
+        for (int i = 1; i < 4; ++i) {
             float x = origin.x + i * column_width;
             draw_list->AddLine(
                 ImVec2(x, origin.y + 48), ImVec2(x, origin.y + height - 40), rule, 2.0f
@@ -2087,6 +2090,7 @@ class RS_VRImpl {
         const float c0 = margin;
         const float c1 = column_width + margin;
         const float c2 = 2 * column_width + margin;
+        const float c3 = 3 * column_width + margin;
         const float bar_width = column_width - 2 * margin;
 
         text(c0, 40, label_size, accent_color, "SIMULATION");
@@ -2094,10 +2098,31 @@ class RS_VRImpl {
         text(c0, 188, time_size, value_color, _getTimeString(info.sim_time).c_str());
         text(c0, 348, status_size, good_color, "NOMINAL");
 
-        text(c1, 40, label_size, accent_color, "GPU MEMORY");
-        text(c1, 140, sublabel_size, dim_color, info.device_name.c_str());
+        // A load at or below real time reads good, above it warns; the gauge fills toward
+        // saturation.
+        bool is_behind = info.world_load > 1.0f;
+        ImVec4 load_color = !info.is_world_load_valid ? dim_color
+                            : is_behind               ? warn_color
+                                                      : good_color;
+        ImU32 load_gauge = is_behind ? IM_COL32(242, 140, 64, 255) : IM_COL32(90, 235, 140, 255);
+        RFloat load_fraction = info.is_world_load_valid ? RS_MIN(info.world_load, RFloat(1))
+                                                        : RFloat(0);
+        text(c1, 40, label_size, accent_color, "WORLD LOAD");
+        text(c1, 140, sublabel_size, dim_color, "VS REALTIME");
         text(
             c1,
+            196,
+            memory_size,
+            load_color,
+            info.is_world_load_valid ? _getLoadString(info.world_load).c_str() : "N/A"
+        );
+        ImGui::SetCursorPos(ImVec2(c1, 360));
+        _drawSegmentBar(load_fraction, ImVec2(bar_width, 34), load_gauge, gauge_dim);
+
+        text(c2, 40, label_size, accent_color, "GPU MEMORY");
+        text(c2, 140, sublabel_size, dim_color, info.device_name.c_str());
+        text(
+            c2,
             196,
             memory_size,
             value_color,
@@ -2105,13 +2130,13 @@ class RS_VRImpl {
         );
         RFloat device_fraction =
             info.device_total > 0 ? static_cast<RFloat>(info.device_used) / info.device_total : 0;
-        ImGui::SetCursorPos(ImVec2(c1, 360));
+        ImGui::SetCursorPos(ImVec2(c2, 360));
         _drawSegmentBar(device_fraction, ImVec2(bar_width, 34), accent, gauge_dim);
 
-        text(c2, 40, label_size, accent_color, "HOST MEMORY");
-        text(c2, 140, sublabel_size, dim_color, "SYSTEM");
+        text(c3, 40, label_size, accent_color, "HOST MEMORY");
+        text(c3, 140, sublabel_size, dim_color, "SYSTEM");
         text(
-            c2,
+            c3,
             196,
             memory_size,
             value_color,
@@ -2119,7 +2144,7 @@ class RS_VRImpl {
         );
         RFloat host_fraction =
             info.host_total > 0 ? static_cast<RFloat>(info.host_used) / info.host_total : 0;
-        ImGui::SetCursorPos(ImVec2(c2, 360));
+        ImGui::SetCursorPos(ImVec2(c3, 360));
         _drawSegmentBar(host_fraction, ImVec2(bar_width, 34), accent, gauge_dim);
 
         ImGui::End();
@@ -2561,6 +2586,13 @@ class RS_VRImpl {
             static_cast<double>(used) / 1e9,
             static_cast<double>(total) / 1e9
         );
+        return buffer;
+    }
+
+    // Format the world load as a percentage of real time, such as 10%.
+    static std::string _getLoadString(RFloat load) {
+        char buffer[16];
+        std::snprintf(buffer, sizeof(buffer), "%.0f%%", static_cast<double>(load) * 100.0);
         return buffer;
     }
 
@@ -3085,8 +3117,13 @@ void RS_WorldSessionComponentVR::_updateInfo(RBigFloat time) {
     auto bytes = [](const std::string& text) -> RBigSize {
         return text.empty() ? 0 : static_cast<RBigSize>(std::strtoull(text.c_str(), nullptr, 10));
     };
+    std::string world_load = handle->getInfo("world_load");
     RS_VRImpl::HudInfo info;
     info.sim_time = static_cast<RFloat>(time);
+    info.is_world_load_valid = !world_load.empty();
+    info.world_load = info.is_world_load_valid
+                          ? static_cast<RFloat>(std::strtod(world_load.c_str(), nullptr))
+                          : 0;
     info.device_used = bytes(handle->getInfo("device_memory_used"));
     info.device_total = bytes(handle->getInfo("device_memory_capacity"));
     info.host_used = bytes(handle->getInfo("host_memory_used"));

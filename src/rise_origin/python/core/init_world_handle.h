@@ -15,6 +15,11 @@ class RSPY_WorldHandle {
     std::shared_ptr<RS_WorldHandle> handle;
     explicit RSPY_WorldHandle(std::shared_ptr<RS_WorldHandle> handle) : handle(std::move(handle)) {}
 
+    // Info
+    [[nodiscard]] std::string get_info(const std::string &info_name) const {
+        return handle->getInfo(info_name);
+    }
+
     // Lifecycle
     [[nodiscard]] bool is_pending() const { return handle->isPending(); }
     [[nodiscard]] bool is_running() const { return handle->isRunning(); }

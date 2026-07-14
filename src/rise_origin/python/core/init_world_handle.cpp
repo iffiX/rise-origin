@@ -112,6 +112,20 @@ void initRSPYWorldHandle(py::module &m) {
 
     py::class_<RSPY_WorldHandle>(m, "RS_WorldHandle")
         .def(
+            "get_info",
+            &RSPY_WorldHandle::get_info,
+            py::arg("info_name"),
+            R"doc(
+            Queries a named piece of world or system info as a string.
+
+            Args:
+                info_name: The info key, such as device_name, world_load, or world_contact_num.
+
+            Returns:
+                The info value, or an empty string when the key is unknown.
+        )doc"
+        )
+        .def(
             "is_pending",
             &RSPY_WorldHandle::is_pending,
             R"doc(

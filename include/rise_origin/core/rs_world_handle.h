@@ -173,9 +173,20 @@ class RS_WorldHandle {
      *****************************************************************/
     /**
      * @brief Query a named piece of world or system info as a string.
-     * @details One key resolves to one source. device_memory_used / device_memory_capacity and
-     * host_memory_used / host_memory_capacity report bytes; device_name reports the compute device
-     * as type:id such as cuda:0. An unknown key returns an empty string.
+     * @details One key resolves to one source. An unknown key returns an empty string.
+     * - device_memory_used / device_memory_capacity: device memory in bytes.
+     * - host_memory_used / host_memory_capacity: host memory in bytes.
+     * - device_name: the compute device as type:id such as cuda:0.
+     * - world_load: smoothed wall-clock time spent per second of advanced sim time, so 0.1 means
+     * the world runs ten times faster than real time, and empty while paused.
+     * - world_dynamic_voxel_num: number of dynamic voxels.
+     * - world_bvh_dynamic_voxel_num: number of voxels in the dynamic voxel BVH.
+     * - world_static_voxel_num: number of static voxels.
+     * - world_dynamic_rigid_body_num: number of dynamic rigid bodies.
+     * - world_static_rigid_body_num: number of static rigid bodies.
+     * - world_link_num: number of links.
+     * - world_constraint_joint_num: number of constraint joints.
+     * - world_contact_num: number of rigid body contacts.
      */
     virtual std::string getInfo(const std::string& info_name) = 0;
 
