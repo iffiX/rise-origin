@@ -32,16 +32,12 @@ class RSC_FloorBase : public RSC_EntityBase {
         return RSC_EntityBase::operator==(other) && material_reference == other.material_reference;
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_EntityBase::serialize(s);
-        s("material_reference", material_reference);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /**
@@ -58,17 +54,12 @@ class RSC_FloorFlat : public RSC_FloorBase {
 
     bool operator==(const RSC_FloorFlat& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_FloorBase::serialize(s);
-        s("height", height);
-        s("uv_scale", uv_scale);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -100,22 +91,12 @@ class RSC_FloorArray : public RSC_FloorBase {
 
     bool operator==(const RSC_FloorArray& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_FloorBase::serialize(s);
-        s("x_size", x_size);
-        s("y_size", y_size);
-        s("x_values", x_values);
-        s("y_values", y_values);
-        s("is_x_repeat", is_x_repeat);
-        s("is_y_repeat", is_y_repeat);
-        s("height", height);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

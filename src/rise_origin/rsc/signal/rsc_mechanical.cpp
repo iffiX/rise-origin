@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/signal/rsc_mechanical.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_util.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 
@@ -27,7 +28,7 @@ void RSC_Force::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_Force::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_Force::_read(const RS_RSCFileTreeReader &tree) {
     RSC_SignalBase::_read(tree);
     structure_name = tree.get<string>("structure_name");
     voxel_range = readBound3ri(tree, "voxel_range");
@@ -35,12 +36,28 @@ void RSC_Force::_read(const RS_RSCPropertyTreeReader &tree) {
     segment_bid = tree.get("segment_bid", segment_bid);
 }
 
-void RSC_Force::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_Force::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_SignalBase::_write(tree);
     tree.add("structure_name", structure_name);
     writeBound3ri(tree, "voxel_range", voxel_range);
     tree.add("body_sid", body_sid);
     tree.add("segment_bid", segment_bid);
+}
+
+void RSC_Force::_deserialize(RS_RSCArchive &archive) {
+    RSC_SignalBase::_deserialize(archive);
+    archive.deserialize("structure_name", structure_name);
+    archive.deserialize("voxel_range", voxel_range);
+    archive.deserialize("body_sid", body_sid);
+    archive.deserialize("segment_bid", segment_bid);
+}
+
+void RSC_Force::_serialize(RS_RSCArchive &archive) const {
+    RSC_SignalBase::_serialize(archive);
+    archive.serialize("structure_name", structure_name);
+    archive.serialize("voxel_range", voxel_range);
+    archive.serialize("body_sid", body_sid);
+    archive.serialize("segment_bid", segment_bid);
 }
 
 bool RSC_Torque::operator==(const RSC_Torque &other) const {
@@ -57,18 +74,32 @@ void RSC_Torque::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_Torque::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_Torque::_read(const RS_RSCFileTreeReader &tree) {
     RSC_SignalBase::_read(tree);
     structure_name = tree.get<string>("structure_name");
     body_sid = tree.get("body_sid", body_sid);
     segment_bid = tree.get("segment_bid", segment_bid);
 }
 
-void RSC_Torque::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_Torque::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_SignalBase::_write(tree);
     tree.add("structure_name", structure_name);
     tree.add("body_sid", body_sid);
     tree.add("segment_bid", segment_bid);
+}
+
+void RSC_Torque::_deserialize(RS_RSCArchive &archive) {
+    RSC_SignalBase::_deserialize(archive);
+    archive.deserialize("structure_name", structure_name);
+    archive.deserialize("body_sid", body_sid);
+    archive.deserialize("segment_bid", segment_bid);
+}
+
+void RSC_Torque::_serialize(RS_RSCArchive &archive) const {
+    RSC_SignalBase::_serialize(archive);
+    archive.serialize("structure_name", structure_name);
+    archive.serialize("body_sid", body_sid);
+    archive.serialize("segment_bid", segment_bid);
 }
 
 bool RSC_Transform::operator==(const RSC_Transform &other) const {
@@ -82,14 +113,24 @@ void RSC_Transform::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_Transform::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_Transform::_read(const RS_RSCFileTreeReader &tree) {
     RSC_SignalBase::_read(tree);
     structure_name = tree.get<string>("structure_name");
 }
 
-void RSC_Transform::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_Transform::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_SignalBase::_write(tree);
     tree.add("structure_name", structure_name);
+}
+
+void RSC_Transform::_deserialize(RS_RSCArchive &archive) {
+    RSC_SignalBase::_deserialize(archive);
+    archive.deserialize("structure_name", structure_name);
+}
+
+void RSC_Transform::_serialize(RS_RSCArchive &archive) const {
+    RSC_SignalBase::_serialize(archive);
+    archive.serialize("structure_name", structure_name);
 }
 
 }  // namespace rsc

@@ -10,3 +10,4 @@ openxr:                  1.1.60 (release-1.1.60, loader + headers)
 imgui:                   1.92.8
 cpp-httplib:             0.49.0
 stb_image_write:         1.16
+zstd:                    1.5.7

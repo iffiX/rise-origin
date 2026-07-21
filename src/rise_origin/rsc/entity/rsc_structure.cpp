@@ -8,6 +8,7 @@
 #include <unordered_map>
 
 #include "rise_origin/device/rs_dev_util.h"
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_util.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rise_origin/utils/rs_conf.h"
@@ -21,9 +22,25 @@ namespace rise {
 
 namespace rsc {
 
-void RSC_StructureBase::_read(const RS_RSCPropertyTreeReader &tree) { (void)tree; }
+void RSC_StructureBase::_read(const RS_RSCFileTreeReader &tree) { (void)tree; }
 
-void RSC_StructureBase::_write(RS_RSCPropertyTreeWriter &tree) const { (void)tree; }
+void RSC_StructureBase::_write(RS_RSCFileTreeWriter &tree) const { (void)tree; }
+
+void RSC_StructureBase::_deserialize(RS_RSCArchive &archive) {
+    RSC_EntityBase::_deserialize(archive);
+    archive.deserialize("origin_position", origin_position);
+    archive.deserialize("orientation", orientation);
+    archive.deserialize("material_references", material_references);
+    archive.deserialize("material_optical_references", material_optical_references);
+}
+
+void RSC_StructureBase::_serialize(RS_RSCArchive &archive) const {
+    RSC_EntityBase::_serialize(archive);
+    archive.serialize("origin_position", origin_position);
+    archive.serialize("orientation", orientation);
+    archive.serialize("material_references", material_references);
+    archive.serialize("material_optical_references", material_optical_references);
+}
 
 bool RSC_StructureVoxelBody::operator==(const RSC_StructureVoxelBody &other) const {
     return RSC_Base::operator==(other) &&
@@ -53,7 +70,8 @@ void RSC_StructureVoxelBody::_validate(RS_RSCValidator &validator) const {
         if (!material_optical_reference_mid.empty() &&
             material_optical_reference_mid.size() != voxel_num) {
             RS_THROW(RS_InvalidCharacterizationException(
-                "RSC_StructureVoxelBody material_optical_reference_mid must be empty or match voxel "
+                "RSC_StructureVoxelBody material_optical_reference_mid must be empty or match "
+                "voxel "
                 "count"
             ));
         }
@@ -81,9 +99,10 @@ void RSC_StructureVoxelBody::_validate(RS_RSCValidator &validator) const {
     });
     _validateNullSegment(validator);
     _validateLinkAdjacency(validator);
+    _validateExpansionControlModeValidity(validator);
 }
 
-void RSC_StructureVoxelBody::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_StructureVoxelBody::_read(const RS_RSCFileTreeReader &tree) {
     relative_origin_position = readVec3rf(tree, "relative_origin_position");
     relative_orientation = readQuat3rf(tree, "relative_orientation").normalized();
 
@@ -92,37 +111,20 @@ void RSC_StructureVoxelBody::_read(const RS_RSCPropertyTreeReader &tree) {
     z_voxels = tree.get<RSize>("z_voxels");
 
     RSize voxel_num = x_voxels * y_voxels * z_voxels;
-    RSize voxel_per_layer_num = x_voxels * y_voxels;
 
-    readIndexLayers(
-        tree, "material_reference_sid", voxel_num, voxel_per_layer_num, material_reference_sid, true
+    _readVoxelArray(tree, "material_reference_sid", voxel_num, material_reference_sid);
+    _readVoxelArray(
+        tree, "material_optical_reference_mid", voxel_num, material_optical_reference_mid
     );
-    readIndexLayers(
-        tree,
-        "material_optical_reference_mid",
-        voxel_num,
-        voxel_per_layer_num,
-        material_optical_reference_mid,
-        false
-    );
-    readIndexLayers(tree, "segment_bid", voxel_num, voxel_per_layer_num, segment_bid, true);
-    readIndexLayers(
-        tree, "expansion_signal_sid", voxel_num, voxel_per_layer_num, expansion_signal_sid, false
-    );
-    readEnumLayers(
-        tree,
-        "expansion_control_mode",
-        voxel_num,
-        voxel_per_layer_num,
-        expansion_control_mode,
-        false
-    );
-    readIndexLayers(tree, "link", voxel_num, voxel_per_layer_num, link, false);
+    _readVoxelArray(tree, "segment_bid", voxel_num, segment_bid);
+    _readVoxelArray(tree, "expansion_signal_sid", voxel_num, expansion_signal_sid);
+    _readVoxelArray(tree, "expansion_control_mode", voxel_num, expansion_control_mode);
+    _readVoxelArray(tree, "link", voxel_num, link);
 
     voxel_size = tree.get<RFloat>("voxel_size", 0);
 }
 
-void RSC_StructureVoxelBody::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_StructureVoxelBody::_write(RS_RSCFileTreeWriter &tree) const {
     writeVec3rf(tree, "relative_origin_position", relative_origin_position);
     writeQuat3rf(tree, "relative_orientation", relative_orientation);
 
@@ -130,18 +132,68 @@ void RSC_StructureVoxelBody::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("y_voxels", y_voxels);
     tree.add("z_voxels", z_voxels);
 
-    RSize voxel_per_layer_num = x_voxels * y_voxels;
-
-    writeIndexLayers(tree, "material_reference_sid", voxel_per_layer_num, material_reference_sid);
-    writeIndexLayers(
-        tree, "material_optical_reference_mid", voxel_per_layer_num, material_optical_reference_mid
-    );
-    writeIndexLayers(tree, "segment_bid", voxel_per_layer_num, segment_bid);
-    writeIndexLayers(tree, "expansion_signal_sid", voxel_per_layer_num, expansion_signal_sid);
-    writeEnumLayers(tree, "expansion_control_mode", voxel_per_layer_num, expansion_control_mode);
-    writeIndexLayers(tree, "link", voxel_per_layer_num, link);
+    _writeVoxelArray(tree, "material_reference_sid", material_reference_sid);
+    _writeVoxelArray(tree, "material_optical_reference_mid", material_optical_reference_mid);
+    _writeVoxelArray(tree, "segment_bid", segment_bid);
+    _writeVoxelArray(tree, "expansion_signal_sid", expansion_signal_sid);
+    _writeVoxelArray(tree, "expansion_control_mode", expansion_control_mode);
+    _writeVoxelArray(tree, "link", link);
 
     tree.add("voxel_size", voxel_size);
+}
+
+void RSC_StructureVoxelBody::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("relative_origin_position", relative_origin_position);
+    archive.deserialize("relative_orientation", relative_orientation);
+    archive.deserialize("x_voxels", x_voxels);
+    archive.deserialize("y_voxels", y_voxels);
+    archive.deserialize("z_voxels", z_voxels);
+    archive.deserialize("material_reference_sid", material_reference_sid);
+    archive.deserialize("material_optical_reference_mid", material_optical_reference_mid);
+    archive.deserialize("segment_bid", segment_bid);
+    archive.deserialize("expansion_signal_sid", expansion_signal_sid);
+    archive.deserialize("expansion_control_mode", expansion_control_mode);
+    archive.deserialize("link", link);
+    archive.deserialize("voxel_size", voxel_size);
+}
+
+void RSC_StructureVoxelBody::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("relative_origin_position", relative_origin_position);
+    archive.serialize("relative_orientation", relative_orientation);
+    archive.serialize("x_voxels", x_voxels);
+    archive.serialize("y_voxels", y_voxels);
+    archive.serialize("z_voxels", z_voxels);
+    archive.serialize("material_reference_sid", material_reference_sid);
+    archive.serialize("material_optical_reference_mid", material_optical_reference_mid);
+    archive.serialize("segment_bid", segment_bid);
+    archive.serialize("expansion_signal_sid", expansion_signal_sid);
+    archive.serialize("expansion_control_mode", expansion_control_mode);
+    archive.serialize("link", link);
+    archive.serialize("voxel_size", voxel_size);
+}
+
+template <typename T>
+void RSC_StructureVoxelBody::_readVoxelArray(
+    const RS_RSCFileTreeReader &tree,
+    const std::string &key,
+    RSize voxel_num,
+    std::vector<T> &out
+) {
+    if (!tree.hasChild(key)) {
+        out.clear();
+        return;
+    }
+    out.resize(voxel_num);
+    tree.getBulk(key, out.data(), {voxel_num});
+}
+
+template <typename T>
+void RSC_StructureVoxelBody::_writeVoxelArray(
+    RS_RSCFileTreeWriter &tree,
+    const std::string &key,
+    const std::vector<T> &data
+) {
+    if (!data.empty()) tree.addBulk(key, data.data(), {data.size()});
 }
 
 void RSC_StructureVoxelBody::_validateNullSegment(RS_RSCValidator &validator) const {
@@ -267,6 +319,47 @@ void RSC_StructureVoxelBody::_validateLinkAdjacency(RS_RSCValidator &validator) 
     });
 }
 
+void RSC_StructureVoxelBody::_validateExpansionControlModeValidity(
+    RS_RSCValidator &validator
+) const {
+    if (expansion_control_mode.empty()) return;
+    RSize mode_num = expansion_control_mode.size();
+    RSize thread_num = validator.getThreadPool().size();
+    RSize block_size =
+        RS_MAX(RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE, RS_CEIL_DIV(mode_num, thread_num));
+    RSize num_blocks = RS_CEIL_DIV(mode_num, block_size);
+    auto futures = std::make_shared<RS_MultiFuture<std::pair<bool, std::string>>>(
+        validator.getThreadPool().submitTaskSequence(
+            0,
+            num_blocks,
+            [this, mode_num, block_size](RIndex block) -> std::pair<bool, std::string> {
+                RSize lo = block * block_size;
+                RSize hi = RS_MIN(lo + block_size, mode_num);
+                for (RSize i = lo; i < hi; i++) {
+                    if (!isValidEnum(expansion_control_mode[i])) {
+                        return {
+                            false,
+                            format(
+                                "Voxel {:d} has invalid expansion_control_mode value {:d}",
+                                i,
+                                static_cast<int64_t>(expansion_control_mode[i])
+                            )
+                        };
+                    }
+                }
+                return {true, {}};
+            }
+        )
+    );
+    validator.submitValidator(
+        "RSC_StructureVoxelBody::_validateExpansionControlModeValidity", this, [futures] {
+            for (auto &[is_valid, message] : futures->get()) {
+                if (!is_valid) RS_THROW(RS_InvalidCharacterizationException(message));
+            }
+        }
+    );
+}
+
 bool RSC_StructureVoxelConstraint::operator==(const RSC_StructureVoxelConstraint &other) const {
     return RSC_Base::operator==(other) && type == other.type &&
            is_collision_enabled == other.is_collision_enabled && a_body_sid == other.a_body_sid &&
@@ -323,7 +416,7 @@ void RSC_StructureVoxelConstraint::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_StructureVoxelConstraint::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_StructureVoxelConstraint::_read(const RS_RSCFileTreeReader &tree) {
     type = readEnum<RSE_StructureVoxelConstraintType>(tree, "type");
     is_collision_enabled = tree.get<bool>("is_collision_enabled", is_collision_enabled);
     a_body_sid = tree.get<RIndex>("a_body_sid");
@@ -356,7 +449,7 @@ void RSC_StructureVoxelConstraint::_read(const RS_RSCPropertyTreeReader &tree) {
     }
 }
 
-void RSC_StructureVoxelConstraint::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_StructureVoxelConstraint::_write(RS_RSCFileTreeWriter &tree) const {
     writeEnum(tree, "type", type);
     tree.add("is_collision_enabled", is_collision_enabled);
     tree.add("a_body_sid", a_body_sid);
@@ -387,6 +480,62 @@ void RSC_StructureVoxelConstraint::_write(RS_RSCPropertyTreeWriter &tree) const 
     }
 }
 
+void RSC_StructureVoxelConstraint::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("type", type);
+    archive.deserialize("is_collision_enabled", is_collision_enabled);
+    archive.deserialize("a_body_sid", a_body_sid);
+    archive.deserialize("a_segment_bid", a_segment_bid);
+    archive.deserialize("b_body_sid", b_body_sid);
+    archive.deserialize("b_segment_bid", b_segment_bid);
+    archive.deserialize("relative_anchor", relative_anchor);
+    archive.deserialize("hinge_control_mode", hinge_control_mode);
+    archive.deserialize("hinge_relative_axis", hinge_relative_axis);
+    archive.deserialize("hinge_min", hinge_min);
+    archive.deserialize("hinge_max", hinge_max);
+    archive.deserialize("hinge_position_control_kp", hinge_position_control_kp);
+    archive.deserialize("hinge_position_control_kd", hinge_position_control_kd);
+    archive.deserialize("hinge_max_speed", hinge_max_speed);
+    archive.deserialize("hinge_max_torque", hinge_max_torque);
+    archive.deserialize("hinge_signal_sid", hinge_signal_sid);
+    archive.deserialize("prismatic_control_mode", prismatic_control_mode);
+    archive.deserialize("prismatic_relative_axis", prismatic_relative_axis);
+    archive.deserialize("prismatic_min", prismatic_min);
+    archive.deserialize("prismatic_max", prismatic_max);
+    archive.deserialize("prismatic_position_control_kp", prismatic_position_control_kp);
+    archive.deserialize("prismatic_position_control_kd", prismatic_position_control_kd);
+    archive.deserialize("prismatic_max_speed", prismatic_max_speed);
+    archive.deserialize("prismatic_max_force", prismatic_max_force);
+    archive.deserialize("prismatic_signal_sid", prismatic_signal_sid);
+}
+
+void RSC_StructureVoxelConstraint::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("type", type);
+    archive.serialize("is_collision_enabled", is_collision_enabled);
+    archive.serialize("a_body_sid", a_body_sid);
+    archive.serialize("a_segment_bid", a_segment_bid);
+    archive.serialize("b_body_sid", b_body_sid);
+    archive.serialize("b_segment_bid", b_segment_bid);
+    archive.serialize("relative_anchor", relative_anchor);
+    archive.serialize("hinge_control_mode", hinge_control_mode);
+    archive.serialize("hinge_relative_axis", hinge_relative_axis);
+    archive.serialize("hinge_min", hinge_min);
+    archive.serialize("hinge_max", hinge_max);
+    archive.serialize("hinge_position_control_kp", hinge_position_control_kp);
+    archive.serialize("hinge_position_control_kd", hinge_position_control_kd);
+    archive.serialize("hinge_max_speed", hinge_max_speed);
+    archive.serialize("hinge_max_torque", hinge_max_torque);
+    archive.serialize("hinge_signal_sid", hinge_signal_sid);
+    archive.serialize("prismatic_control_mode", prismatic_control_mode);
+    archive.serialize("prismatic_relative_axis", prismatic_relative_axis);
+    archive.serialize("prismatic_min", prismatic_min);
+    archive.serialize("prismatic_max", prismatic_max);
+    archive.serialize("prismatic_position_control_kp", prismatic_position_control_kp);
+    archive.serialize("prismatic_position_control_kd", prismatic_position_control_kd);
+    archive.serialize("prismatic_max_speed", prismatic_max_speed);
+    archive.serialize("prismatic_max_force", prismatic_max_force);
+    archive.serialize("prismatic_signal_sid", prismatic_signal_sid);
+}
+
 bool RSC_StructureVoxelRecord::operator==(const RSC_StructureVoxelRecord &other) const {
     return RSC_RecordBase::operator==(other) && voxel_record_range == other.voxel_record_range &&
            link_record_range == other.link_record_range &&
@@ -402,7 +551,7 @@ void RSC_StructureVoxelRecord::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_StructureVoxelRecord::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_StructureVoxelRecord::_read(const RS_RSCFileTreeReader &tree) {
     RSC_RecordBase::_read(tree);
     name = "default";
     voxel_record_range = readEnum<RSE_StructureVoxelRecordVoxelRange>(tree, "voxel_record_range");
@@ -414,7 +563,7 @@ void RSC_StructureVoxelRecord::_read(const RS_RSCPropertyTreeReader &tree) {
     link_sample_num = tree.get<RSize>("link_sample_num", link_sample_num);
 }
 
-void RSC_StructureVoxelRecord::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_StructureVoxelRecord::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_RecordBase::_write(tree);
     writeEnum(tree, "voxel_record_range", voxel_record_range);
     writeEnum(tree, "link_record_range", link_record_range);
@@ -422,6 +571,26 @@ void RSC_StructureVoxelRecord::_write(RS_RSCPropertyTreeWriter &tree) const {
     writeEnum(tree, "joint_record_range", joint_record_range);
     tree.add("voxel_sample_num", voxel_sample_num);
     tree.add("link_sample_num", link_sample_num);
+}
+
+void RSC_StructureVoxelRecord::_deserialize(RS_RSCArchive &archive) {
+    RSC_RecordBase::_deserialize(archive);
+    archive.deserialize("voxel_record_range", voxel_record_range);
+    archive.deserialize("link_record_range", link_record_range);
+    archive.deserialize("rigid_body_record_range", rigid_body_record_range);
+    archive.deserialize("joint_record_range", joint_record_range);
+    archive.deserialize("voxel_sample_num", voxel_sample_num);
+    archive.deserialize("link_sample_num", link_sample_num);
+}
+
+void RSC_StructureVoxelRecord::_serialize(RS_RSCArchive &archive) const {
+    RSC_RecordBase::_serialize(archive);
+    archive.serialize("voxel_record_range", voxel_record_range);
+    archive.serialize("link_record_range", link_record_range);
+    archive.serialize("rigid_body_record_range", rigid_body_record_range);
+    archive.serialize("joint_record_range", joint_record_range);
+    archive.serialize("voxel_sample_num", voxel_sample_num);
+    archive.serialize("link_sample_num", link_sample_num);
 }
 
 bool RSC_StructureVoxelSignal::operator==(const RSC_StructureVoxelSignal &other) const {
@@ -438,7 +607,7 @@ void RSC_StructureVoxelSignal::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_StructureVoxelSignal::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_StructureVoxelSignal::_read(const RS_RSCFileTreeReader &tree) {
     RSC_SignalBase::_read(tree);
     name = "default";
     expansion_signal_num = tree.get("expansion_signal_num", expansion_signal_num);
@@ -446,11 +615,25 @@ void RSC_StructureVoxelSignal::_read(const RS_RSCPropertyTreeReader &tree) {
     prismatic_signal_num = tree.get("prismatic_signal_num", prismatic_signal_num);
 }
 
-void RSC_StructureVoxelSignal::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_StructureVoxelSignal::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_SignalBase::_write(tree);
     tree.add("expansion_signal_num", expansion_signal_num);
     tree.add("hinge_signal_num", hinge_signal_num);
     tree.add("prismatic_signal_num", prismatic_signal_num);
+}
+
+void RSC_StructureVoxelSignal::_deserialize(RS_RSCArchive &archive) {
+    RSC_SignalBase::_deserialize(archive);
+    archive.deserialize("expansion_signal_num", expansion_signal_num);
+    archive.deserialize("hinge_signal_num", hinge_signal_num);
+    archive.deserialize("prismatic_signal_num", prismatic_signal_num);
+}
+
+void RSC_StructureVoxelSignal::_serialize(RS_RSCArchive &archive) const {
+    RSC_SignalBase::_serialize(archive);
+    archive.serialize("expansion_signal_num", expansion_signal_num);
+    archive.serialize("hinge_signal_num", hinge_signal_num);
+    archive.serialize("prismatic_signal_num", prismatic_signal_num);
 }
 
 bool RSC_StructureVoxel::operator==(const RSC_StructureVoxel &other) const {
@@ -493,9 +676,8 @@ void RSC_StructureVoxel::_validateMaterialReferences(RS_RSCValidator &validator)
             validator.getThreadPool().submitTaskSequence(
                 0,
                 num_blocks,
-                [bp, body_sid, material_limit, voxel_num, block_size, optical_counts](
-                    RIndex block
-                ) -> std::pair<bool, std::string> {
+                [bp, body_sid, material_limit, voxel_num, block_size, optical_counts](RIndex block)
+                    -> std::pair<bool, std::string> {
                     RSize lo = block * block_size;
                     RSize hi = RS_MIN(lo + block_size, voxel_num);
                     for (RSize i = lo; i < hi; i++) {
@@ -518,7 +700,8 @@ void RSC_StructureVoxel::_validateMaterialReferences(RS_RSCValidator &validator)
                             m >= optical_counts.size()) {
                             continue;
                         }
-                        // A material with no declared optical list still admits mid 0 (its default).
+                        // A material with no declared optical list still admits mid 0 (its
+                        // default).
                         RSize optical_limit = optical_counts[m] > 0 ? optical_counts[m] : 1;
                         if (o >= optical_limit) {
                             return {
@@ -727,38 +910,28 @@ void RSC_StructureVoxel::_validateConstraintSignals(RS_RSCValidator &validator) 
     );
 }
 
-void RSC_StructureVoxel::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_StructureVoxel::_read(const RS_RSCFileTreeReader &tree) {
     RSC_EntityBase::_read(tree);
     is_fixed = tree.get("is_fixed", is_fixed);
     origin_position = readVec3rf(tree, "origin_position");
     orientation = readQuat3rf(tree, "orientation");
     material_references = tree.get<std::vector<std::string>>("material_references");
-    if (tree.isChildExist("material_optical_references")) {
+    if (tree.hasChild("material_optical_references")) {
         material_optical_references =
             tree.get<std::vector<std::vector<std::string>>>("material_optical_references");
     }
 
-    for (auto &element : tree.getArray("bodies")) {
-        RSC_StructureVoxelBody body;
-        body.read(element);
-        bodies.push_back(body);
+    bodies.read(tree, "bodies");
+    constraints.read(tree, "constraints");
+    if (tree.hasChild("record")) {
+        record.read(tree, "record");
     }
-    if (tree.isChildExist("constraints")) {
-        for (auto &element : tree.getArray("constraints")) {
-            RSC_StructureVoxelConstraint constraint;
-            constraint.read(element);
-            constraints.push_back(constraint);
-        }
-    }
-    if (tree.isChildExist("record")) {
-        record->read(tree.getChild("record"));
-    }
-    if (tree.isChildExist("signal")) {
-        signal->read(tree.getChild("signal"));
+    if (tree.hasChild("signal")) {
+        signal.read(tree, "signal");
     }
 }
 
-void RSC_StructureVoxel::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_StructureVoxel::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_EntityBase::_write(tree);
     tree.add("is_fixed", is_fixed);
     writeVec3rf(tree, "origin_position", origin_position);
@@ -768,16 +941,28 @@ void RSC_StructureVoxel::_write(RS_RSCPropertyTreeWriter &tree) const {
         tree.add("material_optical_references", material_optical_references);
     }
 
-    {
-        auto bodies_array = tree.addArray("bodies");
-        for (auto &body : bodies) body.write(bodies_array.add());
-    }
-    {
-        auto constraints_array = tree.addArray("constraints");
-        for (auto &constraint : constraints) constraint.write(constraints_array.add());
-    }
-    record->write(tree.addChild("record"));
-    signal->write(tree.addChild("signal"));
+    bodies.write(tree, "bodies");
+    constraints.write(tree, "constraints");
+    record.write(tree, "record");
+    signal.write(tree, "signal");
+}
+
+void RSC_StructureVoxel::_deserialize(RS_RSCArchive &archive) {
+    RSC_StructureBase::_deserialize(archive);
+    archive.deserialize("is_fixed", is_fixed);
+    archive.deserializeShared("bodies", bodies);
+    archive.deserializeShared("constraints", constraints);
+    archive.deserializeShared("record", record);
+    archive.deserializeShared("signal", signal);
+}
+
+void RSC_StructureVoxel::_serialize(RS_RSCArchive &archive) const {
+    RSC_StructureBase::_serialize(archive);
+    archive.serialize("is_fixed", is_fixed);
+    archive.serializeShared("bodies", bodies);
+    archive.serializeShared("constraints", constraints);
+    archive.serializeShared("record", record);
+    archive.serializeShared("signal", signal);
 }
 
 void RSC_StructureVoxel::_deepCopyShared(MemoRef memo) {

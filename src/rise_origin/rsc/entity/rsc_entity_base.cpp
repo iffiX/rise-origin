@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/entity/rsc_entity_base.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 
 namespace rise {
@@ -19,11 +20,15 @@ void RSC_EntityBase::_validate(RS_RSCValidator& validator) const {
     });
 }
 
-void RSC_EntityBase::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_EntityBase::_read(const RS_RSCFileTreeReader& tree) {
     name = tree.get<std::string>("name", name);
 }
 
-void RSC_EntityBase::_write(RS_RSCPropertyTreeWriter& tree) const { tree.add("name", name); }
+void RSC_EntityBase::_write(RS_RSCFileTreeWriter& tree) const { tree.add("name", name); }
+
+void RSC_EntityBase::_deserialize(RS_RSCArchive& archive) { archive.deserialize("name", name); }
+
+void RSC_EntityBase::_serialize(RS_RSCArchive& archive) const { archive.serialize("name", name); }
 
 }  // namespace rsc
 

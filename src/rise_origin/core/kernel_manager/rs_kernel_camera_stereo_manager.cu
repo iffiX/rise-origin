@@ -141,9 +141,7 @@ RS_KernelCameraStereoManager::RS_KernelCameraStereoManager(
         _camera_aux_endpoint_material_type[eye].fill(RSE_VISION_MATERIAL_OPAQUE, false);
         _camera_aux_endpoint_screen_motion[eye].fill(RVec2f::zero(), false);
         _camera_aux_chain_throughput[eye].fill(RVec3f::one(), false);
-        _camera_aux_chain_terminal_type[eye].fill(
-            RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE, false
-        );
+        _camera_aux_chain_terminal_type[eye].fill(RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE, false);
         _camera_prev_reservoir_di[eye].fill(logic::RS_ReservoirDI{}, false);
         _camera_current_reservoir_di[eye].fill(logic::RS_ReservoirDI{}, false);
         _camera_prev_reservoir_gi[eye].fill(logic::RS_ReservoirGI{}, false);
@@ -177,7 +175,9 @@ RS_KernelCameraStereoManager::RS_KernelCameraStereoManager(
         1
     );
     for (RIndex eye = 0; eye < 2; ++eye) {
-        _recorder_buffer[eye].init(buffer_frame_num, buffer_frame_num * frame_size, memory_provider);
+        _recorder_buffer[eye].init(
+            buffer_frame_num, buffer_frame_num * frame_size, memory_provider
+        );
         _controller_buffer[eye].init(frame_size, memory_provider);
     }
 
@@ -275,9 +275,7 @@ std::vector<RS_WorldCameraStereoRecord> RS_KernelCameraStereoManager::getRecorde
     return records;
 }
 
-bool RS_KernelCameraStereoManager::hasControllerSignal() {
-    return _rsc.is<RSC_CameraStereoFree>();
-}
+bool RS_KernelCameraStereoManager::hasControllerSignal() { return _rsc.is<RSC_CameraStereoFree>(); }
 
 void RS_KernelCameraStereoManager::syncControllerSignal() {
     if (hasControllerSignal()) {
@@ -331,23 +329,23 @@ std::string RS_KernelCameraStereoManager::getEntityName() const {
 }
 
 std::string RS_KernelCameraStereoManager::getRecordName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.record.name; });
+    return _rsc.visit([](auto& c) -> std::string { return c.record->name; });
 }
 
 std::string RS_KernelCameraStereoManager::getSignalName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.signal.name; });
+    return _rsc.visit([](auto& c) -> std::string { return c.signal->name; });
 }
 
 std::string RS_KernelCameraStereoManager::getRecordControllerName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.record.target_controller_reference; });
+    return _rsc.visit([](auto& c) -> std::string { return c.record->target_controller_reference; });
 }
 
 std::string RS_KernelCameraStereoManager::getRecordRecorderName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.record.target_recorder_reference; });
+    return _rsc.visit([](auto& c) -> std::string { return c.record->target_recorder_reference; });
 }
 
 std::string RS_KernelCameraStereoManager::getSignalControllerName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.signal.source_controller_reference; });
+    return _rsc.visit([](auto& c) -> std::string { return c.signal->source_controller_reference; });
 }
 
 RIndex RS_KernelCameraStereoManager::getEntityGid() const { return _entity_registration.gid(); }
@@ -409,7 +407,7 @@ void RS_KernelCameraStereoManager::_initKernelData() {
         using CameraMemType = RS_CameraMem<ContextType::FloatMemAccuracy>;
 
         const auto& base_rsc = _base();
-        const auto& record_rsc = base_rsc.record;
+        const auto& record_rsc = *base_rsc.record;
         bool is_rigid = _rsc.is<RSC_CameraStereoRigidBodyLinked>();
 
         // The head pose places the two eyes; for a free camera it is the origin pose, for a
@@ -530,9 +528,11 @@ void RS_KernelCameraStereoManager::_initKernelData() {
             ctx.camera_denoiser_moment_history.append(_camera_denoiser_moment_history[eye]);
             ctx.camera_denoiser_history_length.append(_camera_denoiser_history_length[eye]);
             ctx.camera_prev_denoiser_color_history.append(_camera_prev_denoiser_color_history[eye]);
-            ctx.camera_prev_denoiser_moment_history.append(_camera_prev_denoiser_moment_history[eye]
+            ctx.camera_prev_denoiser_moment_history.append(
+                _camera_prev_denoiser_moment_history[eye]
             );
-            ctx.camera_prev_denoiser_history_length.append(_camera_prev_denoiser_history_length[eye]
+            ctx.camera_prev_denoiser_history_length.append(
+                _camera_prev_denoiser_history_length[eye]
             );
             ctx.camera_denoiser_variance.append(_camera_denoiser_variance[eye]);
             ctx.camera_next_denoiser_variance.append(_camera_next_denoiser_variance[eye]);
@@ -545,9 +545,11 @@ void RS_KernelCameraStereoManager::_initKernelData() {
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
         ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
         ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
-        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(
+            ctx.camera_normal_record_layout
         );
-        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(
+            ctx.camera_motion_record_layout
         );
         ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
             ctx.camera_entity_info_record_layout
@@ -559,18 +561,16 @@ void RS_KernelCameraStereoManager::_initKernelData() {
 
         if (hasControllerSignal()) {
             // Seed initial per-eye poses into the host signal buffer.
-            _host_signal.left_position_signals.position[0] =
-                head_position - unit_right * half_ipd;
-            _host_signal.right_position_signals.position[0] =
-                head_position + unit_right * half_ipd;
+            _host_signal.left_position_signals.position[0] = head_position - unit_right * half_ipd;
+            _host_signal.right_position_signals.position[0] = head_position + unit_right * half_ipd;
             _host_signal.left_orientation_signals.orientation[0] = head_orientation;
             _host_signal.right_orientation_signals.orientation[0] = head_orientation;
 
             // Seed both eyes with the configured frustum angles, ordered left, right, up, down. The
             // VR client overwrites them with the headset's real per-eye angles each step.
             for (RIndex eye = 0; eye < 2; ++eye) {
-                auto& optics =
-                    (eye == 0) ? _host_signal.left_optics_signals : _host_signal.right_optics_signals;
+                auto& optics = (eye == 0) ? _host_signal.left_optics_signals
+                                          : _host_signal.right_optics_signals;
                 optics.field_of_view[0] = base_rsc.angle_left;
                 optics.field_of_view[1] = base_rsc.angle_right;
                 optics.field_of_view[2] = base_rsc.angle_up;
@@ -590,13 +590,11 @@ void RS_KernelCameraStereoManager::_initKernelData() {
                     ctx.host_data->structure_rigid_body_layout.find(_structure_reference.gid())
                 );
                 for (RIndex eye = 0; eye < 2; ++eye) {
-                    RIndex camera_index = ctx.host_data->camera_layout.find(
-                        makeCameraSegmentGid(entity_gid, eye)
-                    );
+                    RIndex camera_index =
+                        ctx.host_data->camera_layout.find(makeCameraSegmentGid(entity_gid, eye));
                     p_ptr->template run<RSCF_LaunchDirect<
-                        RSCF_ResolveRigidBodyLinkedStereoCameraDependency, KernelType>>(
-                        {1}, camera_index, rigid_body_offset
-                    );
+                        RSCF_ResolveRigidBodyLinkedStereoCameraDependency,
+                        KernelType>>({1}, camera_index, rigid_body_offset);
                 }
             });
         }
@@ -697,9 +695,11 @@ void RS_KernelCameraStereoManager::_freeKernelData() {
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
         ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
         ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
-        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(
+            ctx.camera_normal_record_layout
         );
-        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(
+            ctx.camera_motion_record_layout
         );
         ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
             ctx.camera_entity_info_record_layout
@@ -812,9 +812,11 @@ void RS_KernelCameraStereoManager::_freezeKernelData(bool is_freeze) {
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
         ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
         ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
-        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(
+            ctx.camera_normal_record_layout
         );
-        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(
+            ctx.camera_motion_record_layout
         );
         ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
             ctx.camera_entity_info_record_layout

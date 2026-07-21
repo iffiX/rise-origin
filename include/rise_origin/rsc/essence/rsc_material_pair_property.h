@@ -34,17 +34,12 @@ class RSC_MaterialPairPropertyBase : public RSC_EssenceBase {
                second_material_reference == other.second_material_reference;
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_EssenceBase::serialize(s);
-        s("first_material_reference", first_material_reference);
-        s("second_material_reference", second_material_reference);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
-    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
+    void _read(const RS_RSCFileTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCFileTreeWriter& tree) const override { (void)tree; }
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /**
@@ -60,17 +55,12 @@ class RSC_MaterialPairPropertyCoulombFriction : public RSC_MaterialPairPropertyB
 
     bool operator==(const RSC_MaterialPairPropertyCoulombFriction& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialPairPropertyBase::serialize(s);
-        s("u_static", u_static);
-        s("u_dynamic", u_dynamic);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -84,16 +74,12 @@ class RSC_MaterialPairPropertyRestitution : public RSC_MaterialPairPropertyBase 
 
     bool operator==(const RSC_MaterialPairPropertyRestitution& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialPairPropertyBase::serialize(s);
-        s("restitution", restitution);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

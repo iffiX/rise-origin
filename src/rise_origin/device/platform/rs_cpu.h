@@ -339,7 +339,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                 },
                 RS_DEVICE_CPU_THREAD_POOL_TASK_TO_THREAD_RATIO * pool->size()
             );
-            if (config.sync || RS_EnvironmentVariables::getInstance().isExecForceSync())
+            if (config.sync || RS_EnvironmentVariables::isExecForceSync())
                 pool->wait();
 
             if (isExecLogging()) execTraceEnd(exec_timer);
@@ -466,7 +466,7 @@ class RS_MemoryCPUProvider final : public RS_MemoryProvider {
                 },
                 RS_DEVICE_CPU_THREAD_POOL_TASK_TO_THREAD_RATIO * pool->size()
             );
-            if (config.sync || RS_EnvironmentVariables::getInstance().isExecForceSync())
+            if (config.sync || RS_EnvironmentVariables::isExecForceSync())
                 pool->wait();
 
             if (isExecLogging()) execTraceEnd(exec_timer);

@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/record/rsc_intersect_region.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 
 namespace rise {
@@ -23,12 +24,26 @@ void RSC_IntersectRegionCuboid::_validate(RS_RSCValidator& validator) const {
     });
 }
 
-void RSC_IntersectRegionCuboid::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_IntersectRegionCuboid::_read(const RS_RSCFileTreeReader& tree) {
     RSC_RecordBase::_read(tree);
 }
 
-void RSC_IntersectRegionCuboid::_write(RS_RSCPropertyTreeWriter& tree) const {
+void RSC_IntersectRegionCuboid::_write(RS_RSCFileTreeWriter& tree) const {
     RSC_RecordBase::_write(tree);
+}
+
+void RSC_IntersectRegionCuboid::_deserialize(RS_RSCArchive& archive) {
+    RSC_RecordBase::_deserialize(archive);
+    archive.deserialize("position", position);
+    archive.deserialize("orientation", orientation);
+    archive.deserialize("size", size);
+}
+
+void RSC_IntersectRegionCuboid::_serialize(RS_RSCArchive& archive) const {
+    RSC_RecordBase::_serialize(archive);
+    archive.serialize("position", position);
+    archive.serialize("orientation", orientation);
+    archive.serialize("size", size);
 }
 
 bool RSC_IntersectRegionCuboidRigidBodyLinked::operator==(
@@ -52,12 +67,32 @@ void RSC_IntersectRegionCuboidRigidBodyLinked::_validate(RS_RSCValidator& valida
     );
 }
 
-void RSC_IntersectRegionCuboidRigidBodyLinked::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_IntersectRegionCuboidRigidBodyLinked::_read(const RS_RSCFileTreeReader& tree) {
     RSC_RecordBase::_read(tree);
 }
 
-void RSC_IntersectRegionCuboidRigidBodyLinked::_write(RS_RSCPropertyTreeWriter& tree) const {
+void RSC_IntersectRegionCuboidRigidBodyLinked::_write(RS_RSCFileTreeWriter& tree) const {
     RSC_RecordBase::_write(tree);
+}
+
+void RSC_IntersectRegionCuboidRigidBodyLinked::_deserialize(RS_RSCArchive& archive) {
+    RSC_RecordBase::_deserialize(archive);
+    archive.deserialize("structure_name", structure_name);
+    archive.deserialize("body_sid", body_sid);
+    archive.deserialize("segment_bid", segment_bid);
+    archive.deserialize("relative_anchor", relative_anchor);
+    archive.deserialize("relative_orientation", relative_orientation);
+    archive.deserialize("size", size);
+}
+
+void RSC_IntersectRegionCuboidRigidBodyLinked::_serialize(RS_RSCArchive& archive) const {
+    RSC_RecordBase::_serialize(archive);
+    archive.serialize("structure_name", structure_name);
+    archive.serialize("body_sid", body_sid);
+    archive.serialize("segment_bid", segment_bid);
+    archive.serialize("relative_anchor", relative_anchor);
+    archive.serialize("relative_orientation", relative_orientation);
+    archive.serialize("size", size);
 }
 
 bool RSC_IntersectRegionSphere::operator==(const RSC_IntersectRegionSphere& other) const {
@@ -72,12 +107,24 @@ void RSC_IntersectRegionSphere::_validate(RS_RSCValidator& validator) const {
     });
 }
 
-void RSC_IntersectRegionSphere::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_IntersectRegionSphere::_read(const RS_RSCFileTreeReader& tree) {
     RSC_RecordBase::_read(tree);
 }
 
-void RSC_IntersectRegionSphere::_write(RS_RSCPropertyTreeWriter& tree) const {
+void RSC_IntersectRegionSphere::_write(RS_RSCFileTreeWriter& tree) const {
     RSC_RecordBase::_write(tree);
+}
+
+void RSC_IntersectRegionSphere::_deserialize(RS_RSCArchive& archive) {
+    RSC_RecordBase::_deserialize(archive);
+    archive.deserialize("position", position);
+    archive.deserialize("radius", radius);
+}
+
+void RSC_IntersectRegionSphere::_serialize(RS_RSCArchive& archive) const {
+    RSC_RecordBase::_serialize(archive);
+    archive.serialize("position", position);
+    archive.serialize("radius", radius);
 }
 
 bool RSC_IntersectRegionSphereRigidBodyLinked::operator==(
@@ -98,12 +145,30 @@ void RSC_IntersectRegionSphereRigidBodyLinked::_validate(RS_RSCValidator& valida
     );
 }
 
-void RSC_IntersectRegionSphereRigidBodyLinked::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_IntersectRegionSphereRigidBodyLinked::_read(const RS_RSCFileTreeReader& tree) {
     RSC_RecordBase::_read(tree);
 }
 
-void RSC_IntersectRegionSphereRigidBodyLinked::_write(RS_RSCPropertyTreeWriter& tree) const {
+void RSC_IntersectRegionSphereRigidBodyLinked::_write(RS_RSCFileTreeWriter& tree) const {
     RSC_RecordBase::_write(tree);
+}
+
+void RSC_IntersectRegionSphereRigidBodyLinked::_deserialize(RS_RSCArchive& archive) {
+    RSC_RecordBase::_deserialize(archive);
+    archive.deserialize("structure_name", structure_name);
+    archive.deserialize("body_sid", body_sid);
+    archive.deserialize("segment_bid", segment_bid);
+    archive.deserialize("relative_anchor", relative_anchor);
+    archive.deserialize("radius", radius);
+}
+
+void RSC_IntersectRegionSphereRigidBodyLinked::_serialize(RS_RSCArchive& archive) const {
+    RSC_RecordBase::_serialize(archive);
+    archive.serialize("structure_name", structure_name);
+    archive.serialize("body_sid", body_sid);
+    archive.serialize("segment_bid", segment_bid);
+    archive.serialize("relative_anchor", relative_anchor);
+    archive.serialize("radius", radius);
 }
 
 }  // namespace rsc

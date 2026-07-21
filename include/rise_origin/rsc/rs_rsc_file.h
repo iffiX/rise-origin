@@ -4,22 +4,25 @@
 #ifndef RS_RSC_FILE_H
 #define RS_RSC_FILE_H
 
+#include <cstdint>
 #include <string>
 #include <typeinfo>
 #include <vector>
 
-#include "rise_origin/utils/interchange/rs_json.h"
-#include "rise_origin/utils/rs_conf.h"
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/version/rs_version.h"
-#include "rs_rsc_property_tree_reader.h"
-#include "rs_rsc_property_tree_writer.h"
+#include "rs_rsc_file_tree_context.h"
+#include "rs_rsc_file_tree_reader.h"
+#include "rs_rsc_file_tree_writer.h"
 #include "rs_rsc_registry.h"
 #include "rsc_base.h"
 
 namespace rise {
 
 namespace rsc {
+
+/// Magic guard at the head of every binary RSC file, the four bytes "RSCB".
+constexpr uint32_t RS_RSCB_MAGIC = 0x52534342u;
 
 /**
  * @brief On disk format of an RSC file, chosen by file extension.
@@ -48,7 +51,7 @@ struct RS_RSCFileHeader {
     /**
      * @brief Read the header fields from a reader.
      */
-    void read(const RS_RSCPropertyTreeReader &tree) {
+    void read(const RS_RSCFileTreeReader &tree) {
         magic = tree.get<std::string>("magic");
         edition = tree.get<std::string>("edition");
         rsc_version.fromString(tree.get<std::string>("rsc_version"));
@@ -59,7 +62,7 @@ struct RS_RSCFileHeader {
     /**
      * @brief Write the header fields to a writer.
      */
-    void write(RS_RSCPropertyTreeWriter tree) const {
+    void write(RS_RSCFileTreeWriter tree) const {
         tree.add("magic", magic);
         tree.add("edition", edition);
         tree.add("rsc_version", rsc_version.toString());
@@ -70,18 +73,22 @@ struct RS_RSCFileHeader {
 
 /**
  * @brief Durable save and load of any RSC node, in the text or binary format.
- * @details Holds a node as { header, body }, writes identity and version, and checks and
- * migrates on load. The format is picked from the path extension, .rsct for text and .rscb
- * for binary.
+ * @details Holds a node as { header, shared, body }, writes identity and version, and gates and
+ * migrates on load. The format is picked from the path extension, .rsct for text and .rscb for
+ * binary. The per operation state is a stack local context, which for .rscb also owns the packer
+ * or unpacker moved in from the file pool.
  */
 class RS_RSCFile {
    public:
     /**
      * @brief Save a node to path, format chosen by extension.
+     * @param node The node to save.
+     * @param path The destination path, .rsct for text or .rscb for binary.
+     * @param is_compressing Whether the binary format compresses its fields, ignored for text.
      */
     template <typename T>
-    static void save(const T &node, const std::string &path) {
-        _writeFile(path, _toBytes(node, _formatOfPath(path)));
+    static void save(const T &node, const std::string &path, bool is_compressing = true) {
+        saveAny(node, path, is_compressing);
     }
 
     /**
@@ -89,13 +96,27 @@ class RS_RSCFile {
      */
     template <typename T>
     static T load(const std::string &path) {
-        return _fromBytes<T>(_readFile(path), _formatOfPath(path));
+        RS_RSCFileTreeReadContext context;
+        RS_RSCFileHeader header = _open(context, path);
+        std::string expected = RS_RSCRegistry::getName(typeid(T));
+        if (header.type != expected) {
+            RS_THROW(RS_InvalidCharacterizationException(
+                "RSC file holds {} but {} was requested", header.type, expected
+            ));
+        }
+        RS_RSCFileTreeReader reader(context);
+        T node;
+        node.read(reader.getChild("body"));
+        return node;
     }
 
     /**
      * @brief Save a node to path.
+     * @param node The node to save.
+     * @param path The destination path, .rsct for text or .rscb for binary.
+     * @param is_compressing Whether the binary format compresses its fields, ignored for text.
      */
-    static void saveAny(const RSC_Base &node, const std::string &path);
+    static void saveAny(const RSC_Base &node, const std::string &path, bool is_compressing = true);
 
     /**
      * @brief Load a node from path.
@@ -119,27 +140,12 @@ class RS_RSCFile {
     static RSE_RSCFileFormat _formatOfPath(const std::string &path);
 
     /**
-     * @brief Encode a document to bytes in the given format.
+     * @brief Begin a load, filling the context root, gating, and migrating, returning the header.
      */
-    static std::vector<uint8_t> _encode(const RS_JSON &root, RSE_RSCFileFormat format);
+    static RS_RSCFileHeader _open(RS_RSCFileTreeReadContext &context, const std::string &path);
 
     /**
-     * @brief Decode a document from bytes in the given format.
-     */
-    static RS_JSON _decode(const std::vector<uint8_t> &bytes, RSE_RSCFileFormat format);
-
-    /**
-     * @brief Read a whole file as bytes.
-     */
-    static std::vector<uint8_t> _readFile(const std::string &path);
-
-    /**
-     * @brief Write bytes to a whole file.
-     */
-    static void _writeFile(const std::string &path, const std::vector<uint8_t> &bytes);
-
-    /**
-     * @brief Check magic, edition, and that the version is readable, throwing otherwise.
+     * @brief Check magic and edition, throwing otherwise. The version never locks a read.
      */
     static void _gate(const RS_RSCFileHeader &header);
 
@@ -149,50 +155,30 @@ class RS_RSCFile {
     static void _migrate(RS_JSON &body, const RS_Version &from);
 
     /**
-     * @brief Build the document bytes for a node in the given format.
+     * @brief Finish a save, writing the text file or packing the binary file.
      */
-    template <typename T>
-    static std::vector<uint8_t> _toBytes(const T &node, RSE_RSCFileFormat format) {
-        RS_RSCPropertyTreeWriter writer(currentVersion());
-        RS_RSCFileHeader header;
-        header.magic = "RSC";
-        header.edition = RS_RSC_EDITION;
-        header.rsc_version = currentVersion();
-        header.engine_version = engineVersion();
-        header.type = RS_RSCRegistry::getInstance().getName(typeid(node));
-        header.write(writer.addChild("header"));
-        node.write(writer.addChild("body"));
-        return _encode(*writer.root, format);
-    }
+    static void
+    _commit(RS_RSCFileTreeWriteContext &context, const std::string &path, RSE_RSCFileFormat format);
 
     /**
-     * @brief Decode, gate, migrate, verify the type, and read a node of type T.
+     * @brief Parse the root document from a text file.
      */
-    template <typename T>
-    static T _fromBytes(const std::vector<uint8_t> &bytes, RSE_RSCFileFormat format) {
-        RS_JSON root = _decode(bytes, format);
-        RS_RSCPropertyTreeReader root_reader(root);
-        RS_RSCFileHeader header;
-        header.read(root_reader.getChild("header"));
-        _gate(header);
+    static RS_JSON _readTextFile(const std::string &path);
 
-        RS_JSON &body = root.at("body");
-        if (header.rsc_version < currentVersion()) {
-            _migrate(body, header.rsc_version);
-        }
+    /**
+     * @brief Write the root document to a text file as pretty JSON.
+     */
+    static void _writeTextFile(const std::string &path, const RS_JSON &root);
 
-        std::string expected = RS_RSCRegistry::getInstance().getName(typeid(T));
-        if (header.type != expected) {
-            RS_THROW(RS_InvalidCharacterizationException(
-                "RSC file holds {} but {} was requested", header.type, expected
-            ));
-        }
+    /**
+     * @brief Unpack a binary file into the context, returning its root document from the meta.
+     */
+    static RS_JSON _readBinaryFile(const std::string &path, RS_RSCFileTreeReadContext &context);
 
-        T node;
-        RS_RSCPropertyTreeReader reader(body, header.rsc_version);
-        node.read(reader);
-        return node;
-    }
+    /**
+     * @brief Pack the context to a binary file, extracting the root as meta and bulk as fields.
+     */
+    static void _writeBinaryFile(const std::string &path, RS_RSCFileTreeWriteContext &context);
 };
 
 }  // namespace rsc

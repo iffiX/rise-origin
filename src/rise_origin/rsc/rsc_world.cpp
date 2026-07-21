@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/rsc_world.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_file.h"
 #include "rise_origin/rsc/rs_rsc_registry.h"
 
@@ -11,7 +12,6 @@ namespace rise {
 namespace rsc {
 
 void RSC_World::assembleFrom(const std::vector<std::string> &paths) {
-    auto &registry = RS_RSCRegistry::getInstance();
     for (const auto &path : paths) {
         RSCRef<RSC_Base> node = RS_RSCFile::loadAny(path);
 
@@ -28,37 +28,37 @@ void RSC_World::assembleFrom(const std::vector<std::string> &paths) {
         }
 
         RSC_ResourceVariant resource;
-        if (registry.tryAssign(resource, node)) {
+        if (RS_RSCRegistry::tryAssign(resource, node)) {
             resources.push_back(resource);
             continue;
         }
         RSC_EssenceVariant essence;
-        if (registry.tryAssign(essence, node)) {
+        if (RS_RSCRegistry::tryAssign(essence, node)) {
             essences.push_back(essence);
             continue;
         }
         RSC_EntityVariant entity;
-        if (registry.tryAssign(entity, node)) {
+        if (RS_RSCRegistry::tryAssign(entity, node)) {
             entities.push_back(entity);
             continue;
         }
         RSC_RecordVariant record;
-        if (registry.tryAssign(record, node)) {
+        if (RS_RSCRegistry::tryAssign(record, node)) {
             records.push_back(record);
             continue;
         }
         RSC_SignalVariant signal;
-        if (registry.tryAssign(signal, node)) {
+        if (RS_RSCRegistry::tryAssign(signal, node)) {
             signals.push_back(signal);
             continue;
         }
         RSC_RecorderVariant recorder;
-        if (registry.tryAssign(recorder, node)) {
+        if (RS_RSCRegistry::tryAssign(recorder, node)) {
             recorders.push_back(recorder);
             continue;
         }
         RSC_ControllerVariant controller;
-        if (registry.tryAssign(controller, node)) {
+        if (RS_RSCRegistry::tryAssign(controller, node)) {
             controllers.push_back(controller);
             continue;
         }
@@ -87,85 +87,101 @@ void RSC_World::_validate(RS_RSCValidator &validator) const {
     for (auto &c : controllers) c.visit([&](const auto &v) { v.validate(validator); });
 }
 
-void RSC_World::_read(const RS_RSCPropertyTreeReader &tree) {
-    auto &registry = RS_RSCRegistry::getInstance();
+void RSC_World::_read(const RS_RSCFileTreeReader &tree) {
     name = tree.get<std::string>("name", name);
-    simulation = nullptr;
-    if (tree.isChildExist("simulation")) {
-        simulation = RSC_Simulation();
-        simulation->read(tree.getChild("simulation"));
-    }
+    simulation.read(tree, "simulation");
     for (const auto &element : tree.getArray("resources")) {
         RSC_ResourceVariant value;
-        registry.read(value, element);
+        RS_RSCRegistry::read(value, element);
         resources.push_back(value);
     }
     for (const auto &element : tree.getArray("essences")) {
         RSC_EssenceVariant value;
-        registry.read(value, element);
+        RS_RSCRegistry::read(value, element);
         essences.push_back(value);
     }
     for (const auto &element : tree.getArray("entities")) {
         RSC_EntityVariant value;
-        registry.read(value, element);
+        RS_RSCRegistry::read(value, element);
         entities.push_back(value);
     }
     for (const auto &element : tree.getArray("records")) {
         RSC_RecordVariant value;
-        registry.read(value, element);
+        RS_RSCRegistry::read(value, element);
         records.push_back(value);
     }
     for (const auto &element : tree.getArray("signals")) {
         RSC_SignalVariant value;
-        registry.read(value, element);
+        RS_RSCRegistry::read(value, element);
         signals.push_back(value);
     }
     for (const auto &element : tree.getArray("recorders")) {
         RSC_RecorderVariant value;
-        registry.read(value, element);
+        RS_RSCRegistry::read(value, element);
         recorders.push_back(value);
     }
     for (const auto &element : tree.getArray("controllers")) {
         RSC_ControllerVariant value;
-        registry.read(value, element);
+        RS_RSCRegistry::read(value, element);
         controllers.push_back(value);
     }
 }
 
-void RSC_World::_write(RS_RSCPropertyTreeWriter &tree) const {
-    auto &registry = RS_RSCRegistry::getInstance();
+void RSC_World::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("name", name);
-    if (simulation) {
-        simulation->write(tree.addChild("simulation"));
-    }
+    simulation.write(tree, "simulation");
     {
         auto array = tree.addArray("resources");
-        for (const auto &value : resources) registry.write(value, array.add());
+        for (const auto &value : resources) RS_RSCRegistry::write(value, array.add());
     }
     {
         auto array = tree.addArray("essences");
-        for (const auto &value : essences) registry.write(value, array.add());
+        for (const auto &value : essences) RS_RSCRegistry::write(value, array.add());
     }
     {
         auto array = tree.addArray("entities");
-        for (const auto &value : entities) registry.write(value, array.add());
+        for (const auto &value : entities) RS_RSCRegistry::write(value, array.add());
     }
     {
         auto array = tree.addArray("records");
-        for (const auto &value : records) registry.write(value, array.add());
+        for (const auto &value : records) RS_RSCRegistry::write(value, array.add());
     }
     {
         auto array = tree.addArray("signals");
-        for (const auto &value : signals) registry.write(value, array.add());
+        for (const auto &value : signals) RS_RSCRegistry::write(value, array.add());
     }
     {
         auto array = tree.addArray("recorders");
-        for (const auto &value : recorders) registry.write(value, array.add());
+        for (const auto &value : recorders) RS_RSCRegistry::write(value, array.add());
     }
     {
         auto array = tree.addArray("controllers");
-        for (const auto &value : controllers) registry.write(value, array.add());
+        for (const auto &value : controllers) RS_RSCRegistry::write(value, array.add());
     }
+}
+
+void RSC_World::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("name", name);
+    archive.deserializeShared("simulation", simulation);
+    archive.deserializeVariantVec("resources", resources);
+    archive.deserializeVariantVec("essences", essences);
+    archive.deserializeVariantVec("entities", entities);
+    archive.deserializeVariantVec("records", records);
+    archive.deserializeVariantVec("signals", signals);
+    archive.deserializeVariantVec("recorders", recorders);
+    archive.deserializeVariantVec("controllers", controllers);
+}
+
+void RSC_World::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("name", name);
+    archive.serializeShared("simulation", simulation);
+    archive.serializeVariantVec("resources", resources);
+    archive.serializeVariantVec("essences", essences);
+    archive.serializeVariantVec("entities", entities);
+    archive.serializeVariantVec("records", records);
+    archive.serializeVariantVec("signals", signals);
+    archive.serializeVariantVec("recorders", recorders);
+    archive.serializeVariantVec("controllers", controllers);
 }
 
 void RSC_World::_deepCopyShared(MemoRef memo) {

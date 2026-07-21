@@ -339,23 +339,23 @@ std::string RS_KernelCameraPerspectiveManager::getEntityName() const {
 }
 
 std::string RS_KernelCameraPerspectiveManager::getRecordName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.record.name; });
+    return _rsc.visit([](auto& c) -> std::string { return c.record->name; });
 }
 
 std::string RS_KernelCameraPerspectiveManager::getSignalName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.signal.name; });
+    return _rsc.visit([](auto& c) -> std::string { return c.signal->name; });
 }
 
 std::string RS_KernelCameraPerspectiveManager::getRecordControllerName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.record.target_controller_reference; });
+    return _rsc.visit([](auto& c) -> std::string { return c.record->target_controller_reference; });
 }
 
 std::string RS_KernelCameraPerspectiveManager::getRecordRecorderName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.record.target_recorder_reference; });
+    return _rsc.visit([](auto& c) -> std::string { return c.record->target_recorder_reference; });
 }
 
 std::string RS_KernelCameraPerspectiveManager::getSignalControllerName() const {
-    return _rsc.visit([](auto& c) -> std::string { return c.signal.source_controller_reference; });
+    return _rsc.visit([](auto& c) -> std::string { return c.signal->source_controller_reference; });
 }
 
 RIndex RS_KernelCameraPerspectiveManager::getEntityGid() const {
@@ -414,7 +414,7 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
             camera.orientation = _camera_orientation;
             perspective_base = &perspective;
         }
-        const auto& record_rsc = perspective_base->record;
+        const auto& record_rsc = *perspective_base->record;
 
         camera.aspect_ratio = static_cast<RFloat>(perspective_base->image_height) /
                               static_cast<RFloat>(perspective_base->image_width);
@@ -485,9 +485,11 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
         ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
         ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
-        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(
+            ctx.camera_normal_record_layout
         );
-        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(
+            ctx.camera_motion_record_layout
         );
         ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
             ctx.camera_entity_info_record_layout
@@ -662,9 +664,11 @@ void RS_KernelCameraPerspectiveManager::_freeKernelData() {
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
         ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
         ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
-        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(
+            ctx.camera_normal_record_layout
         );
-        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(
+            ctx.camera_motion_record_layout
         );
         ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
             ctx.camera_entity_info_record_layout
@@ -773,9 +777,11 @@ void RS_KernelCameraPerspectiveManager::_freezeKernelData(bool is_freeze) {
         ctx.host_data->camera_record_layout.syncDeviceLayout(ctx.camera_record_layout);
         ctx.host_data->camera_rgb_record_layout.syncDeviceLayout(ctx.camera_rgb_record_layout);
         ctx.host_data->camera_depth_record_layout.syncDeviceLayout(ctx.camera_depth_record_layout);
-        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(ctx.camera_normal_record_layout
+        ctx.host_data->camera_normal_record_layout.syncDeviceLayout(
+            ctx.camera_normal_record_layout
         );
-        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(ctx.camera_motion_record_layout
+        ctx.host_data->camera_motion_record_layout.syncDeviceLayout(
+            ctx.camera_motion_record_layout
         );
         ctx.host_data->camera_entity_info_record_layout.syncDeviceLayout(
             ctx.camera_entity_info_record_layout

@@ -15,7 +15,8 @@ from rise_origin import rsc
 
 SENSOR_ORIGIN = (0.0, 0.0, 0.3)
 CUBE_CENTER = (0.6, 0.0, 0.3)
-CUBE_HALF_EXTENT = 0.09  # 6 voxels of 0.03 m, centered
+CUBE_HALF_EXTENT = 0.105  # half of the 7-voxel, 0.03 m box
+CUBE_ORIGIN = tuple(c - CUBE_HALF_EXTENT for c in CUBE_CENTER)  # box min-corner
 FLOOR_HEIGHT = 0.0
 
 RAY_FORWARD = (1.0, 0.0, 0.0)  # hits the cube
@@ -73,9 +74,9 @@ def _build_world(captured):
         rsc.entity.FloorFlat("floor", material_reference="floor", height=FLOOR_HEIGHT),
         rsc.entity.StructureVoxel(
             "cube",
-            origin_position=CUBE_CENTER,
+            origin_position=CUBE_ORIGIN,
             material_references=["box"],
-            bodies=[rsc.entity.StructureVoxelBody.box(6, 6, 6, voxel_size=0.03)],
+            bodies=[rsc.entity.StructureVoxelBody.box(7, 7, 7, voxel_size=0.03)],
         ),
         rsc.entity.RaySensorFree(
             "probe",

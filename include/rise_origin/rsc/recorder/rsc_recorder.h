@@ -24,15 +24,11 @@ class RSC_RecorderHDF5 : public RSC_RecorderBase {
 
     bool operator==(const RSC_RecorderHDF5& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecorderBase::serialize(s);
-        s("path", path);
-    }
-
    protected:
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

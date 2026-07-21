@@ -40,8 +40,7 @@ RS_WorldSessionComponentCamera::RS_WorldSessionComponentCamera(
       _position(position),
       _focus(focus),
       _orientation(_lookAt(position, focus)),
-      _distance((focus - position).length()) {
-}
+      _distance((focus - position).length()) {}
 
 void RS_WorldSessionComponentCamera::onAttach(RS_WorldSessionAccess access) {
     _access = std::move(access);
@@ -55,9 +54,7 @@ void RS_WorldSessionComponentCamera::onAttach(RS_WorldSessionAccess access) {
 void RS_WorldSessionComponentCamera::onCallback(RBigFloat time, RS_ThreadPool& pool) {
     RIndex pixel_num = static_cast<RIndex>(static_cast<RBigSize>(_width) * _height);
     auto copy = std::make_shared<RS_MultiFuture<void>>(pool.submitBlocks(
-        0,
-        pixel_num,
-        [this](RIndex start, RIndex end) { _copyFrame(start, end); }
+        0, pixel_num, [this](RIndex start, RIndex end) { _copyFrame(start, end); }
     ));
     pool.detachTask([this] {
         _applyPending();
@@ -70,8 +67,7 @@ void RS_WorldSessionComponentCamera::onCallback(RBigFloat time, RS_ThreadPool& p
     });
 }
 
-void RS_WorldSessionComponentCamera::onDetach() {
-}
+void RS_WorldSessionComponentCamera::onDetach() {}
 
 void RS_WorldSessionComponentCamera::move(
     RFloat orbit_pitch,
@@ -219,9 +215,9 @@ rsc::RSC_EntityVariant RS_WorldSessionComponentCamera::_makeCamera() const {
     camera.field_of_view = _field_of_view;
     camera.defocus_angle = _defocus_angle;
     camera.focus_distance = _focus_distance;
-    camera.record.has_rgb = true;
-    camera.record.target_controller_reference = _controller_name;
-    camera.signal.source_controller_reference = _controller_name;
+    camera.record->has_rgb = true;
+    camera.record->target_controller_reference = _controller_name;
+    camera.signal->source_controller_reference = _controller_name;
     return rsc::RSC_EntityVariant(camera);
 }
 
@@ -230,4 +226,4 @@ rsc::RSC_ControllerVariant RS_WorldSessionComponentCamera::_makeController() con
     controller.name = _controller_name;
     return rsc::RSC_ControllerVariant(controller);
 }
-} // namespace rise
+}  // namespace rise

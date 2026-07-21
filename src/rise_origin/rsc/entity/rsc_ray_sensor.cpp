@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/entity/rsc_ray_sensor.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_util.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rise_origin/utils/rs_conf.h"
@@ -27,7 +28,7 @@ void RSC_RaySensorRecord::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_RaySensorRecord::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_RaySensorRecord::_read(const RS_RSCFileTreeReader &tree) {
     RSC_RecordBase::_read(tree);
     name = "default";
     has_hit = tree.get("has_hit", has_hit);
@@ -38,7 +39,7 @@ void RSC_RaySensorRecord::_read(const RS_RSCPropertyTreeReader &tree) {
     has_velocity = tree.get("has_velocity", has_velocity);
 }
 
-void RSC_RaySensorRecord::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_RaySensorRecord::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_RecordBase::_write(tree);
     tree.add("has_hit", has_hit);
     tree.add("has_entity_info", has_entity_info);
@@ -46,6 +47,26 @@ void RSC_RaySensorRecord::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("has_material", has_material);
     tree.add("has_normal", has_normal);
     tree.add("has_velocity", has_velocity);
+}
+
+void RSC_RaySensorRecord::_deserialize(RS_RSCArchive &archive) {
+    RSC_RecordBase::_deserialize(archive);
+    archive.deserialize("has_hit", has_hit);
+    archive.deserialize("has_entity_info", has_entity_info);
+    archive.deserialize("has_entity_detail", has_entity_detail);
+    archive.deserialize("has_material", has_material);
+    archive.deserialize("has_normal", has_normal);
+    archive.deserialize("has_velocity", has_velocity);
+}
+
+void RSC_RaySensorRecord::_serialize(RS_RSCArchive &archive) const {
+    RSC_RecordBase::_serialize(archive);
+    archive.serialize("has_hit", has_hit);
+    archive.serialize("has_entity_info", has_entity_info);
+    archive.serialize("has_entity_detail", has_entity_detail);
+    archive.serialize("has_material", has_material);
+    archive.serialize("has_normal", has_normal);
+    archive.serialize("has_velocity", has_velocity);
 }
 
 bool RSC_RaySensorSignal::operator==(const RSC_RaySensorSignal &other) const {
@@ -60,17 +81,29 @@ void RSC_RaySensorSignal::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_RaySensorSignal::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_RaySensorSignal::_read(const RS_RSCFileTreeReader &tree) {
     RSC_SignalBase::_read(tree);
     name = "default";
     position_signal_num = tree.get<RSize>("position_signal_num", position_signal_num);
     orientation_signal_num = tree.get<RSize>("orientation_signal_num", orientation_signal_num);
 }
 
-void RSC_RaySensorSignal::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_RaySensorSignal::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_SignalBase::_write(tree);
     tree.add("position_signal_num", position_signal_num);
     tree.add("orientation_signal_num", orientation_signal_num);
+}
+
+void RSC_RaySensorSignal::_deserialize(RS_RSCArchive &archive) {
+    RSC_SignalBase::_deserialize(archive);
+    archive.deserialize("position_signal_num", position_signal_num);
+    archive.deserialize("orientation_signal_num", orientation_signal_num);
+}
+
+void RSC_RaySensorSignal::_serialize(RS_RSCArchive &archive) const {
+    RSC_SignalBase::_serialize(archive);
+    archive.serialize("position_signal_num", position_signal_num);
+    archive.serialize("orientation_signal_num", orientation_signal_num);
 }
 
 void RSC_RaySensorBase::_validate(RS_RSCValidator &validator) const {
@@ -81,41 +114,60 @@ void RSC_RaySensorBase::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_RaySensorBase::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_RaySensorBase::_read(const RS_RSCFileTreeReader &tree) {
     RSC_EntityBase::_read(tree);
     max_range = tree.get<RFloat>("max_range", max_range);
-    ray_directions.clear();
-    if (tree.isChildExist("ray_directions")) {
-        auto rows = tree.get<std::vector<std::vector<RFloat>>>("ray_directions");
-        ray_directions.reserve(rows.size());
-        for (const auto &row : rows) {
-            if (row.size() != 3) {
-                RS_THROW(RS_InvalidCharacterizationException(
-                    "ray_directions row must hold 3 values for RVec3rf"
-                ));
-            }
-            ray_directions.push_back({row[0], row[1], row[2]});
-        }
+    if (tree.hasChild("ray_directions")) {
+        std::vector<RBigSize> shape = tree.getBulkShape("ray_directions");
+        RBigSize ray_num = shape.empty() ? 0 : shape[0];
+        ray_directions.resize(ray_num);
+        tree.getBulk(
+            "ray_directions", reinterpret_cast<RFloat *>(ray_directions.data()), {ray_num, 3}
+        );
+    } else {
+        ray_directions.clear();
     }
-    if (tree.isChildExist("record")) {
-        record.read(tree.getChild("record"));
+    if (tree.hasChild("record")) {
+        record.read(tree, "record");
     }
-    if (tree.isChildExist("signal")) {
-        signal.read(tree.getChild("signal"));
+    if (tree.hasChild("signal")) {
+        signal.read(tree, "signal");
     }
 }
 
-void RSC_RaySensorBase::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_RaySensorBase::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_EntityBase::_write(tree);
-    std::vector<std::vector<RFloat>> rows;
-    rows.reserve(ray_directions.size());
-    for (const auto &d : ray_directions) {
-        rows.push_back({d.x, d.y, d.z});
+    if (!ray_directions.empty()) {
+        tree.addBulk(
+            "ray_directions",
+            reinterpret_cast<const RFloat *>(ray_directions.data()),
+            {ray_directions.size(), 3}
+        );
     }
-    tree.add("ray_directions", rows);
     tree.add("max_range", max_range);
-    record.write(tree.addChild("record"));
-    signal.write(tree.addChild("signal"));
+    record.write(tree, "record");
+    signal.write(tree, "signal");
+}
+
+void RSC_RaySensorBase::_deserialize(RS_RSCArchive &archive) {
+    RSC_EntityBase::_deserialize(archive);
+    archive.deserialize("ray_directions", ray_directions);
+    archive.deserialize("max_range", max_range);
+    archive.deserializeShared("record", record);
+    archive.deserializeShared("signal", signal);
+}
+
+void RSC_RaySensorBase::_serialize(RS_RSCArchive &archive) const {
+    RSC_EntityBase::_serialize(archive);
+    archive.serialize("ray_directions", ray_directions);
+    archive.serialize("max_range", max_range);
+    archive.serializeShared("record", record);
+    archive.serializeShared("signal", signal);
+}
+
+void RSC_RaySensorBase::_deepCopyShared(MemoRef memo) {
+    record = record.deepCopy(memo);
+    signal = signal.deepCopy(memo);
 }
 
 bool RSC_RaySensorFree::operator==(const RSC_RaySensorFree &other) const {
@@ -123,16 +175,28 @@ bool RSC_RaySensorFree::operator==(const RSC_RaySensorFree &other) const {
            orientation == other.orientation;
 }
 
-void RSC_RaySensorFree::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_RaySensorFree::_read(const RS_RSCFileTreeReader &tree) {
     RSC_RaySensorBase::_read(tree);
     origin_position = readVec3rf(tree, "origin_position");
     orientation = readQuat3rf(tree, "orientation");
 }
 
-void RSC_RaySensorFree::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_RaySensorFree::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_RaySensorBase::_write(tree);
     writeVec3rf(tree, "origin_position", origin_position);
     writeQuat3rf(tree, "orientation", orientation);
+}
+
+void RSC_RaySensorFree::_deserialize(RS_RSCArchive &archive) {
+    RSC_RaySensorBase::_deserialize(archive);
+    archive.deserialize("origin_position", origin_position);
+    archive.deserialize("orientation", orientation);
+}
+
+void RSC_RaySensorFree::_serialize(RS_RSCArchive &archive) const {
+    RSC_RaySensorBase::_serialize(archive);
+    archive.serialize("origin_position", origin_position);
+    archive.serialize("orientation", orientation);
 }
 
 bool RSC_RaySensorRigidBodyLinked::operator==(const RSC_RaySensorRigidBodyLinked &other) const {
@@ -149,7 +213,7 @@ void RSC_RaySensorRigidBodyLinked::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_RaySensorRigidBodyLinked::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_RaySensorRigidBodyLinked::_read(const RS_RSCFileTreeReader &tree) {
     RSC_RaySensorBase::_read(tree);
     structure_name = tree.get<string>("structure_name");
     body_sid = tree.get<RIndex>("body_sid");
@@ -158,13 +222,31 @@ void RSC_RaySensorRigidBodyLinked::_read(const RS_RSCPropertyTreeReader &tree) {
     relative_orientation = readQuat3rf(tree, "relative_orientation");
 }
 
-void RSC_RaySensorRigidBodyLinked::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_RaySensorRigidBodyLinked::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_RaySensorBase::_write(tree);
     tree.add("structure_name", structure_name);
     tree.add("body_sid", body_sid);
     tree.add("segment_bid", segment_bid);
     writeVec3rf(tree, "relative_anchor", relative_anchor);
     writeQuat3rf(tree, "relative_orientation", relative_orientation);
+}
+
+void RSC_RaySensorRigidBodyLinked::_deserialize(RS_RSCArchive &archive) {
+    RSC_RaySensorBase::_deserialize(archive);
+    archive.deserialize("structure_name", structure_name);
+    archive.deserialize("body_sid", body_sid);
+    archive.deserialize("segment_bid", segment_bid);
+    archive.deserialize("relative_anchor", relative_anchor);
+    archive.deserialize("relative_orientation", relative_orientation);
+}
+
+void RSC_RaySensorRigidBodyLinked::_serialize(RS_RSCArchive &archive) const {
+    RSC_RaySensorBase::_serialize(archive);
+    archive.serialize("structure_name", structure_name);
+    archive.serialize("body_sid", body_sid);
+    archive.serialize("segment_bid", segment_bid);
+    archive.serialize("relative_anchor", relative_anchor);
+    archive.serialize("relative_orientation", relative_orientation);
 }
 
 }  // namespace rsc

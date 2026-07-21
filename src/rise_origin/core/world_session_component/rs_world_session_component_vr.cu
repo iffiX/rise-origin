@@ -3214,14 +3214,14 @@ rsc::RSC_EntityVariant RS_WorldSessionComponentVR::_makeCamera() const {
     camera.max_depth = _max_depth;
     camera.interpupillary_distance = ipd > 0.0 ? ipd : 0.063;
     camera.convergence_distance = 0.0;
-    camera.record.has_rgb = true;
-    camera.record.has_depth = true;
-    camera.record.has_entity_info = true;
-    camera.record.is_depth_hyperbolic = true;
-    camera.record.hyperbolic_near_depth = _near_depth;
-    camera.record.hyperbolic_far_depth = _far_depth;
-    camera.record.target_controller_reference = _vr_controller_name;
-    camera.signal.source_controller_reference = _vr_controller_name;
+    camera.record->has_rgb = true;
+    camera.record->has_depth = true;
+    camera.record->has_entity_info = true;
+    camera.record->is_depth_hyperbolic = true;
+    camera.record->hyperbolic_near_depth = _near_depth;
+    camera.record->hyperbolic_far_depth = _far_depth;
+    camera.record->target_controller_reference = _vr_controller_name;
+    camera.signal->source_controller_reference = _vr_controller_name;
     return rsc::RSC_EntityVariant(camera);
 }
 
@@ -3232,11 +3232,11 @@ RS_WorldSessionComponentVR::_makeRaySensor(std::string name, std::string control
     // One ray along local +x; the signal drives the sensor orientation so it points along the aim.
     sensor.ray_directions = {RVec3rf(1, 0, 0)};
     sensor.max_range = _far_depth;
-    sensor.record.has_hit = true;
-    sensor.record.has_entity_info = true;
-    sensor.record.has_entity_detail = true;
-    sensor.record.target_controller_reference = controller_name;
-    sensor.signal.source_controller_reference = controller_name;
+    sensor.record->has_hit = true;
+    sensor.record->has_entity_info = true;
+    sensor.record->has_entity_detail = true;
+    sensor.record->target_controller_reference = controller_name;
+    sensor.signal->source_controller_reference = controller_name;
     return rsc::RSC_EntityVariant(sensor);
 }
 

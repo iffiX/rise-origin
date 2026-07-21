@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/resource/rsc_texture.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_util.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rise_origin/utils/string/rs_string.h"
@@ -13,18 +14,36 @@ namespace rise {
 
 namespace rsc {
 
+void RSC_TextureBase::_deserialize(RS_RSCArchive& archive) {
+    RSC_ResourceBase::_deserialize(archive);
+}
+
+void RSC_TextureBase::_serialize(RS_RSCArchive& archive) const {
+    RSC_ResourceBase::_serialize(archive);
+}
+
 bool RSC_TextureConstant::operator==(const RSC_TextureConstant& other) const {
     return RSC_TextureBase::operator==(other) && value == other.value;
 }
 
-void RSC_TextureConstant::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_TextureConstant::_read(const RS_RSCFileTreeReader& tree) {
     RSC_ResourceBase::_read(tree);
     value = readColor3f(tree, "value");
 }
 
-void RSC_TextureConstant::_write(RS_RSCPropertyTreeWriter& tree) const {
+void RSC_TextureConstant::_write(RS_RSCFileTreeWriter& tree) const {
     RSC_ResourceBase::_write(tree);
     writeColor3f(tree, "value", value);
+}
+
+void RSC_TextureConstant::_deserialize(RS_RSCArchive& archive) {
+    RSC_TextureBase::_deserialize(archive);
+    archive.deserialize("value", value);
+}
+
+void RSC_TextureConstant::_serialize(RS_RSCArchive& archive) const {
+    RSC_TextureBase::_serialize(archive);
+    archive.serialize("value", value);
 }
 
 bool RSC_TextureGrid::operator==(const RSC_TextureGrid& other) const {
@@ -43,7 +62,7 @@ void RSC_TextureGrid::_validate(RS_RSCValidator& validator) const {
     });
 }
 
-void RSC_TextureGrid::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_TextureGrid::_read(const RS_RSCFileTreeReader& tree) {
     RSC_ResourceBase::_read(tree);
     fill_color = readColor3f(tree, "fill_color");
     line_color = readColor3f(tree, "line_color");
@@ -53,7 +72,7 @@ void RSC_TextureGrid::_read(const RS_RSCPropertyTreeReader& tree) {
     line_width = tree.get<RFloat>("line_width", line_width);
 }
 
-void RSC_TextureGrid::_write(RS_RSCPropertyTreeWriter& tree) const {
+void RSC_TextureGrid::_write(RS_RSCFileTreeWriter& tree) const {
     RSC_ResourceBase::_write(tree);
     writeColor3f(tree, "fill_color", fill_color);
     writeColor3f(tree, "line_color", line_color);
@@ -61,6 +80,26 @@ void RSC_TextureGrid::_write(RS_RSCPropertyTreeWriter& tree) const {
     tree.add("x_spacing", x_spacing);
     tree.add("y_spacing", y_spacing);
     tree.add("line_width", line_width);
+}
+
+void RSC_TextureGrid::_deserialize(RS_RSCArchive& archive) {
+    RSC_TextureBase::_deserialize(archive);
+    archive.deserialize("fill_color", fill_color);
+    archive.deserialize("line_color", line_color);
+    archive.deserialize("is_meters", is_meters);
+    archive.deserialize("x_spacing", x_spacing);
+    archive.deserialize("y_spacing", y_spacing);
+    archive.deserialize("line_width", line_width);
+}
+
+void RSC_TextureGrid::_serialize(RS_RSCArchive& archive) const {
+    RSC_TextureBase::_serialize(archive);
+    archive.serialize("fill_color", fill_color);
+    archive.serialize("line_color", line_color);
+    archive.serialize("is_meters", is_meters);
+    archive.serialize("x_spacing", x_spacing);
+    archive.serialize("y_spacing", y_spacing);
+    archive.serialize("line_width", line_width);
 }
 
 }  // namespace rsc

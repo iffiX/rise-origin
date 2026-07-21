@@ -17,8 +17,8 @@ namespace device {
 
 /// @brief True when any exec logging flag is on (build the signature only then).
 inline bool isExecLogging() {
-    auto &env = RS_EnvironmentVariables::getInstance();
-    return env.isExecTraceCalls() || env.isExecProfilePerformance();
+    return RS_EnvironmentVariables::isExecTraceCalls() ||
+           RS_EnvironmentVariables::isExecProfilePerformance();
 }
 
 /// @brief Trim a __FILE__ path to start at the last "rise_origin" segment.
@@ -40,9 +40,8 @@ inline void execTracePrint(
     const std::string &signature,
     const RS_Timer *timer = nullptr
 ) {
-    auto &env = RS_EnvironmentVariables::getInstance();
     if (!isExecLogging()) return;
-    if (env.isExecProfilePerformance() && timer != nullptr)
+    if (RS_EnvironmentVariables::isExecProfilePerformance() && timer != nullptr)
         std::cout << "[EXEC] " << trimExecFile(file) << "(" << line << "): " << signature << ": "
                   << timer->elapsedTimeString() << std::endl;
     else
@@ -58,7 +57,7 @@ inline void execTracePrint(
 inline void execTraceBegin(const char *file, int line, const std::string &signature) {
     if (!isExecLogging()) return;
     std::cout << "[EXEC] " << trimExecFile(file) << "(" << line << "): " << signature;
-    if (RS_EnvironmentVariables::getInstance().isExecProfilePerformance())
+    if (RS_EnvironmentVariables::isExecProfilePerformance())
         std::cout << std::flush;  // keep line open for execTraceEnd
     else
         std::cout << std::endl;
@@ -66,7 +65,7 @@ inline void execTraceBegin(const char *file, int line, const std::string &signat
 
 /// @brief Close a line opened by execTraceBegin, appending elapsed under profiling.
 inline void execTraceEnd(const RS_Timer &timer) {
-    if (RS_EnvironmentVariables::getInstance().isExecProfilePerformance())
+    if (RS_EnvironmentVariables::isExecProfilePerformance())
         std::cout << ": " << timer.elapsedTimeString() << std::endl;
 }
 

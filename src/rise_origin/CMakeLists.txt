@@ -29,10 +29,11 @@ rise_adapt_sources(RS_RISE_ORIGIN_DEVICE_SRC BACKEND ${RISE_ORIGIN_BACKEND})
 ################################################################
 # rise_origin_core library
 ################################################################
-add_library(rise_origin_core
+add_library(rise_origin_core SHARED
         ${RS_RISE_ORIGIN_CORE_SRC}
         ${RS_RISE_ORIGIN_DEVICE_SRC}
         ${RS_RISE_ORIGIN_RSC_SRC}
+        utils/serialization/rs_fast_pack.cpp
         rise_origin.cpp)
 target_link_libraries(rise_origin_core PUBLIC
         ${HDF5_LIBRARIES}
@@ -44,6 +45,7 @@ target_link_libraries(rise_origin_core PUBLIC
         fmt::fmt
         spdlog::spdlog
         hosek-wilkie
+        libzstd_static
         $<$<BOOL:${MINGW}>:ws2_32>
         ${RISE_DEVICE_LIBS})
 target_include_directories(rise_origin_core PUBLIC
@@ -114,7 +116,9 @@ target_link_libraries(rise_origin_instance PUBLIC rise_origin_core)
 pybind11_add_module(rise_origin_python_core MODULE ${RS_RISE_ORIGIN_PYTHON_SRC})
 set_target_properties(rise_origin_python_core PROPERTIES
         OUTPUT_NAME "_core"
-        PREFIX "")
+        PREFIX ""
+        BUILD_RPATH "$ORIGIN"
+        INSTALL_RPATH "$ORIGIN")
 target_link_libraries(rise_origin_python_core PRIVATE rise_origin_core)
 target_include_directories(rise_origin_python_core PUBLIC
         ${HDF5_INCLUDE_DIRS}

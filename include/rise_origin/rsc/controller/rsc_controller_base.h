@@ -24,15 +24,12 @@ class RSC_ControllerBase : public RSC_Base {
 
     bool operator==(const RSC_ControllerBase& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("name", name);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 }  // namespace rsc

@@ -246,23 +246,23 @@ std::string RS_KernelRaySensorManager::getEntityName() const {
 }
 
 std::string RS_KernelRaySensorManager::getRecordName() const {
-    return _rsc.visit([](auto& s) -> std::string { return s.record.name; });
+    return _rsc.visit([](auto& s) -> std::string { return s.record->name; });
 }
 
 std::string RS_KernelRaySensorManager::getSignalName() const {
-    return _rsc.visit([](auto& s) -> std::string { return s.signal.name; });
+    return _rsc.visit([](auto& s) -> std::string { return s.signal->name; });
 }
 
 std::string RS_KernelRaySensorManager::getRecordControllerName() const {
-    return _rsc.visit([](auto& s) -> std::string { return s.record.target_controller_reference; });
+    return _rsc.visit([](auto& s) -> std::string { return s.record->target_controller_reference; });
 }
 
 std::string RS_KernelRaySensorManager::getRecordRecorderName() const {
-    return _rsc.visit([](auto& s) -> std::string { return s.record.target_recorder_reference; });
+    return _rsc.visit([](auto& s) -> std::string { return s.record->target_recorder_reference; });
 }
 
 std::string RS_KernelRaySensorManager::getSignalControllerName() const {
-    return _rsc.visit([](auto& s) -> std::string { return s.signal.source_controller_reference; });
+    return _rsc.visit([](auto& s) -> std::string { return s.signal->source_controller_reference; });
 }
 
 RIndex RS_KernelRaySensorManager::getEntityGid() const { return _entity_registration.gid(); }
@@ -348,7 +348,8 @@ void RS_KernelRaySensorManager::_initKernelData() {
         ctx.host_data->ray_sensor_layout.syncDeviceLayout(ctx.ray_sensor_layout);
         ctx.host_data->ray_sensor_ray_layout.syncDeviceLayout(ctx.ray_sensor_ray_layout);
         ctx.host_data->ray_sensor_record_layout.syncDeviceLayout(ctx.ray_sensor_record_layout);
-        ctx.host_data->ray_sensor_hit_record_layout.syncDeviceLayout(ctx.ray_sensor_hit_record_layout
+        ctx.host_data->ray_sensor_hit_record_layout.syncDeviceLayout(
+            ctx.ray_sensor_hit_record_layout
         );
         ctx.host_data->ray_sensor_entity_info_record_layout.syncDeviceLayout(
             ctx.ray_sensor_entity_info_record_layout
@@ -459,7 +460,8 @@ void RS_KernelRaySensorManager::_freeKernelData() {
         ctx.host_data->ray_sensor_layout.syncDeviceLayout(ctx.ray_sensor_layout);
         ctx.host_data->ray_sensor_ray_layout.syncDeviceLayout(ctx.ray_sensor_ray_layout);
         ctx.host_data->ray_sensor_record_layout.syncDeviceLayout(ctx.ray_sensor_record_layout);
-        ctx.host_data->ray_sensor_hit_record_layout.syncDeviceLayout(ctx.ray_sensor_hit_record_layout
+        ctx.host_data->ray_sensor_hit_record_layout.syncDeviceLayout(
+            ctx.ray_sensor_hit_record_layout
         );
         ctx.host_data->ray_sensor_entity_info_record_layout.syncDeviceLayout(
             ctx.ray_sensor_entity_info_record_layout
@@ -579,7 +581,8 @@ void RS_KernelRaySensorManager::_freezeKernelData(bool is_freeze) {
         ctx.host_data->ray_sensor_layout.syncDeviceLayout(ctx.ray_sensor_layout);
         ctx.host_data->ray_sensor_ray_layout.syncDeviceLayout(ctx.ray_sensor_ray_layout);
         ctx.host_data->ray_sensor_record_layout.syncDeviceLayout(ctx.ray_sensor_record_layout);
-        ctx.host_data->ray_sensor_hit_record_layout.syncDeviceLayout(ctx.ray_sensor_hit_record_layout
+        ctx.host_data->ray_sensor_hit_record_layout.syncDeviceLayout(
+            ctx.ray_sensor_hit_record_layout
         );
         ctx.host_data->ray_sensor_entity_info_record_layout.syncDeviceLayout(
             ctx.ray_sensor_entity_info_record_layout
@@ -633,7 +636,8 @@ RS_KernelRaySensorReference::RS_KernelRaySensorReference(
 
 RS_KernelRaySensorReference::~RS_KernelRaySensorReference() { _release(); }
 
-RS_KernelRaySensorReference::RS_KernelRaySensorReference(RS_KernelRaySensorReference&& other
+RS_KernelRaySensorReference::RS_KernelRaySensorReference(
+    RS_KernelRaySensorReference&& other
 ) noexcept
     : _kernel_manager(other._kernel_manager), _name(std::move(other._name)), _gid(other._gid) {
     other._kernel_manager = nullptr;

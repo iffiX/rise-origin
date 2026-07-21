@@ -13,20 +13,31 @@ namespace rise {
 // Singleton class
 class RS_EnvironmentVariables {
    public:
+    // No copy, assignment, move constructor, move assignment
+    RS_EnvironmentVariables(const RS_EnvironmentVariables&) = delete;
+    RS_EnvironmentVariables& operator=(const RS_EnvironmentVariables&) = delete;
+    RS_EnvironmentVariables(RS_EnvironmentVariables&&) noexcept = delete;
+    RS_EnvironmentVariables& operator=(RS_EnvironmentVariables&&) noexcept = delete;
+
     static RS_EnvironmentVariables& getInstance() {
         static RS_EnvironmentVariables instance;
         return instance;
     }
 
-    RS_EnvironmentVariables(const RS_EnvironmentVariables&) = delete;
+    static bool isExecForceSync() {
+        auto& instance = getInstance();
+        return instance._is_exec_force_sync;
+    }
 
-    RS_EnvironmentVariables& operator=(const RS_EnvironmentVariables&) = delete;
+    static bool isExecTraceCalls() {
+        auto& instance = getInstance();
+        return instance._is_exec_trace_calls;
+    }
 
-    bool isExecForceSync() const { return _is_exec_force_sync; }
-
-    bool isExecTraceCalls() const { return _is_exec_trace_calls; }
-
-    bool isExecProfilePerformance() const { return _is_exec_profile_performance; }
+    static bool isExecProfilePerformance() {
+        auto& instance = getInstance();
+        return instance._is_exec_profile_performance;
+    }
 
    private:
     RS_EnvironmentVariables() {

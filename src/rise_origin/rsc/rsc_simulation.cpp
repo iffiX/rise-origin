@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/rsc_simulation.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 #include "rs_rsc_util.h"
 
@@ -18,12 +19,20 @@ bool RSC_SimulationEnvironment::operator==(const RSC_SimulationEnvironment &othe
 
 void RSC_SimulationEnvironment::_validate(RS_RSCValidator &) const {}
 
-void RSC_SimulationEnvironment::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationEnvironment::_read(const RS_RSCFileTreeReader &tree) {
     gravity_acceleration = tree.get("gravity_acceleration", gravity_acceleration);
 }
 
-void RSC_SimulationEnvironment::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationEnvironment::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("gravity_acceleration", gravity_acceleration);
+}
+
+void RSC_SimulationEnvironment::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("gravity_acceleration", gravity_acceleration);
+}
+
+void RSC_SimulationEnvironment::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("gravity_acceleration", gravity_acceleration);
 }
 
 bool RSC_SimulationTime::operator==(const RSC_SimulationTime &other) const {
@@ -53,25 +62,25 @@ void RSC_SimulationTime::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationTime::_read(const RS_RSCPropertyTreeReader &tree) {
-    if (tree.isChildExist("dt")) dt = tree.get<RFloat>("dt");
+void RSC_SimulationTime::_read(const RS_RSCFileTreeReader &tree) {
+    if (tree.hasChild("dt")) dt = tree.get<RFloat>("dt");
     dt_ratio = tree.get("dt_ratio", dt_ratio);
     dt_update_interval = tree.get("dt_update_interval", dt_update_interval);
-    if (tree.isChildExist("dt_softbody_and_rigidbody_update"))
+    if (tree.hasChild("dt_softbody_and_rigidbody_update"))
         dt_softbody_and_rigidbody_update = tree.get<RFloat>("dt_softbody_and_rigidbody_update");
-    if (tree.isChildExist("dt_rigidbody_contact_and_constraint_update"))
+    if (tree.hasChild("dt_rigidbody_contact_and_constraint_update"))
         dt_rigidbody_contact_and_constraint_update =
             tree.get<RFloat>("dt_rigidbody_contact_and_constraint_update");
-    if (tree.isChildExist("dt_contact_update"))
+    if (tree.hasChild("dt_contact_update"))
         dt_contact_update = tree.get<RFloat>("dt_contact_update");
-    if (tree.isChildExist("dt_mechanical_signal_update"))
+    if (tree.hasChild("dt_mechanical_signal_update"))
         dt_mechanical_signal_update = tree.get<RFloat>("dt_mechanical_signal_update");
-    if (tree.isChildExist("dt_sentinel_update"))
+    if (tree.hasChild("dt_sentinel_update"))
         dt_sentinel_update = tree.get<RFloat>("dt_sentinel_update");
     is_aligned_to_wallclock = tree.get("is_aligned_to_wallclock", is_aligned_to_wallclock);
 }
 
-void RSC_SimulationTime::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationTime::_write(RS_RSCFileTreeWriter &tree) const {
     if (dt) tree.add("dt", dt.get());
     tree.add("dt_ratio", dt_ratio);
     tree.add("dt_update_interval", dt_update_interval);
@@ -87,6 +96,34 @@ void RSC_SimulationTime::_write(RS_RSCPropertyTreeWriter &tree) const {
         tree.add("dt_mechanical_signal_update", dt_mechanical_signal_update.get());
     if (dt_sentinel_update) tree.add("dt_sentinel_update", dt_sentinel_update.get());
     tree.add("is_aligned_to_wallclock", is_aligned_to_wallclock);
+}
+
+void RSC_SimulationTime::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("dt", dt);
+    archive.deserialize("dt_ratio", dt_ratio);
+    archive.deserialize("dt_update_interval", dt_update_interval);
+    archive.deserialize("dt_softbody_and_rigidbody_update", dt_softbody_and_rigidbody_update);
+    archive.deserialize(
+        "dt_rigidbody_contact_and_constraint_update", dt_rigidbody_contact_and_constraint_update
+    );
+    archive.deserialize("dt_contact_update", dt_contact_update);
+    archive.deserialize("dt_mechanical_signal_update", dt_mechanical_signal_update);
+    archive.deserialize("dt_sentinel_update", dt_sentinel_update);
+    archive.deserialize("is_aligned_to_wallclock", is_aligned_to_wallclock);
+}
+
+void RSC_SimulationTime::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("dt", dt);
+    archive.serialize("dt_ratio", dt_ratio);
+    archive.serialize("dt_update_interval", dt_update_interval);
+    archive.serialize("dt_softbody_and_rigidbody_update", dt_softbody_and_rigidbody_update);
+    archive.serialize(
+        "dt_rigidbody_contact_and_constraint_update", dt_rigidbody_contact_and_constraint_update
+    );
+    archive.serialize("dt_contact_update", dt_contact_update);
+    archive.serialize("dt_mechanical_signal_update", dt_mechanical_signal_update);
+    archive.serialize("dt_sentinel_update", dt_sentinel_update);
+    archive.serialize("is_aligned_to_wallclock", is_aligned_to_wallclock);
 }
 
 bool RSC_SimulationSoftBody::operator==(const RSC_SimulationSoftBody &other) const {
@@ -111,7 +148,7 @@ void RSC_SimulationSoftBody::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationSoftBody::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationSoftBody::_read(const RS_RSCFileTreeReader &tree) {
     internal_damping_z = tree.get("internal_damping_z", internal_damping_z);
     contact_damping_z = tree.get("contact_damping_z", contact_damping_z);
     global_damping_z = tree.get("global_damping_z", global_damping_z);
@@ -120,12 +157,28 @@ void RSC_SimulationSoftBody::_read(const RS_RSCPropertyTreeReader &tree) {
     link_max_compression = tree.get("link_max_compression", link_max_compression);
 }
 
-void RSC_SimulationSoftBody::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationSoftBody::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("internal_damping_z", internal_damping_z);
     tree.add("contact_damping_z", contact_damping_z);
     tree.add("global_damping_z", global_damping_z);
     tree.add("integration_frequency_multiplier", integration_frequency_multiplier);
     tree.add("link_max_compression", link_max_compression);
+}
+
+void RSC_SimulationSoftBody::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("internal_damping_z", internal_damping_z);
+    archive.deserialize("contact_damping_z", contact_damping_z);
+    archive.deserialize("global_damping_z", global_damping_z);
+    archive.deserialize("integration_frequency_multiplier", integration_frequency_multiplier);
+    archive.deserialize("link_max_compression", link_max_compression);
+}
+
+void RSC_SimulationSoftBody::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("internal_damping_z", internal_damping_z);
+    archive.serialize("contact_damping_z", contact_damping_z);
+    archive.serialize("global_damping_z", global_damping_z);
+    archive.serialize("integration_frequency_multiplier", integration_frequency_multiplier);
+    archive.serialize("link_max_compression", link_max_compression);
 }
 
 bool RSC_SimulationRigidBody::operator==(const RSC_SimulationRigidBody &other) const {
@@ -175,7 +228,7 @@ void RSC_SimulationRigidBody::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationRigidBody::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationRigidBody::_read(const RS_RSCFileTreeReader &tree) {
     constraint_iterations = tree.get("constraint_iterations", constraint_iterations);
     constraint_position_correction_ratio =
         tree.get("constraint_position_correction_ratio", constraint_position_correction_ratio);
@@ -205,7 +258,7 @@ void RSC_SimulationRigidBody::_read(const RS_RSCPropertyTreeReader &tree) {
     angular_damping_z = tree.get("angular_damping_z", angular_damping_z);
 }
 
-void RSC_SimulationRigidBody::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationRigidBody::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("constraint_iterations", constraint_iterations);
     tree.add("constraint_position_correction_ratio", constraint_position_correction_ratio);
     tree.add("constraint_warm_start_damping_z", constraint_warm_start_damping_z);
@@ -224,6 +277,58 @@ void RSC_SimulationRigidBody::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("contact_slop", contact_slop);
     tree.add("linear_damping_z", linear_damping_z);
     tree.add("angular_damping_z", angular_damping_z);
+}
+
+void RSC_SimulationRigidBody::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("constraint_iterations", constraint_iterations);
+    archive.deserialize(
+        "constraint_position_correction_ratio", constraint_position_correction_ratio
+    );
+    archive.deserialize("constraint_warm_start_damping_z", constraint_warm_start_damping_z);
+    archive.deserialize("constraint_stiffness_initial", constraint_stiffness_initial);
+    archive.deserialize("constraint_stiffness_min_threshold", constraint_stiffness_min_threshold);
+    archive.deserialize("constraint_stiffness_max_threshold", constraint_stiffness_max_threshold);
+    archive.deserialize(
+        "constraint_stiffness_auto_adjust_watt_threshold",
+        constraint_stiffness_auto_adjust_watt_threshold
+    );
+    archive.deserialize(
+        "constraint_stiffness_auto_adjust_step", constraint_stiffness_auto_adjust_step
+    );
+    archive.deserialize("contact_iterations", contact_iterations);
+    archive.deserialize(
+        "contact_position_correction_iterations", contact_position_correction_iterations
+    );
+    archive.deserialize("contact_position_correction_ratio", contact_position_correction_ratio);
+    archive.deserialize("contact_warm_start_damping_z", contact_warm_start_damping_z);
+    archive.deserialize("contact_slop", contact_slop);
+    archive.deserialize("linear_damping_z", linear_damping_z);
+    archive.deserialize("angular_damping_z", angular_damping_z);
+}
+
+void RSC_SimulationRigidBody::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("constraint_iterations", constraint_iterations);
+    archive.serialize("constraint_position_correction_ratio", constraint_position_correction_ratio);
+    archive.serialize("constraint_warm_start_damping_z", constraint_warm_start_damping_z);
+    archive.serialize("constraint_stiffness_initial", constraint_stiffness_initial);
+    archive.serialize("constraint_stiffness_min_threshold", constraint_stiffness_min_threshold);
+    archive.serialize("constraint_stiffness_max_threshold", constraint_stiffness_max_threshold);
+    archive.serialize(
+        "constraint_stiffness_auto_adjust_watt_threshold",
+        constraint_stiffness_auto_adjust_watt_threshold
+    );
+    archive.serialize(
+        "constraint_stiffness_auto_adjust_step", constraint_stiffness_auto_adjust_step
+    );
+    archive.serialize("contact_iterations", contact_iterations);
+    archive.serialize(
+        "contact_position_correction_iterations", contact_position_correction_iterations
+    );
+    archive.serialize("contact_position_correction_ratio", contact_position_correction_ratio);
+    archive.serialize("contact_warm_start_damping_z", contact_warm_start_damping_z);
+    archive.serialize("contact_slop", contact_slop);
+    archive.serialize("linear_damping_z", linear_damping_z);
+    archive.serialize("angular_damping_z", angular_damping_z);
 }
 
 bool RSC_SimulationContact::operator==(const RSC_SimulationContact &other) const {
@@ -247,14 +352,24 @@ void RSC_SimulationContact::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationContact::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationContact::_read(const RS_RSCFileTreeReader &tree) {
     bvh_rebuild_sub_interval = tree.get("bvh_rebuild_sub_interval", bvh_rebuild_sub_interval);
     bvh_refit_sub_interval = tree.get("bvh_refit_sub_interval", bvh_refit_sub_interval);
 }
 
-void RSC_SimulationContact::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationContact::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("bvh_rebuild_sub_interval", bvh_rebuild_sub_interval);
     tree.add("bvh_refit_sub_interval", bvh_refit_sub_interval);
+}
+
+void RSC_SimulationContact::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("bvh_rebuild_sub_interval", bvh_rebuild_sub_interval);
+    archive.deserialize("bvh_refit_sub_interval", bvh_refit_sub_interval);
+}
+
+void RSC_SimulationContact::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("bvh_rebuild_sub_interval", bvh_rebuild_sub_interval);
+    archive.serialize("bvh_refit_sub_interval", bvh_refit_sub_interval);
 }
 
 bool RSC_SimulationVisionTrace::operator==(const RSC_SimulationVisionTrace &other) const {
@@ -268,15 +383,25 @@ void RSC_SimulationVisionTrace::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationVisionTrace::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationVisionTrace::_read(const RS_RSCFileTreeReader &tree) {
     firefly_cap = tree.get<RFloat>("firefly_cap", firefly_cap);
     russian_roulette_start_depth =
         tree.get<RSize>("russian_roulette_start_depth", russian_roulette_start_depth);
 }
 
-void RSC_SimulationVisionTrace::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationVisionTrace::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("firefly_cap", firefly_cap);
     tree.add("russian_roulette_start_depth", russian_roulette_start_depth);
+}
+
+void RSC_SimulationVisionTrace::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("firefly_cap", firefly_cap);
+    archive.deserialize("russian_roulette_start_depth", russian_roulette_start_depth);
+}
+
+void RSC_SimulationVisionTrace::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("firefly_cap", firefly_cap);
+    archive.serialize("russian_roulette_start_depth", russian_roulette_start_depth);
 }
 
 bool RSC_SimulationVisionReSTIR::operator==(const RSC_SimulationVisionReSTIR &other) const {
@@ -305,7 +430,7 @@ void RSC_SimulationVisionReSTIR::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationVisionReSTIR::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationVisionReSTIR::_read(const RS_RSCFileTreeReader &tree) {
     is_enabled = tree.get<bool>("is_enabled", is_enabled);
     disocclusion_position_threshold =
         tree.get<RFloat>("disocclusion_position_threshold", disocclusion_position_threshold);
@@ -322,7 +447,7 @@ void RSC_SimulationVisionReSTIR::_read(const RS_RSCPropertyTreeReader &tree) {
     gi_validation_period = tree.get<RSize>("gi_validation_period", gi_validation_period);
 }
 
-void RSC_SimulationVisionReSTIR::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationVisionReSTIR::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("is_enabled", is_enabled);
     tree.add("disocclusion_position_threshold", disocclusion_position_threshold);
     tree.add("disocclusion_normal_threshold", disocclusion_normal_threshold);
@@ -337,6 +462,36 @@ void RSC_SimulationVisionReSTIR::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("gi_validation_period", gi_validation_period);
 }
 
+void RSC_SimulationVisionReSTIR::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("is_enabled", is_enabled);
+    archive.deserialize("disocclusion_position_threshold", disocclusion_position_threshold);
+    archive.deserialize("disocclusion_normal_threshold", disocclusion_normal_threshold);
+    archive.deserialize("max_specular_chain", max_specular_chain);
+    archive.deserialize("di_m_cap", di_m_cap);
+    archive.deserialize("di_spatial_neighbors", di_spatial_neighbors);
+    archive.deserialize("di_spatial_radius", di_spatial_radius);
+    archive.deserialize("is_gi_bounce_nee_enabled", is_gi_bounce_nee_enabled);
+    archive.deserialize("gi_m_cap", gi_m_cap);
+    archive.deserialize("gi_spatial_neighbors", gi_spatial_neighbors);
+    archive.deserialize("gi_spatial_radius", gi_spatial_radius);
+    archive.deserialize("gi_validation_period", gi_validation_period);
+}
+
+void RSC_SimulationVisionReSTIR::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("is_enabled", is_enabled);
+    archive.serialize("disocclusion_position_threshold", disocclusion_position_threshold);
+    archive.serialize("disocclusion_normal_threshold", disocclusion_normal_threshold);
+    archive.serialize("max_specular_chain", max_specular_chain);
+    archive.serialize("di_m_cap", di_m_cap);
+    archive.serialize("di_spatial_neighbors", di_spatial_neighbors);
+    archive.serialize("di_spatial_radius", di_spatial_radius);
+    archive.serialize("is_gi_bounce_nee_enabled", is_gi_bounce_nee_enabled);
+    archive.serialize("gi_m_cap", gi_m_cap);
+    archive.serialize("gi_spatial_neighbors", gi_spatial_neighbors);
+    archive.serialize("gi_spatial_radius", gi_spatial_radius);
+    archive.serialize("gi_validation_period", gi_validation_period);
+}
+
 bool RSC_SimulationVisionDenoiseNone::operator==(
     const RSC_SimulationVisionDenoiseNone &other
 ) const {
@@ -345,9 +500,13 @@ bool RSC_SimulationVisionDenoiseNone::operator==(
 
 void RSC_SimulationVisionDenoiseNone::_validate(RS_RSCValidator &) const {}
 
-void RSC_SimulationVisionDenoiseNone::_read(const RS_RSCPropertyTreeReader &) {}
+void RSC_SimulationVisionDenoiseNone::_read(const RS_RSCFileTreeReader &) {}
 
-void RSC_SimulationVisionDenoiseNone::_write(RS_RSCPropertyTreeWriter &) const {}
+void RSC_SimulationVisionDenoiseNone::_write(RS_RSCFileTreeWriter &) const {}
+
+void RSC_SimulationVisionDenoiseNone::_deserialize(RS_RSCArchive &) {}
+
+void RSC_SimulationVisionDenoiseNone::_serialize(RS_RSCArchive &) const {}
 
 bool RSC_SimulationVisionDenoiseAtrous::operator==(
     const RSC_SimulationVisionDenoiseAtrous &other
@@ -369,7 +528,7 @@ void RSC_SimulationVisionDenoiseAtrous::_validate(RS_RSCValidator &validator) co
     );
 }
 
-void RSC_SimulationVisionDenoiseAtrous::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationVisionDenoiseAtrous::_read(const RS_RSCFileTreeReader &tree) {
     atrous_iterations = tree.get<RSize>("atrous_iterations", atrous_iterations);
     atrous_min_passes = tree.get<RSize>("atrous_min_passes", atrous_min_passes);
     sigma_color = tree.get<RFloat>("sigma_color", sigma_color);
@@ -377,12 +536,28 @@ void RSC_SimulationVisionDenoiseAtrous::_read(const RS_RSCPropertyTreeReader &tr
     sigma_depth = tree.get<RFloat>("sigma_depth", sigma_depth);
 }
 
-void RSC_SimulationVisionDenoiseAtrous::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationVisionDenoiseAtrous::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("atrous_iterations", atrous_iterations);
     tree.add("atrous_min_passes", atrous_min_passes);
     tree.add("sigma_color", sigma_color);
     tree.add("sigma_normal", sigma_normal);
     tree.add("sigma_depth", sigma_depth);
+}
+
+void RSC_SimulationVisionDenoiseAtrous::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("atrous_iterations", atrous_iterations);
+    archive.deserialize("atrous_min_passes", atrous_min_passes);
+    archive.deserialize("sigma_color", sigma_color);
+    archive.deserialize("sigma_normal", sigma_normal);
+    archive.deserialize("sigma_depth", sigma_depth);
+}
+
+void RSC_SimulationVisionDenoiseAtrous::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("atrous_iterations", atrous_iterations);
+    archive.serialize("atrous_min_passes", atrous_min_passes);
+    archive.serialize("sigma_color", sigma_color);
+    archive.serialize("sigma_normal", sigma_normal);
+    archive.serialize("sigma_depth", sigma_depth);
 }
 
 bool RSC_SimulationVisionDenoiseSVGF::operator==(
@@ -411,7 +586,7 @@ void RSC_SimulationVisionDenoiseSVGF::_validate(RS_RSCValidator &validator) cons
     );
 }
 
-void RSC_SimulationVisionDenoiseSVGF::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationVisionDenoiseSVGF::_read(const RS_RSCFileTreeReader &tree) {
     atrous_iterations = tree.get<RSize>("atrous_iterations", atrous_iterations);
     atrous_min_passes = tree.get<RSize>("atrous_min_passes", atrous_min_passes);
     sigma_color = tree.get<RFloat>("sigma_color", sigma_color);
@@ -422,7 +597,7 @@ void RSC_SimulationVisionDenoiseSVGF::_read(const RS_RSCPropertyTreeReader &tree
     temporal_min_history = tree.get<RFloat>("temporal_min_history", temporal_min_history);
 }
 
-void RSC_SimulationVisionDenoiseSVGF::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationVisionDenoiseSVGF::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("atrous_iterations", atrous_iterations);
     tree.add("atrous_min_passes", atrous_min_passes);
     tree.add("sigma_color", sigma_color);
@@ -431,6 +606,28 @@ void RSC_SimulationVisionDenoiseSVGF::_write(RS_RSCPropertyTreeWriter &tree) con
     tree.add("temporal_alpha", temporal_alpha);
     tree.add("temporal_alpha_moments", temporal_alpha_moments);
     tree.add("temporal_min_history", temporal_min_history);
+}
+
+void RSC_SimulationVisionDenoiseSVGF::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("atrous_iterations", atrous_iterations);
+    archive.deserialize("atrous_min_passes", atrous_min_passes);
+    archive.deserialize("sigma_color", sigma_color);
+    archive.deserialize("sigma_normal", sigma_normal);
+    archive.deserialize("sigma_depth", sigma_depth);
+    archive.deserialize("temporal_alpha", temporal_alpha);
+    archive.deserialize("temporal_alpha_moments", temporal_alpha_moments);
+    archive.deserialize("temporal_min_history", temporal_min_history);
+}
+
+void RSC_SimulationVisionDenoiseSVGF::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("atrous_iterations", atrous_iterations);
+    archive.serialize("atrous_min_passes", atrous_min_passes);
+    archive.serialize("sigma_color", sigma_color);
+    archive.serialize("sigma_normal", sigma_normal);
+    archive.serialize("sigma_depth", sigma_depth);
+    archive.serialize("temporal_alpha", temporal_alpha);
+    archive.serialize("temporal_alpha_moments", temporal_alpha_moments);
+    archive.serialize("temporal_min_history", temporal_min_history);
 }
 
 bool RSC_SimulationVision::operator==(const RSC_SimulationVision &other) const {
@@ -444,14 +641,14 @@ void RSC_SimulationVision::_validate(RS_RSCValidator &validator) const {
     denoise.visit([&validator](const auto &d) { d.validate(validator); });
 }
 
-void RSC_SimulationVision::_read(const RS_RSCPropertyTreeReader &tree) {
-    if (tree.isChildExist("trace")) {
+void RSC_SimulationVision::_read(const RS_RSCFileTreeReader &tree) {
+    if (tree.hasChild("trace")) {
         trace.read(tree.getChild("trace"));
     }
-    if (tree.isChildExist("restir")) {
+    if (tree.hasChild("restir")) {
         restir.read(tree.getChild("restir"));
     }
-    if (tree.isChildExist("denoise")) {
+    if (tree.hasChild("denoise")) {
         auto denoise_tree = tree.getChild("denoise");
         auto children = denoise_tree.getChildren();
         if (children.empty()) {
@@ -479,7 +676,7 @@ void RSC_SimulationVision::_read(const RS_RSCPropertyTreeReader &tree) {
     }
 }
 
-void RSC_SimulationVision::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationVision::_write(RS_RSCFileTreeWriter &tree) const {
     trace.write(tree.addChild("trace"));
     restir.write(tree.addChild("restir"));
     auto denoise_tree = tree.addChild("denoise");
@@ -495,6 +692,18 @@ void RSC_SimulationVision::_write(RS_RSCPropertyTreeWriter &tree) const {
     });
 }
 
+void RSC_SimulationVision::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("trace", trace);
+    archive.deserialize("restir", restir);
+    archive.deserializeVariant("denoise", denoise);
+}
+
+void RSC_SimulationVision::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("trace", trace);
+    archive.serialize("restir", restir);
+    archive.serializeVariant("denoise", denoise);
+}
+
 bool RSC_SimulationControl::operator==(const RSC_SimulationControl &other) const {
     return RSC_Base::operator==(other) && frequency == other.frequency;
 }
@@ -505,12 +714,20 @@ void RSC_SimulationControl::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationControl::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationControl::_read(const RS_RSCFileTreeReader &tree) {
     frequency = tree.get("frequency", frequency);
 }
 
-void RSC_SimulationControl::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationControl::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("frequency", frequency);
+}
+
+void RSC_SimulationControl::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("frequency", frequency);
+}
+
+void RSC_SimulationControl::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("frequency", frequency);
 }
 
 bool RSC_SimulationRecord::operator==(const RSC_SimulationRecord &other) const {
@@ -523,12 +740,20 @@ void RSC_SimulationRecord::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationRecord::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationRecord::_read(const RS_RSCFileTreeReader &tree) {
     frequency = tree.get("frequency", frequency);
 }
 
-void RSC_SimulationRecord::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationRecord::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("frequency", frequency);
+}
+
+void RSC_SimulationRecord::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("frequency", frequency);
+}
+
+void RSC_SimulationRecord::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("frequency", frequency);
 }
 
 bool RSC_SimulationSentinel::operator==(const RSC_SimulationSentinel &other) const {
@@ -538,14 +763,24 @@ bool RSC_SimulationSentinel::operator==(const RSC_SimulationSentinel &other) con
 
 void RSC_SimulationSentinel::_validate(RS_RSCValidator &) const {}
 
-void RSC_SimulationSentinel::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationSentinel::_read(const RS_RSCFileTreeReader &tree) {
     is_enabled = tree.get("is_enabled", is_enabled);
     degenerate_min_dt = tree.get<RFloat>("degenerate_min_dt", degenerate_min_dt);
 }
 
-void RSC_SimulationSentinel::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationSentinel::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("is_enabled", is_enabled);
     tree.add("degenerate_min_dt", degenerate_min_dt);
+}
+
+void RSC_SimulationSentinel::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("is_enabled", is_enabled);
+    archive.deserialize("degenerate_min_dt", degenerate_min_dt);
+}
+
+void RSC_SimulationSentinel::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("is_enabled", is_enabled);
+    archive.serialize("degenerate_min_dt", degenerate_min_dt);
 }
 
 bool RSC_SimulationRuntime::operator==(const RSC_SimulationRuntime &other) const {
@@ -562,7 +797,7 @@ void RSC_SimulationRuntime::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_SimulationRuntime::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_SimulationRuntime::_read(const RS_RSCFileTreeReader &tree) {
     is_paused_on_start = tree.get("is_paused_on_start", is_paused_on_start);
     max_time = tree.get("max_time", max_time);
     record_buffer_size = tree.get("record_buffer_size", record_buffer_size);
@@ -572,7 +807,7 @@ void RSC_SimulationRuntime::_read(const RS_RSCPropertyTreeReader &tree) {
     log_level = tree.get("log_level", log_level);
 }
 
-void RSC_SimulationRuntime::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_SimulationRuntime::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("is_paused_on_start", is_paused_on_start);
     tree.add("max_time", max_time);
     tree.add("record_buffer_size", record_buffer_size);
@@ -580,6 +815,26 @@ void RSC_SimulationRuntime::_write(RS_RSCPropertyTreeWriter &tree) const {
     writeEnum(tree, "compute_accuracy", compute_accuracy);
     writeEnum(tree, "memory_accuracy", memory_accuracy);
     tree.add("log_level", log_level);
+}
+
+void RSC_SimulationRuntime::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("is_paused_on_start", is_paused_on_start);
+    archive.deserialize("max_time", max_time);
+    archive.deserialize("record_buffer_size", record_buffer_size);
+    archive.deserialize("is_save_record", is_save_record);
+    archive.deserialize("compute_accuracy", compute_accuracy);
+    archive.deserialize("memory_accuracy", memory_accuracy);
+    archive.deserialize("log_level", log_level);
+}
+
+void RSC_SimulationRuntime::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("is_paused_on_start", is_paused_on_start);
+    archive.serialize("max_time", max_time);
+    archive.serialize("record_buffer_size", record_buffer_size);
+    archive.serialize("is_save_record", is_save_record);
+    archive.serialize("compute_accuracy", compute_accuracy);
+    archive.serialize("memory_accuracy", memory_accuracy);
+    archive.serialize("log_level", log_level);
 }
 
 bool RSC_Simulation::operator==(const RSC_Simulation &other) const {
@@ -603,10 +858,10 @@ void RSC_Simulation::_validate(RS_RSCValidator &validator) const {
     runtime.validate(validator);
 }
 
-void RSC_Simulation::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_Simulation::_read(const RS_RSCFileTreeReader &tree) {
     seed = tree.get("seed", seed);
 
-    if (tree.isChildExist("stop_condition")) {
+    if (tree.hasChild("stop_condition")) {
         auto stop_condition_str = tree.get<string>("stop_condition", "");
         try {
             stop_condition = stop_condition_str;
@@ -615,39 +870,39 @@ void RSC_Simulation::_read(const RS_RSCPropertyTreeReader &tree) {
         }
     }
 
-    if (tree.isChildExist("environment")) {
+    if (tree.hasChild("environment")) {
         environment.read(tree.getChild("environment"));
     }
-    if (tree.isChildExist("time")) {
+    if (tree.hasChild("time")) {
         time.read(tree.getChild("time"));
     }
-    if (tree.isChildExist("soft_body")) {
+    if (tree.hasChild("soft_body")) {
         soft_body.read(tree.getChild("soft_body"));
     }
-    if (tree.isChildExist("rigid_body")) {
+    if (tree.hasChild("rigid_body")) {
         rigid_body.read(tree.getChild("rigid_body"));
     }
-    if (tree.isChildExist("contact")) {
+    if (tree.hasChild("contact")) {
         contact.read(tree.getChild("contact"));
     }
-    if (tree.isChildExist("sentinel")) {
+    if (tree.hasChild("sentinel")) {
         sentinel.read(tree.getChild("sentinel"));
     }
-    if (tree.isChildExist("vision")) {
+    if (tree.hasChild("vision")) {
         vision.read(tree.getChild("vision"));
     }
-    if (tree.isChildExist("control")) {
+    if (tree.hasChild("control")) {
         control.read(tree.getChild("control"));
     }
-    if (tree.isChildExist("record")) {
+    if (tree.hasChild("record")) {
         record.read(tree.getChild("record"));
     }
-    if (tree.isChildExist("runtime")) {
+    if (tree.hasChild("runtime")) {
         runtime.read(tree.getChild("runtime"));
     }
 }
 
-void RSC_Simulation::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_Simulation::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("seed", seed);
     environment.write(tree.addChild("environment"));
     time.write(tree.addChild("time"));
@@ -659,6 +914,36 @@ void RSC_Simulation::_write(RS_RSCPropertyTreeWriter &tree) const {
     control.write(tree.addChild("control"));
     record.write(tree.addChild("record"));
     runtime.write(tree.addChild("runtime"));
+}
+
+void RSC_Simulation::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("seed", seed);
+    archive.deserialize("stop_condition", stop_condition);
+    archive.deserialize("environment", environment);
+    archive.deserialize("time", time);
+    archive.deserialize("soft_body", soft_body);
+    archive.deserialize("rigid_body", rigid_body);
+    archive.deserialize("contact", contact);
+    archive.deserialize("vision", vision);
+    archive.deserialize("sentinel", sentinel);
+    archive.deserialize("control", control);
+    archive.deserialize("record", record);
+    archive.deserialize("runtime", runtime);
+}
+
+void RSC_Simulation::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("seed", seed);
+    archive.serialize("stop_condition", stop_condition);
+    archive.serialize("environment", environment);
+    archive.serialize("time", time);
+    archive.serialize("soft_body", soft_body);
+    archive.serialize("rigid_body", rigid_body);
+    archive.serialize("contact", contact);
+    archive.serialize("vision", vision);
+    archive.serialize("sentinel", sentinel);
+    archive.serialize("control", control);
+    archive.serialize("record", record);
+    archive.serialize("runtime", runtime);
 }
 
 }  // namespace rsc

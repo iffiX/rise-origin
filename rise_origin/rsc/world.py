@@ -58,11 +58,20 @@ class World(RSC_World):
         super().__init__()
         self.name = name
         self.simulation = simulation if simulation is not None else Simulation()
-        # The container casters wrap each concrete builder into its variant on assignment.
-        self.resources = list(resources)
-        self.essences = list(essences)
-        self.entities = list(entities)
-        self.records = list(records)
-        self.signals = list(signals)
-        self.recorders = list(recorders)
-        self.controllers = list(controllers)
+        # The container casters wrap each concrete builder into its variant
+        # as it lands; extending the live vectors streams one element at a
+        # time, so a big build never stands in memory twice.
+        self.resources.clear()
+        self.resources.extend(resources)
+        self.essences.clear()
+        self.essences.extend(essences)
+        self.entities.clear()
+        self.entities.extend(entities)
+        self.records.clear()
+        self.records.extend(records)
+        self.signals.clear()
+        self.signals.extend(signals)
+        self.recorders.clear()
+        self.recorders.extend(recorders)
+        self.controllers.clear()
+        self.controllers.extend(controllers)

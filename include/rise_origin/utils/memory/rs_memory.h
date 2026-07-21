@@ -5,6 +5,8 @@
 #define RS_MEMORY_H
 
 #include <cassert>
+#include <cstdlib>
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -695,6 +697,208 @@ class RS_MemoryScopedProvider final : public RS_MemoryProvider {
             }
         }
     }
+};
+
+/**
+ * @brief STL-compatible allocator that allocates host memory through an RS_MemoryProvider.
+ *
+ * RS_MemoryAllocator lets standard containers (and RS_Bytes) allocate through a memory
+ * provider. The default provider uses malloc/free directly with zero tracking overhead;
+ * a custom provider stores a small header before the user data so the allocation can be
+ * freed back through the provider.
+ */
+template <typename T>
+class RS_MemoryAllocator {
+   public:
+    // STL allocator interface requirements (C++17 and later)
+    // @note For generic compatibility use std::size_t etc. instead of RISE types
+    using value_type = T;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using propagate_on_container_copy_assignment = std::false_type;
+    using propagate_on_container_move_assignment = std::true_type;
+    using propagate_on_container_swap = std::true_type;
+    using is_always_equal = std::false_type;
+
+   private:
+    /**
+     * @brief Header stored before user data for non-default providers.
+     *
+     * This header is only used when provider is not RS_MemoryDefaultProvider.
+     * It stores the RS_MemoryPtr needed for proper deallocation.
+     */
+    struct AllocationHeader {
+        void* base_ptr;            // Base pointer from provider (for free)
+        RBigSize total_bytes;      // Total allocated bytes including header
+        RS_DeviceLocation device;  // Device location of the allocation
+    };
+
+    static constexpr size_t HEADER_SIZE = sizeof(AllocationHeader);
+    static constexpr size_t HEADER_ALIGN = alignof(AllocationHeader);
+
+   public:
+    /**
+     * @brief Construct allocator with a memory provider.
+     *
+     * @param provider The memory provider to use for allocations (must not be null)
+     *                 Default is RS_MemoryDefaultProvider which uses zero-cost malloc/free
+     */
+    explicit RS_MemoryAllocator(
+        RS_MemoryProvider* provider = &RS_MemoryDefaultProvider::getInstance()
+    ) noexcept
+        : _provider(provider) {
+        if (!provider) {
+            // This should never happen in practice, but fail gracefully
+            _provider = &RS_MemoryDefaultProvider::getInstance();
+        }
+        _is_default_provider = (_provider->type == RSE_MEMORY_PROVIDER_TYPE_DEFAULT);
+    }
+
+    /**
+     * @brief Copy constructor
+     */
+    RS_MemoryAllocator(const RS_MemoryAllocator& other) noexcept = default;
+
+    /**
+     * @brief Rebind constructor for different type
+     *
+     * Required for STL containers that allocate internal nodes of different types
+     * (e.g., std::list nodes, std::unordered_map buckets)
+     */
+    template <typename U>
+    RS_MemoryAllocator(const RS_MemoryAllocator<U>& other) noexcept
+        : _provider(other._provider), _is_default_provider(other._is_default_provider) {}
+
+    /**
+     * @brief Allocate memory for n objects of type T.
+     *
+     * For default provider: Uses std::malloc directly (zero tracking overhead)
+     * For custom provider: Allocates header + data, stores metadata for deallocation
+     *
+     * @param n Number of objects to allocate space for
+     * @return Pointer to allocated memory (never null, throws on failure)
+     * @throws RS_HostMemoryException if allocation fails or size overflows
+     */
+    [[nodiscard]] T* allocate(size_type n) {
+        if (n == 0) {
+            return nullptr;
+        }
+
+        // Check for size overflow
+        if (n > std::numeric_limits<size_type>::max() / sizeof(T)) {
+            RS_THROW(RS_HostMemoryException(
+                "Allocation size overflow: {} objects of size {} bytes", n, sizeof(T)
+            ));
+        }
+
+        const RBigSize user_bytes = n * sizeof(T);
+
+        // Fast path: Default provider uses malloc directly
+        if (_is_default_provider) {
+            void* ptr = std::malloc(user_bytes);
+            if (!ptr) {
+                RS_THROW(
+                    RS_HostMemoryException("Failed to allocate {} bytes using malloc", user_bytes)
+                );
+            }
+            return static_cast<T*>(ptr);
+        }
+
+        // Custom provider path: Allocate header + data
+        const RBigSize total_bytes = HEADER_SIZE + user_bytes;
+
+        // Use allocateHost() for host-side memory with optimal CPU affinity
+        RS_MemoryPtr mem = _provider->allocateHost(total_bytes);
+
+        // Store header at the beginning
+        AllocationHeader* header = mem.as<AllocationHeader>();
+        header->base_ptr = mem.data;
+        header->total_bytes = total_bytes;
+        header->device = mem.mem_device;
+
+        // Return pointer after header
+        void* user_ptr = static_cast<char*>(mem.data) + HEADER_SIZE;
+        return static_cast<T*>(user_ptr);
+    }
+
+    /**
+     * @brief Deallocate memory previously allocated by this allocator.
+     *
+     * For default provider: Uses std::free directly
+     * For custom provider: Retrieves header and uses provider to free
+     *
+     * @param ptr Pointer to memory to deallocate (must be from allocate())
+     * @param n Number of objects (ignored, size is stored in header)
+     */
+    void deallocate(T* ptr, size_type n) noexcept {
+        if (ptr == nullptr) {
+            return;
+        }
+
+        // Fast path: Default provider uses free directly
+        if (_is_default_provider) {
+            std::free(ptr);
+            return;
+        }
+
+        // Custom provider path: Retrieve header and free via provider
+        void* header_ptr = static_cast<char*>(static_cast<void*>(ptr)) - HEADER_SIZE;
+        AllocationHeader* header = static_cast<AllocationHeader*>(header_ptr);
+
+        // Reconstruct RS_MemoryPtr for deallocation
+        RS_MemoryPtr mem(header->base_ptr, header->total_bytes, 0, header->device, _provider);
+
+        // Free through provider
+        mem.free();
+    }
+
+    /**
+     * @brief Get the memory provider used by this allocator.
+     * @return Pointer to the memory provider
+     */
+    RS_MemoryProvider* provider() const noexcept { return _provider; }
+
+    /**
+     * @brief Check if this allocator uses the default provider (zero-cost path).
+     * @return true if using RS_MemoryDefaultProvider, false otherwise
+     */
+    bool isDefaultProvider() const noexcept { return _is_default_provider; }
+
+    /**
+     * @brief Equality comparison.
+     *
+     * Two allocators are equal if they use the same provider.
+     * This determines if memory allocated by one can be deallocated by the other.
+     *
+     * @return true if both allocators use the same provider
+     */
+    bool operator==(const RS_MemoryAllocator& other) const noexcept {
+        return _provider == other._provider;
+    }
+
+    /**
+     * @brief Inequality comparison.
+     */
+    bool operator!=(const RS_MemoryAllocator& other) const noexcept {
+        return _provider != other._provider;
+    }
+
+    /**
+     * @brief Rebind allocator to allocate different type.
+     *
+     * Required by STL for internal allocations (e.g., list nodes, map buckets).
+     */
+    template <typename U>
+    struct rebind {
+        using other = RS_MemoryAllocator<U>;
+    };
+
+   private:
+    RS_MemoryProvider* _provider;
+    bool _is_default_provider;
+
+    template <typename U>
+    friend class RS_MemoryAllocator;
 };
 
 }  // namespace rise

@@ -30,16 +30,12 @@ class RSC_MaterialUnaryProperty : public RSC_EssenceBase {
         return RSC_EssenceBase::operator==(other) && material_reference == other.material_reference;
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_EssenceBase::serialize(s);
-        s("material_reference", material_reference);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
-    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
+    void _read(const RS_RSCFileTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCFileTreeWriter& tree) const override { (void)tree; }
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /*****************************************************************
@@ -51,10 +47,9 @@ class RSC_MaterialPhysicalPropertyBase : public RSC_MaterialUnaryProperty {
         return RSC_MaterialUnaryProperty::operator==(other);
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialUnaryProperty::serialize(s);
-    }
+   protected:
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /**
@@ -64,14 +59,11 @@ class RSC_MaterialPhysicalPropertyFixed : public RSC_MaterialPhysicalPropertyBas
    public:
     bool operator==(const RSC_MaterialPhysicalPropertyFixed& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialPhysicalPropertyBase::serialize(s);
-    }
-
    protected:
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -100,21 +92,12 @@ class RSC_MaterialPhysicalPropertySoft : public RSC_MaterialPhysicalPropertyBase
 
     bool operator==(const RSC_MaterialPhysicalPropertySoft& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialPhysicalPropertyBase::serialize(s);
-        s("elastic_modulus", elastic_modulus);
-        s("fail_stress", fail_stress);
-        s("density", density);
-        s("poissons_ratio", poissons_ratio);
-        s("min_expansion", min_expansion);
-        s("max_expansion", max_expansion);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -128,16 +111,12 @@ class RSC_MaterialPhysicalPropertyRigid : public RSC_MaterialPhysicalPropertyBas
 
     bool operator==(const RSC_MaterialPhysicalPropertyRigid& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialPhysicalPropertyBase::serialize(s);
-        s("density", density);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -158,18 +137,12 @@ class RSC_MaterialPhysicalPropertyAtlas : public RSC_MaterialPhysicalPropertyBas
 
     bool operator==(const RSC_MaterialPhysicalPropertyAtlas& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialPhysicalPropertyBase::serialize(s);
-        s("mass", mass);
-        s("com_position", com_position);
-        s("inertia", inertia);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -182,10 +155,9 @@ class RSC_MaterialOpticalPropertyBase : public RSC_MaterialUnaryProperty {
         return RSC_MaterialUnaryProperty::operator==(other);
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialUnaryProperty::serialize(s);
-    }
+   protected:
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /**
@@ -213,20 +185,11 @@ class RSC_MaterialOpticalPropertySimpleMicrofacet : public RSC_MaterialOpticalPr
 
     bool operator==(const RSC_MaterialOpticalPropertySimpleMicrofacet& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_MaterialOpticalPropertyBase::serialize(s);
-        s("albedo_texture_reference", albedo_texture_reference);
-        s("roughness_metalness_texture_reference", roughness_metalness_texture_reference);
-        s("is_transparent", is_transparent);
-        s("ior", ior);
-        s("emission_texture_reference", emission_texture_reference);
-        s("emission_intensity", emission_intensity);
-    }
-
    protected:
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

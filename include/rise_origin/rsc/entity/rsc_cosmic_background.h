@@ -22,15 +22,12 @@ class RSC_CosmicBackgroundBase : public RSC_EntityBase {
         return RSC_EntityBase::operator==(other);
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_EntityBase::serialize(s);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
-    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
+    void _read(const RS_RSCFileTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCFileTreeWriter& tree) const override { (void)tree; }
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /**
@@ -49,18 +46,12 @@ class RSC_CosmicBackgroundUniform : public RSC_CosmicBackgroundBase {
 
     bool operator==(const RSC_CosmicBackgroundUniform& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CosmicBackgroundBase::serialize(s);
-        s("texture_reference", texture_reference);
-        s("intensity", intensity);
-        s("rotation_rad", rotation_rad);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -86,20 +77,12 @@ class RSC_CosmicBackgroundGradient : public RSC_CosmicBackgroundBase {
 
     bool operator==(const RSC_CosmicBackgroundGradient& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CosmicBackgroundBase::serialize(s);
-        s("zenith_color", zenith_color);
-        s("horizon_color", horizon_color);
-        s("sun_direction", sun_direction);
-        s("sun_color", sun_color);
-        s("sun_angular_radius", sun_angular_radius);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -128,21 +111,12 @@ class RSC_CosmicBackgroundHosekWilkie : public RSC_CosmicBackgroundBase {
 
     bool operator==(const RSC_CosmicBackgroundHosekWilkie& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CosmicBackgroundBase::serialize(s);
-        s("sun_direction", sun_direction);
-        s("sun_color", sun_color);
-        s("sun_angular_radius", sun_angular_radius);
-        s("turbidity", turbidity);
-        s("ground_color", ground_color);
-        s("intensity", intensity);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

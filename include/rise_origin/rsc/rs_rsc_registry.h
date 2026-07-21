@@ -15,8 +15,8 @@
 
 #include "rise_origin/utils/data/rs_variant.h"
 #include "rise_origin/utils/rs_exception.h"
-#include "rs_rsc_property_tree_reader.h"
-#include "rs_rsc_property_tree_writer.h"
+#include "rs_rsc_file_tree_reader.h"
+#include "rs_rsc_file_tree_writer.h"
 #include "rsc_base.h"
 
 namespace rise {
@@ -34,10 +34,18 @@ class RS_RSCRegistry {
     RS_RSCRegistry &operator=(const RS_RSCRegistry &) = delete;
 
     /**
+     * @brief Get the process wide registry, built on first use.
+     */
+    static RS_RSCRegistry &getInstance() {
+        static RS_RSCRegistry instance;
+        return instance;
+    }
+
+    /**
      * @brief Set a node into the matching variant alternative, false when none matches.
      */
     template <typename... Ts>
-    bool tryAssign(RS_Variant<Ts...> &out, const RSC_Base::RSCRef<RSC_Base> &node) const {
+    static bool tryAssign(RS_Variant<Ts...> &out, const RSC_Base::RSCRef<RSC_Base> &node) {
         return ([&] {
             if (auto *held = dynamic_cast<Ts *>(node.get())) {
                 out = *held;
@@ -51,7 +59,7 @@ class RS_RSCRegistry {
      * @brief Read a { type, data } element into the matching variant alternative.
      */
     template <typename... Ts>
-    void read(RS_Variant<Ts...> &out, const RS_RSCPropertyTreeReader &element) const {
+    static void read(RS_Variant<Ts...> &out, const RS_RSCFileTreeReader &element) {
         std::string type = element.get<std::string>(RSC_Base::VAR_TYPE_KEY);
         RSC_Base::RSCRef<RSC_Base> node = make(type, element.getChild(RSC_Base::VAR_DATA_KEY));
         if (!tryAssign(out, node)) {
@@ -63,7 +71,7 @@ class RS_RSCRegistry {
      * @brief Write the held variant alternative as a { type, data } element.
      */
     template <typename... Ts>
-    void write(const RS_Variant<Ts...> &in, RS_RSCPropertyTreeWriter element) const {
+    static void write(const RS_Variant<Ts...> &in, RS_RSCFileTreeWriter element) {
         in.visit([&](const auto &held) {
             using T = std::decay_t<decltype(held)>;
             element.add(RSC_Base::VAR_TYPE_KEY, getName(typeid(T)));
@@ -74,34 +82,25 @@ class RS_RSCRegistry {
     /**
      * @brief Construct a node by type name and read it.
      */
-    RSC_Base::RSCRef<RSC_Base>
-    make(std::string_view type, const RS_RSCPropertyTreeReader &data) const;
+    static RSC_Base::RSCRef<RSC_Base> make(std::string_view type, const RS_RSCFileTreeReader &data);
 
     /**
      * @brief Get the registered name of a concrete RSC type.
      */
-    const std::string &getName(const std::type_info &type) const;
+    static const std::string &getName(const std::type_info &type);
 
     /**
      * @brief Get the registered type names grouped by category.
      */
-    std::map<std::string, std::vector<std::string>> getCategory() const;
+    static std::map<std::string, std::vector<std::string>> getCategory();
 
     /**
      * @brief Construct a default node of a type name, as an example to fill in.
      */
-    RSC_Base::RSCRef<RSC_Base> getExample(std::string_view type) const;
-
-    /**
-     * @brief Get the process wide registry, built on first use.
-     */
-    static RS_RSCRegistry &getInstance() {
-        static RS_RSCRegistry instance;
-        return instance;
-    }
+    static RSC_Base::RSCRef<RSC_Base> getExample(std::string_view type);
 
    private:
-    using ReadFn = std::function<RSC_Base::RSCRef<RSC_Base>(const RS_RSCPropertyTreeReader &)>;
+    using ReadFn = std::function<RSC_Base::RSCRef<RSC_Base>(const RS_RSCFileTreeReader &)>;
     using MakeFn = std::function<RSC_Base::RSCRef<RSC_Base>()>;
 
     /// Maps type name -> construct and read into a base node.
@@ -128,7 +127,7 @@ class RS_RSCRegistry {
      */
     template <typename T>
     void _register(const std::string &name, const std::string &category) {
-        _read_map[name] = [](const RS_RSCPropertyTreeReader &data) -> RSC_Base::RSCRef<RSC_Base> {
+        _read_map[name] = [](const RS_RSCFileTreeReader &data) -> RSC_Base::RSCRef<RSC_Base> {
             auto node = std::make_shared<T>();
             node->read(data);
             return node;
@@ -137,6 +136,26 @@ class RS_RSCRegistry {
         _name_map[std::type_index(typeid(T))] = name;
         _category_map[category].push_back(name);
     }
+
+    /**
+     * @brief Construct a node by type name and read it.
+     */
+    RSC_Base::RSCRef<RSC_Base> _make(std::string_view type, const RS_RSCFileTreeReader &data) const;
+
+    /**
+     * @brief Get the registered name of a concrete RSC type.
+     */
+    const std::string &_getName(const std::type_info &type) const;
+
+    /**
+     * @brief Get the registered type names grouped by category.
+     */
+    std::map<std::string, std::vector<std::string>> _getCategory() const;
+
+    /**
+     * @brief Construct a default node of a type name, as an example to fill in.
+     */
+    RSC_Base::RSCRef<RSC_Base> _getExample(std::string_view type) const;
 };
 
 }  // namespace rsc

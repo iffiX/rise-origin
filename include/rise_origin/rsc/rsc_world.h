@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "rise_origin/utils/data/rs_variant.h"
-#include "rise_origin/utils/serialization/rs_mp_serialization.h"
 #include "rsc_base.h"
 #include "rsc_simulation.h"
 
@@ -162,23 +161,12 @@ class RSC_World : public RSC_Base {
 
     bool operator==(const RSC_World& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("name", name);
-        s("simulation", simulation);
-        s("resources", resources);
-        s("essences", essences);
-        s("entities", entities);
-        s("records", records);
-        s("signals", signals);
-        s("recorders", recorders);
-        s("controllers", controllers);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& reader) override;
-    void _write(RS_RSCPropertyTreeWriter& writer) const override;
+    void _read(const RS_RSCFileTreeReader& reader) override;
+    void _write(RS_RSCFileTreeWriter& writer) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
     void _deepCopyShared(MemoRef memo) override;
 };

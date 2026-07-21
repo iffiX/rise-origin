@@ -15,6 +15,12 @@ struct RS_UnorderedPair {
         return (value1 == other.value1 && value2 == other.value2) ||
                (value2 == other.value1 && value1 == other.value2);
     }
+
+    template <class Serializer>
+    void serialize(Serializer& s) {
+        s("value1", value1);
+        s("value2", value2);
+    }
 };
 
 template <typename T1, typename T2>
@@ -28,6 +34,12 @@ struct RS_OrderedPair {
     }
     bool operator<(const RS_OrderedPair& other) const {
         return value1 < other.value1 || (value1 == other.value1 && value2 < other.value2);
+    }
+
+    template <class Serializer>
+    void serialize(Serializer& s) {
+        s("value1", value1);
+        s("value2", value2);
     }
 };
 
@@ -55,6 +67,13 @@ struct RS_UnorderedTriple {
         }
         return true;
     }
+
+    template <class Serializer>
+    void serialize(Serializer& s) {
+        s("value1", value1);
+        s("value2", value2);
+        s("value3", value3);
+    }
 };
 
 template <typename T1, typename T2, typename T3>
@@ -72,6 +91,13 @@ struct RS_OrderedTriple {
         return value1 < other.value1 ||
                (value1 == other.value1 &&
                 (value2 < other.value2 || (value2 == other.value2 && value3 < other.value3)));
+    }
+
+    template <class Serializer>
+    void serialize(Serializer& s) {
+        s("value1", value1);
+        s("value2", value2);
+        s("value3", value3);
     }
 };
 
@@ -99,6 +125,14 @@ struct RS_UnorderedQuadruple {
         }
         return true;
     }
+
+    template <class Serializer>
+    void serialize(Serializer& s) {
+        s("value1", value1);
+        s("value2", value2);
+        s("value3", value3);
+        s("value4", value4);
+    }
 };
 
 template <typename T1, typename T2, typename T3, typename T4>
@@ -120,6 +154,14 @@ struct RS_OrderedQuadruple {
                 (value2 < other.value2 ||
                  (value2 == other.value2 &&
                   (value3 < other.value3 || (value3 == other.value3 && value4 < other.value4)))));
+    }
+
+    template <class Serializer>
+    void serialize(Serializer& s) {
+        s("value1", value1);
+        s("value2", value2);
+        s("value3", value3);
+        s("value4", value4);
     }
 };
 

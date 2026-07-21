@@ -162,7 +162,7 @@
         );                                                                   \
         rise::RS_Timer __exec_timer;                                         \
         cudaMemcpyAsync(dst, src, count, kind, stream);                      \
-        if (RS_EnvironmentVariables::getInstance().isExecForceSync())        \
+        if (RS_EnvironmentVariables::isExecForceSync())        \
             cudaStreamSynchronize(stream);                                   \
         CUDA_ERROR_CHECK(cudaGetLastError(), function, &__exec_timer);       \
     }
@@ -179,7 +179,7 @@
         );                                                                                         \
         rise::RS_Timer __exec_timer;                                                               \
         cudaMemcpyToSymbolAsync(symbol, src, count, offset, cudaMemcpyHostToDevice, stream);       \
-        if (RS_EnvironmentVariables::getInstance().isExecForceSync())                              \
+        if (RS_EnvironmentVariables::isExecForceSync())                              \
             cudaStreamSynchronize(stream);                                                         \
         CUDA_ERROR_CHECK(cudaGetLastError(), function, &__exec_timer);                             \
     }
@@ -211,7 +211,7 @@
         );                                                             \
         rise::RS_Timer __exec_timer;                                   \
         cudaMemsetAsync(dMem, value, count, stream);                   \
-        if (RS_EnvironmentVariables::getInstance().isExecForceSync())  \
+        if (RS_EnvironmentVariables::isExecForceSync())  \
             cudaStreamSynchronize(stream);                             \
         CUDA_ERROR_CHECK(cudaGetLastError(), function, &__exec_timer); \
     }
@@ -225,7 +225,7 @@
         );                                                             \
         rise::RS_Timer __exec_timer;                                   \
         cudaMallocAsync(dMemPtr, size, stream);                        \
-        if (RS_EnvironmentVariables::getInstance().isExecForceSync())  \
+        if (RS_EnvironmentVariables::isExecForceSync())  \
             cudaStreamSynchronize(stream);                             \
         CUDA_ERROR_CHECK(cudaGetLastError(), function, &__exec_timer); \
     }
@@ -239,7 +239,7 @@
         if (dMem != nullptr) {                                             \
             rise::RS_Timer __exec_timer;                                   \
             cudaFreeAsync(dMem, stream);                                   \
-            if (RS_EnvironmentVariables::getInstance().isExecForceSync())  \
+            if (RS_EnvironmentVariables::isExecForceSync())  \
                 cudaStreamSynchronize(stream);                             \
             CUDA_ERROR_CHECK(cudaGetLastError(), function, &__exec_timer); \
         }                                                                  \
@@ -317,7 +317,7 @@
         );                                                                               \
         rise::RS_Timer __exec_timer;                                                     \
         cudaMemcpyPeerAsync(dst, dstDevice, src, srcDevice, count, stream);              \
-        if (RS_EnvironmentVariables::getInstance().isExecForceSync())                    \
+        if (RS_EnvironmentVariables::isExecForceSync())                    \
             cudaStreamSynchronize(stream);                                               \
         CUDA_ERROR_CHECK(cudaGetLastError(), function, &__exec_timer);                   \
     }
@@ -357,7 +357,7 @@
         );                                                             \
         rise::RS_Timer __exec_timer;                                   \
         cudaGraphLaunch(exec, stream);                                 \
-        if (RS_EnvironmentVariables::getInstance().isExecForceSync())  \
+        if (RS_EnvironmentVariables::isExecForceSync())  \
             cudaStreamSynchronize(stream);                             \
         CUDA_ERROR_CHECK(cudaGetLastError(), function, &__exec_timer); \
     }
@@ -412,7 +412,7 @@ HOST_QUALIFIER inline void cudaCheckCallStatus(
     if (code != cudaSuccess) {
         std::string error;
         std::string note =
-            !RS_EnvironmentVariables::getInstance().isExecForceSync()
+            !RS_EnvironmentVariables::isExecForceSync()
                 ? " Note: CUDA kernels are executing in asynchronous mode, this error may be "
                   "produced "
                   "by a past CUDA call. To accurately check CUDA errors, set the environment "
@@ -648,7 +648,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
         if (device.type == RSE_DEVICE_TYPE_CUDA && device.id != current_device)
             RcudaSetDevice(current_device);
 
-        if (RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+        if (RS_EnvironmentVariables::isExecForceSync()) {
             RcudaStreamSynchronize(stream);
             --stream_event_count;
         }
@@ -690,7 +690,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
             RcudaFreeAsync(ptr.data, stream);
             ++stream_event_count;
 
-            if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+            if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                 RcudaStreamSynchronize(stream);
                 --stream_event_count;
             }
@@ -723,7 +723,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
             RcudaMemsetAsync((ptr + offset).data, value, size, stream);
             ++stream_event_count;
 
-            if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+            if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                 RcudaStreamSynchronize(stream);
                 --stream_event_count;
             }
@@ -776,7 +776,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                 RcudaMemcpyAsync(dst.data, src.data, size, cudaMemcpyDeviceToDevice, stream);
                 ++stream_event_count;
 
-                if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+                if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                     RcudaStreamSynchronize(stream);
                     --stream_event_count;
                 }
@@ -813,7 +813,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                         );
                         ++stream_event_count;
 
-                        if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+                        if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                             RcudaStreamSynchronize(stream);
                             --stream_event_count;
                         }
@@ -829,7 +829,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                             );
                             ++stream_copy_to_event_count;
 
-                            if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+                            if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                                 RcudaStreamSynchronize(stream_copy_to);
                                 --stream_copy_to_event_count;
                             }
@@ -844,7 +844,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                             );
                             ++stream_copy_from_event_count;
 
-                            if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+                            if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                                 RcudaStreamSynchronize(stream_copy_from);
                                 --stream_copy_from_event_count;
                             }
@@ -879,7 +879,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                 RcudaMemcpyAsync(dst.data, src.data, size, kind, stream);
                 ++stream_event_count;
 
-                if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+                if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                     RcudaStreamSynchronize(stream);
                     --stream_event_count;
                 }
@@ -888,7 +888,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                     RcudaMemcpyAsync(dst.data, src.data, size, kind, stream_copy_to);
                     ++stream_copy_to_event_count;
 
-                    if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+                    if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                         RcudaStreamSynchronize(stream_copy_to);
                         --stream_copy_to_event_count;
                     }
@@ -896,7 +896,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
                     RcudaMemcpyAsync(dst.data, src.data, size, kind, stream_copy_from);
                     ++stream_copy_from_event_count;
 
-                    if (sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+                    if (sync || RS_EnvironmentVariables::isExecForceSync()) {
                         RcudaStreamSynchronize(stream_copy_from);
                         --stream_copy_from_event_count;
                     }
@@ -982,7 +982,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
             }
             ++stream_event_count;
 
-            if (config.sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+            if (config.sync || RS_EnvironmentVariables::isExecForceSync()) {
                 CUDA_CHECK_AFTER_CALL(
                     ComputeFunction,
                     RS_CEIL_DIV(config.thread_num, config.block_size),
@@ -1049,7 +1049,7 @@ class RS_MemoryCudaProvider final : public RS_MemoryProvider {
 
             ++stream_event_count;
 
-            if (config.sync || RS_EnvironmentVariables::getInstance().isExecForceSync()) {
+            if (config.sync || RS_EnvironmentVariables::isExecForceSync()) {
                 CUDA_CHECK_AFTER_CALL(
                     ComputeFunction,
                     fmt::format(

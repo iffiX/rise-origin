@@ -1,12 +1,42 @@
 ################################################################
+# External libraries
+################################################################
+find_package(HDF5 REQUIRED)
+# CMake >=3.30 (CMP0167) defaults find_package(Boost) to config mode, which
+# needs BoostConfig.cmake (Boost >=1.70). The manylinux image's boost-devel is
+# 1.66 (no config files), so force the classic FindBoost module to locate it.
+# Windows conda/vcpkg Boost ships BoostConfig.cmake, so keep config mode there.
+if (POLICY CMP0167 AND NOT WIN32)
+    cmake_policy(SET CMP0167 OLD)
+endif ()
+find_package(Boost REQUIRED COMPONENTS filesystem program_options fiber context)
+find_package(TBB REQUIRED)
+
+################################################################
 # Bundled libraries
 ################################################################
 rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/fmt BINARY_DIR ${CMAKE_BINARY_DIR}/lib/fmt)
 rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/spdlog BINARY_DIR ${CMAKE_BINARY_DIR}/lib/spdlog)
 rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/hosek-wilkie BINARY_DIR ${CMAKE_BINARY_DIR}/lib/hosek-wilkie)
 
+set(ZSTD_BUILD_PROGRAMS OFF CACHE BOOL "Disable zstd programs" FORCE)
+set(ZSTD_BUILD_TESTS OFF CACHE BOOL "Disable zstd tests" FORCE)
+set(ZSTD_BUILD_SHARED OFF CACHE BOOL "Disable zstd shared library" FORCE)
+set(ZSTD_BUILD_STATIC ON CACHE BOOL "Enable zstd static library" FORCE)
+set(ZSTD_LEGACY_SUPPORT OFF CACHE BOOL "Disable zstd legacy support" FORCE)
+rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/zstd/build/cmake BINARY_DIR ${CMAKE_BINARY_DIR}/lib/zstd)
+
 if (uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG" AND NOT WIN32)
     rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/backward-cpp BINARY_DIR ${CMAKE_BINARY_DIR}/lib/backward-cpp)
+endif ()
+
+################################################################
+# Python
+################################################################
+find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
+
+if (RISE_ORIGIN_BUILD_CORE)
+    rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/pybind11 BINARY_DIR ${CMAKE_BINARY_DIR}/lib/pybind11)
 endif ()
 
 ################################################################
@@ -23,25 +53,6 @@ if (RISE_ORIGIN_BACKEND STREQUAL "cuda")
     message(STATUS "Found CUDA ${CUDAToolkit_VERSION}")
 
     set(CMAKE_CUDA_SEPARABLE_COMPILATION ON)
-endif ()
-
-################################################################
-# Host libraries
-################################################################
-find_package(HDF5 REQUIRED)
-# CMake >=3.30 (CMP0167) defaults find_package(Boost) to config mode, which
-# needs BoostConfig.cmake (Boost >=1.70). The manylinux image's boost-devel is
-# 1.66 (no config files), so force the classic FindBoost module to locate it.
-# Windows conda/vcpkg Boost ships BoostConfig.cmake, so keep config mode there.
-if (POLICY CMP0167 AND NOT WIN32)
-    cmake_policy(SET CMP0167 OLD)
-endif ()
-find_package(Boost REQUIRED COMPONENTS filesystem program_options fiber context)
-find_package(TBB REQUIRED)
-find_package(Python3 COMPONENTS Interpreter Development.Module REQUIRED)
-
-if (RISE_ORIGIN_BUILD_CORE)
-    rise_add_lib_subdirectory(${CMAKE_SOURCE_DIR}/lib/pybind11 BINARY_DIR ${CMAKE_BINARY_DIR}/lib/pybind11)
 endif ()
 
 ################################################################

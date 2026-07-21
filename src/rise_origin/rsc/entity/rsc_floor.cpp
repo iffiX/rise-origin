@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/entity/rsc_floor.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_util.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 
@@ -19,16 +20,26 @@ void RSC_FloorBase::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_FloorBase::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_FloorBase::_read(const RS_RSCFileTreeReader &tree) {
     RSC_EntityBase::_read(tree);
-    if (tree.isChildExist("material_reference")) {
+    if (tree.hasChild("material_reference")) {
         material_reference = tree.get<string>("material_reference");
     }
 }
 
-void RSC_FloorBase::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_FloorBase::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_EntityBase::_write(tree);
     tree.add("material_reference", material_reference);
+}
+
+void RSC_FloorBase::_deserialize(RS_RSCArchive &archive) {
+    RSC_EntityBase::_deserialize(archive);
+    archive.deserialize("material_reference", material_reference);
+}
+
+void RSC_FloorBase::_serialize(RS_RSCArchive &archive) const {
+    RSC_EntityBase::_serialize(archive);
+    archive.serialize("material_reference", material_reference);
 }
 
 bool RSC_FloorFlat::operator==(const RSC_FloorFlat &other) const {
@@ -42,16 +53,28 @@ void RSC_FloorFlat::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_FloorFlat::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_FloorFlat::_read(const RS_RSCFileTreeReader &tree) {
     RSC_FloorBase::_read(tree);
     height = tree.get("height", height);
     uv_scale = tree.get("uv_scale", uv_scale);
 }
 
-void RSC_FloorFlat::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_FloorFlat::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_FloorBase::_write(tree);
     tree.add("height", height);
     tree.add("uv_scale", uv_scale);
+}
+
+void RSC_FloorFlat::_deserialize(RS_RSCArchive &archive) {
+    RSC_FloorBase::_deserialize(archive);
+    archive.deserialize("height", height);
+    archive.deserialize("uv_scale", uv_scale);
+}
+
+void RSC_FloorFlat::_serialize(RS_RSCArchive &archive) const {
+    RSC_FloorBase::_serialize(archive);
+    archive.serialize("height", height);
+    archive.serialize("uv_scale", uv_scale);
 }
 
 bool RSC_FloorArray::operator==(const RSC_FloorArray &other) const {
@@ -76,7 +99,7 @@ void RSC_FloorArray::_validate(RS_RSCValidator &validator) const {
     });
 }
 
-void RSC_FloorArray::_read(const RS_RSCPropertyTreeReader &tree) {
+void RSC_FloorArray::_read(const RS_RSCFileTreeReader &tree) {
     RSC_FloorBase::_read(tree);
     x_size = tree.get("x_size", x_size);
     y_size = tree.get("y_size", y_size);
@@ -85,19 +108,15 @@ void RSC_FloorArray::_read(const RS_RSCPropertyTreeReader &tree) {
     is_x_repeat = tree.get("is_x_repeat", is_x_repeat);
     is_y_repeat = tree.get("is_y_repeat", is_y_repeat);
     RSize num = x_values * y_values;
-    height = tree.get<std::vector<float>>("height");
-    if (height.size() != num) {
-        RS_THROW(RS_InvalidCharacterizationException(
-            "Floor elevation height array size is {}, required {} (X_Values = {}, Y_Values = {})",
-            height.size(),
-            num,
-            x_values,
-            y_values
-        ));
+    if (tree.hasChild("height")) {
+        height.resize(num);
+        tree.getBulk("height", height.data(), {num});
+    } else {
+        height.clear();
     }
 }
 
-void RSC_FloorArray::_write(RS_RSCPropertyTreeWriter &tree) const {
+void RSC_FloorArray::_write(RS_RSCFileTreeWriter &tree) const {
     RSC_FloorBase::_write(tree);
     tree.add("x_size", x_size);
     tree.add("y_size", y_size);
@@ -105,7 +124,29 @@ void RSC_FloorArray::_write(RS_RSCPropertyTreeWriter &tree) const {
     tree.add("y_values", y_values);
     tree.add("is_x_repeat", is_x_repeat);
     tree.add("is_y_repeat", is_y_repeat);
-    tree.add("height", height);
+    if (!height.empty()) tree.addBulk("height", height.data(), {height.size()});
+}
+
+void RSC_FloorArray::_deserialize(RS_RSCArchive &archive) {
+    RSC_FloorBase::_deserialize(archive);
+    archive.deserialize("x_size", x_size);
+    archive.deserialize("y_size", y_size);
+    archive.deserialize("x_values", x_values);
+    archive.deserialize("y_values", y_values);
+    archive.deserialize("is_x_repeat", is_x_repeat);
+    archive.deserialize("is_y_repeat", is_y_repeat);
+    archive.deserialize("height", height);
+}
+
+void RSC_FloorArray::_serialize(RS_RSCArchive &archive) const {
+    RSC_FloorBase::_serialize(archive);
+    archive.serialize("x_size", x_size);
+    archive.serialize("y_size", y_size);
+    archive.serialize("x_values", x_values);
+    archive.serialize("y_values", y_values);
+    archive.serialize("is_x_repeat", is_x_repeat);
+    archive.serialize("is_y_repeat", is_y_repeat);
+    archive.serialize("height", height);
 }
 
 }  // namespace rsc

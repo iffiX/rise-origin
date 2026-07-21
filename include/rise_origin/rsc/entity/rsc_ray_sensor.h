@@ -46,21 +46,12 @@ class RSC_RaySensorRecord : public RSC_RecordBase {
 
     bool operator==(const RSC_RaySensorRecord& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("has_hit", has_hit);
-        s("has_entity_info", has_entity_info);
-        s("has_entity_detail", has_entity_detail);
-        s("has_material", has_material);
-        s("has_normal", has_normal);
-        s("has_velocity", has_velocity);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -79,17 +70,12 @@ class RSC_RaySensorSignal : public RSC_SignalBase {
 
     bool operator==(const RSC_RaySensorSignal& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_SignalBase::serialize(s);
-        s("position_signal_num", position_signal_num);
-        s("orientation_signal_num", orientation_signal_num);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -105,29 +91,23 @@ class RSC_RaySensorBase : public RSC_EntityBase {
     RFloat max_range = 100.0;
 
     /// Ray sensor record.
-    RSC_RaySensorRecord record;
+    RSCRef<RSC_RaySensorRecord> record = RSC_RaySensorRecord();
 
     /// Ray sensor signal.
-    RSC_RaySensorSignal signal;
+    RSCRef<RSC_RaySensorSignal> signal = RSC_RaySensorSignal();
 
     bool operator==(const RSC_RaySensorBase& other) const {
         return RSC_EntityBase::operator==(other) && ray_directions == other.ray_directions &&
                max_range == other.max_range && record == other.record && signal == other.signal;
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_EntityBase::serialize(s);
-        s("ray_directions", ray_directions);
-        s("max_range", max_range);
-        s("record", record);
-        s("signal", signal);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
+    void _deepCopyShared(MemoRef memo) override;
 };
 
 /**
@@ -143,16 +123,11 @@ class RSC_RaySensorFree : public RSC_RaySensorBase {
 
     bool operator==(const RSC_RaySensorFree& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RaySensorBase::serialize(s);
-        s("origin_position", origin_position);
-        s("orientation", orientation);
-    }
-
    protected:
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -179,20 +154,12 @@ class RSC_RaySensorRigidBodyLinked : public RSC_RaySensorBase {
 
     bool operator==(const RSC_RaySensorRigidBodyLinked& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RaySensorBase::serialize(s);
-        s("structure_name", structure_name);
-        s("body_sid", body_sid);
-        s("segment_bid", segment_bid);
-        s("relative_anchor", relative_anchor);
-        s("relative_orientation", relative_orientation);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

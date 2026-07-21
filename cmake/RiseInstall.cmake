@@ -8,8 +8,8 @@ include(GNUInstallDirs)
 ################################################################
 
 if (DEFINED SKBUILD)
-    # Python low-level extension module (wheel layout)
-    install(TARGETS rise_origin_python_core
+    # Python low-level extension module and the shared core it links, co-located in the package.
+    install(TARGETS rise_origin_python_core rise_origin_core
             LIBRARY DESTINATION rise_origin_python_core
             RUNTIME DESTINATION rise_origin_python_core)
 else ()

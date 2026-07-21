@@ -32,18 +32,12 @@ class RSC_IntersectRegionCuboid : public RSC_RecordBase {
 
     bool operator==(const RSC_IntersectRegionCuboid& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("position", position);
-        s("orientation", orientation);
-        s("size", size);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -72,21 +66,12 @@ class RSC_IntersectRegionCuboidRigidBodyLinked : public RSC_RecordBase {
 
     bool operator==(const RSC_IntersectRegionCuboidRigidBodyLinked& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("structure_name", structure_name);
-        s("body_sid", body_sid);
-        s("segment_bid", segment_bid);
-        s("relative_anchor", relative_anchor);
-        s("relative_orientation", relative_orientation);
-        s("size", size);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -103,17 +88,12 @@ class RSC_IntersectRegionSphere : public RSC_RecordBase {
 
     bool operator==(const RSC_IntersectRegionSphere& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("position", position);
-        s("radius", radius);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -139,20 +119,12 @@ class RSC_IntersectRegionSphereRigidBodyLinked : public RSC_RecordBase {
 
     bool operator==(const RSC_IntersectRegionSphereRigidBodyLinked& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("structure_name", structure_name);
-        s("body_sid", body_sid);
-        s("segment_bid", segment_bid);
-        s("relative_anchor", relative_anchor);
-        s("radius", radius);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

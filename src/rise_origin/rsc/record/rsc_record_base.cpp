@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/record/rsc_record_base.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 
 namespace rise {
@@ -27,7 +28,7 @@ void RSC_RecordBase::_validate(RS_RSCValidator& validator) const {
     });
 }
 
-void RSC_RecordBase::_read(const RS_RSCPropertyTreeReader& tree) {
+void RSC_RecordBase::_read(const RS_RSCFileTreeReader& tree) {
     name = tree.get<std::string>("name", name);
     target_controller_reference =
         tree.get<std::string>("target_controller_reference", target_controller_reference);
@@ -35,10 +36,22 @@ void RSC_RecordBase::_read(const RS_RSCPropertyTreeReader& tree) {
         tree.get<std::string>("target_recorder_reference", target_recorder_reference);
 }
 
-void RSC_RecordBase::_write(RS_RSCPropertyTreeWriter& tree) const {
+void RSC_RecordBase::_write(RS_RSCFileTreeWriter& tree) const {
     tree.add("name", name);
     tree.add("target_controller_reference", target_controller_reference);
     tree.add("target_recorder_reference", target_recorder_reference);
+}
+
+void RSC_RecordBase::_deserialize(RS_RSCArchive& archive) {
+    archive.deserialize("name", name);
+    archive.deserialize("target_controller_reference", target_controller_reference);
+    archive.deserialize("target_recorder_reference", target_recorder_reference);
+}
+
+void RSC_RecordBase::_serialize(RS_RSCArchive& archive) const {
+    archive.serialize("name", name);
+    archive.serialize("target_controller_reference", target_controller_reference);
+    archive.serialize("target_recorder_reference", target_recorder_reference);
 }
 
 }  // namespace rsc

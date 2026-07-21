@@ -27,15 +27,12 @@ class RSC_SimulationEnvironment : public RSC_Base {
 
     bool operator==(const RSC_SimulationEnvironment& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("gravity_acceleration", gravity_acceleration);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -83,23 +80,12 @@ class RSC_SimulationTime : public RSC_Base {
 
     bool operator==(const RSC_SimulationTime& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("dt", dt);
-        s("dt_ratio", dt_ratio);
-        s("dt_update_interval", dt_update_interval);
-        s("dt_softbody_and_rigidbody_update", dt_softbody_and_rigidbody_update);
-        s("dt_rigidbody_contact_and_constraint_update", dt_rigidbody_contact_and_constraint_update);
-        s("dt_contact_update", dt_contact_update);
-        s("dt_mechanical_signal_update", dt_mechanical_signal_update);
-        s("dt_sentinel_update", dt_sentinel_update);
-        s("is_aligned_to_wallclock", is_aligned_to_wallclock);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -130,19 +116,12 @@ class RSC_SimulationSoftBody : public RSC_Base {
 
     bool operator==(const RSC_SimulationSoftBody& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("internal_damping_z", internal_damping_z);
-        s("contact_damping_z", contact_damping_z);
-        s("global_damping_z", global_damping_z);
-        s("integration_frequency_multiplier", integration_frequency_multiplier);
-        s("link_max_compression", link_max_compression);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -199,30 +178,12 @@ class RSC_SimulationRigidBody : public RSC_Base {
 
     bool operator==(const RSC_SimulationRigidBody& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("constraint_iterations", constraint_iterations);
-        s("constraint_position_correction_ratio", constraint_position_correction_ratio);
-        s("constraint_warm_start_damping_z", constraint_warm_start_damping_z);
-        s("constraint_stiffness_initial", constraint_stiffness_initial);
-        s("constraint_stiffness_min_threshold", constraint_stiffness_min_threshold);
-        s("constraint_stiffness_max_threshold", constraint_stiffness_max_threshold);
-        s("constraint_stiffness_auto_adjust_watt_threshold",
-          constraint_stiffness_auto_adjust_watt_threshold);
-        s("constraint_stiffness_auto_adjust_step", constraint_stiffness_auto_adjust_step);
-        s("contact_iterations", contact_iterations);
-        s("contact_position_correction_iterations", contact_position_correction_iterations);
-        s("contact_position_correction_ratio", contact_position_correction_ratio);
-        s("contact_warm_start_damping_z", contact_warm_start_damping_z);
-        s("contact_slop", contact_slop);
-        s("linear_damping_z", linear_damping_z);
-        s("angular_damping_z", angular_damping_z);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -239,16 +200,12 @@ class RSC_SimulationContact : public RSC_Base {
 
     bool operator==(const RSC_SimulationContact& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("bvh_rebuild_sub_interval", bvh_rebuild_sub_interval);
-        s("bvh_refit_sub_interval", bvh_refit_sub_interval);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -265,16 +222,12 @@ class RSC_SimulationVisionTrace : public RSC_Base {
 
     bool operator==(const RSC_SimulationVisionTrace& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("firefly_cap", firefly_cap);
-        s("russian_roulette_start_depth", russian_roulette_start_depth);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -323,26 +276,12 @@ class RSC_SimulationVisionReSTIR : public RSC_Base {
 
     bool operator==(const RSC_SimulationVisionReSTIR& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("is_enabled", is_enabled);
-        s("disocclusion_position_threshold", disocclusion_position_threshold);
-        s("disocclusion_normal_threshold", disocclusion_normal_threshold);
-        s("max_specular_chain", max_specular_chain);
-        s("di_m_cap", di_m_cap);
-        s("di_spatial_neighbors", di_spatial_neighbors);
-        s("di_spatial_radius", di_spatial_radius);
-        s("is_gi_bounce_nee_enabled", is_gi_bounce_nee_enabled);
-        s("gi_m_cap", gi_m_cap);
-        s("gi_spatial_neighbors", gi_spatial_neighbors);
-        s("gi_spatial_radius", gi_spatial_radius);
-        s("gi_validation_period", gi_validation_period);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -353,13 +292,12 @@ class RSC_SimulationVisionDenoiseNone : public RSC_Base {
    public:
     bool operator==(const RSC_SimulationVisionDenoiseNone& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer&) {}
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -385,19 +323,12 @@ class RSC_SimulationVisionDenoiseAtrous : public RSC_Base {
 
     bool operator==(const RSC_SimulationVisionDenoiseAtrous& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("atrous_iterations", atrous_iterations);
-        s("atrous_min_passes", atrous_min_passes);
-        s("sigma_color", sigma_color);
-        s("sigma_normal", sigma_normal);
-        s("sigma_depth", sigma_depth);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -432,22 +363,12 @@ class RSC_SimulationVisionDenoiseSVGF : public RSC_Base {
 
     bool operator==(const RSC_SimulationVisionDenoiseSVGF& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("atrous_iterations", atrous_iterations);
-        s("atrous_min_passes", atrous_min_passes);
-        s("sigma_color", sigma_color);
-        s("sigma_normal", sigma_normal);
-        s("sigma_depth", sigma_depth);
-        s("temporal_alpha", temporal_alpha);
-        s("temporal_alpha_moments", temporal_alpha_moments);
-        s("temporal_min_history", temporal_min_history);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -472,17 +393,12 @@ class RSC_SimulationVision : public RSC_Base {
 
     bool operator==(const RSC_SimulationVision& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("trace", trace);
-        s("restir", restir);
-        s("denoise", denoise);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -501,16 +417,12 @@ class RSC_SimulationSentinel : public RSC_Base {
 
     bool operator==(const RSC_SimulationSentinel& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("is_enabled", is_enabled);
-        s("degenerate_min_dt", degenerate_min_dt);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -524,15 +436,12 @@ class RSC_SimulationControl : public RSC_Base {
 
     bool operator==(const RSC_SimulationControl& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("frequency", frequency);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -546,15 +455,12 @@ class RSC_SimulationRecord : public RSC_Base {
 
     bool operator==(const RSC_SimulationRecord& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("frequency", frequency);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -586,21 +492,12 @@ class RSC_SimulationRuntime : public RSC_Base {
 
     bool operator==(const RSC_SimulationRuntime& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("is_paused_on_start", is_paused_on_start);
-        s("max_time", max_time);
-        s("record_buffer_size", record_buffer_size);
-        s("is_save_record", is_save_record);
-        s("compute_accuracy", compute_accuracy);
-        s("memory_accuracy", memory_accuracy);
-        s("log_level", log_level);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -615,6 +512,7 @@ class RSC_Simulation : public RSC_Base {
     /// Stop condition expression. Simulation halts when this evaluates true.
     RS_MathExpr stop_condition;
 
+    // Sub-field settings, note we are not using rsc ref here, no need.
     RSC_SimulationEnvironment environment;
     RSC_SimulationTime time;
     RSC_SimulationSoftBody soft_body;
@@ -628,26 +526,12 @@ class RSC_Simulation : public RSC_Base {
 
     bool operator==(const RSC_Simulation& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("seed", seed);
-        s("stop_condition", stop_condition);
-        s("environment", environment);
-        s("time", time);
-        s("soft_body", soft_body);
-        s("rigid_body", rigid_body);
-        s("contact", contact);
-        s("vision", vision);
-        s("sentinel", sentinel);
-        s("control", control);
-        s("record", record);
-        s("runtime", runtime);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

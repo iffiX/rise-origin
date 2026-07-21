@@ -12,8 +12,8 @@
 
 #include "rise_origin/utils/data/rs_variant.h"
 #include "rise_origin/utils/rs_def.h"
-#include "rs_rsc_property_tree_reader.h"
-#include "rs_rsc_property_tree_writer.h"
+#include "rs_rsc_file_tree_reader.h"
+#include "rs_rsc_file_tree_writer.h"
 
 namespace rise {
 
@@ -21,16 +21,18 @@ class RS_RSCValidator;
 
 namespace rsc {
 
+class RS_RSCArchive;
+
 /**
  * @brief Root base class for all Rise Characterization (RSC) types.
  *
  * Every RSC class inherits (directly or transitively) from this. Provides the
- * read/write/validate contract driven by RS_RSCPropertyTreeReader, plus the
+ * read/write/validate contract driven by RS_RSCFileTreeReader, plus the
  * shared reference composition utilities (RSCRef, RSCVec, MemoRef) and the
  * shallowCopy/deepCopy contract used to build the RSC tree as a reference
  * counted directed acyclic graph.
  */
-class RSC_Base {
+class RSC_Base : public std::enable_shared_from_this<RSC_Base> {
    public:
     /// Map from an original node to its deep copied node, used to preserve sharing.
     using MemoMap = std::unordered_map<const RSC_Base*, std::shared_ptr<RSC_Base>>;
@@ -103,13 +105,34 @@ class RSC_Base {
         }
         bool operator!=(const RSCRef& other) const { return !(*this == other); }
 
-        /// Serialize as the referenced value, allocating one when reading into a null ref.
-        template <typename Serializer>
-        void serialize(Serializer& s) {
+        /// Write the referenced node under key, pooling it once in the shared region.
+        void write(RS_RSCFileTreeWriter& writer, const std::string& key) const {
             if (_ptr == nullptr) {
-                _ptr = std::make_shared<T>();
+                writer.add(key, RS_JSON(nullptr));
+                return;
             }
-            _ptr->serialize(s);
+            if (!writer.hasShared(_ptr.get())) {
+                _ptr->write(writer.addShared(_ptr.get()));
+            }
+            writer.add(key, RS_JSON{{"$shared", writer.findShared(_ptr.get())}});
+        }
+
+        /// Read the referenced node under key, resolving a shared marker or an inline object.
+        void read(const RS_RSCFileTreeReader& reader, const std::string& key) {
+            if (!reader.hasChild(key)) {
+                _ptr = nullptr;
+                return;
+            }
+            RS_JSON node = reader.get<RS_JSON>(key);
+            if (node.is_null()) {
+                _ptr = nullptr;
+            } else if (node.contains("$shared")) {
+                _ptr = reader.getShared<T>(node.at("$shared").get<RIndex>());
+            } else {
+                std::shared_ptr<T> made = std::make_shared<T>();
+                made->read(reader.getChild(key));
+                _ptr = made;
+            }
         }
 
         /// Produce an independent ref by deep copying the referenced node.
@@ -163,8 +186,13 @@ class RSC_Base {
         void clear() { _data.clear(); }
         void reserve(std::size_t capacity) { _data.reserve(capacity); }
         void erase(std::size_t index) { _data.erase(_data.begin() + index); }
+        void set(std::size_t index, const T& value) { *_data[index] = value; }
+        void setRef(std::size_t index, const RSCRef<T>& ref) { _data[index] = ref; }
         void insert(std::size_t index, const T& value) {
             _data.insert(_data.begin() + index, std::make_shared<T>(value));
+        }
+        void insertRef(std::size_t index, const RSCRef<T>& ref) {
+            _data.insert(_data.begin() + index, ref);
         }
 
         /// Compare element by element by referenced value.
@@ -207,6 +235,36 @@ class RSC_Base {
         const_iterator begin() const { return const_iterator(_data.begin()); }
         const_iterator end() const { return const_iterator(_data.end()); }
 
+        /// Write every element under key as an array, pooling each in the shared region.
+        void write(RS_RSCFileTreeWriter& writer, const std::string& key) const {
+            RS_JSON markers = RS_JSON::array();
+            for (const RSCRef<T>& element : _data) {
+                if (!writer.hasShared(element.get())) {
+                    element.shared()->write(writer.addShared(element.get()));
+                }
+                markers.push_back(RS_JSON{{"$shared", writer.findShared(element.get())}});
+            }
+            writer.add(key, markers);
+        }
+
+        /// Read every element under key, resolving a shared marker or an inline object per element.
+        void read(const RS_RSCFileTreeReader& reader, const std::string& key) {
+            _data.clear();
+            if (!reader.hasChild(key)) {
+                return;
+            }
+            for (const RS_RSCFileTreeReader& element : reader.getArray(key)) {
+                RIndex shared = element.get<RIndex>("$shared", RS_NULL_INDEX);
+                if (shared != RS_NULL_INDEX) {
+                    _data.push_back(RSCRef<T>(reader.getShared<T>(shared)));
+                } else {
+                    std::shared_ptr<T> made = std::make_shared<T>();
+                    made->read(element);
+                    _data.push_back(RSCRef<T>(made));
+                }
+            }
+        }
+
         /// Produce an independent vector by deep copying every element.
         RSCVec deepCopy(MemoRef memo) const {
             RSCVec out;
@@ -226,6 +284,9 @@ class RSC_Base {
 
     /// RSC file key holding the payload fields of a variant element.
     static constexpr const char* VAR_DATA_KEY = "data";
+
+    /// Archive key naming the held alternative of a variant by its position.
+    static constexpr const char* VAR_INDEX_KEY = "index";
 
     virtual ~RSC_Base() = default;
 
@@ -258,12 +319,22 @@ class RSC_Base {
     /**
      * @brief Read the characterization from a reader.
      */
-    void read(const RS_RSCPropertyTreeReader& reader) { _read(reader); }
+    void read(const RS_RSCFileTreeReader& reader) { _read(reader); }
 
     /**
      * @brief Write the characterization to a writer.
      */
-    void write(RS_RSCPropertyTreeWriter writer) const { _write(writer); }
+    void write(RS_RSCFileTreeWriter writer) const { _write(writer); }
+
+    /**
+     * @brief Read the characterization from an archive.
+     */
+    void deserialize(RS_RSCArchive& archive) { _deserialize(archive); }
+
+    /**
+     * @brief Write the characterization to an archive.
+     */
+    void serialize(RS_RSCArchive& archive) const { _serialize(archive); }
 
     /**
      * @brief Submit this characterization's checks to a validator.
@@ -276,8 +347,11 @@ class RSC_Base {
 
    protected:
     virtual void _validate(RS_RSCValidator& validator) const;
-    virtual void _read(const RS_RSCPropertyTreeReader& reader) = 0;
-    virtual void _write(RS_RSCPropertyTreeWriter& writer) const = 0;
+    virtual void _read(const RS_RSCFileTreeReader& reader) = 0;
+    virtual void _write(RS_RSCFileTreeWriter& writer) const = 0;
+
+    virtual void _deserialize(RS_RSCArchive& archive) = 0;
+    virtual void _serialize(RS_RSCArchive& archive) const = 0;
 
     /// Allocate a copy of the concrete type that shares its sub RSC children.
     virtual RSCRef<RSC_Base> _shallowCopy() const = 0;
@@ -288,19 +362,15 @@ class RSC_Base {
 
 }  // namespace rsc
 
-namespace mp_helper {
-
-/// Forward declaration from the message pack serializer.
+/// Forward declaration from the serialization traits.
 template <typename T>
-struct is_container;
+struct RS_IsLinearLike;
 
 /// Serialize an RSCVec exactly like the std::vector it replaced, as an array of elements.
 template <typename T>
-struct is_container<rsc::RSC_Base::RSCVec<T>> {
-    static const bool value = true;
+struct RS_IsLinearLike<rsc::RSC_Base::RSCVec<T>> {
+    static constexpr bool value = true;
 };
-
-}  // namespace mp_helper
 
 /// Deep copy the RSC held by a variant, preserving sharing across the copy through the memo.
 template <typename... Types>

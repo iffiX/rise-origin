@@ -4,13 +4,44 @@
 #include "rise_origin/rsc/rs_rsc_file.h"
 
 #include <fstream>
-#include <iterator>
 
+#include "rise_origin/rsc/rs_rsc_file_pool.h"
+#include "rise_origin/utils/interchange/rs_json.h"
+#include "rise_origin/utils/rs_conf.h"
 #include "rise_origin/utils/string/rs_string.h"
 
 namespace rise {
 
 namespace rsc {
+
+void RS_RSCFile::saveAny(const RSC_Base &node, const std::string &path, bool is_compressing) {
+    RSE_RSCFileFormat format = _formatOfPath(path);
+    RS_RSCFileTreeWriteContext context;
+    context.version = currentVersion();
+    context.is_compressing = is_compressing;
+    if (format == RSE_RSC_FILE_FORMAT_BINARY) {
+        context.packer = RS_RSCFilePool::getPacker();
+    }
+
+    RS_RSCFileTreeWriter writer(context);
+    RS_RSCFileHeader header;
+    header.magic = "RSC";
+    header.edition = RS_RSC_EDITION;
+    header.rsc_version = currentVersion();
+    header.engine_version = engineVersion();
+    header.type = RS_RSCRegistry::getName(typeid(node));
+    header.write(writer.addChild("header"));
+    node.write(writer.addChild("body"));
+
+    _commit(context, path, format);
+}
+
+RSC_Base::RSCRef<RSC_Base> RS_RSCFile::loadAny(const std::string &path) {
+    RS_RSCFileTreeReadContext context;
+    RS_RSCFileHeader header = _open(context, path);
+    RS_RSCFileTreeReader reader(context);
+    return RS_RSCRegistry::make(header.type, reader.getChild("body"));
+}
 
 RS_Version RS_RSCFile::currentVersion() {
     RS_Version version;
@@ -24,63 +55,29 @@ RS_Version RS_RSCFile::engineVersion() {
     return version;
 }
 
-void RS_RSCFile::saveAny(const RSC_Base &node, const std::string &path) {
-    _writeFile(path, _toBytes(node, _formatOfPath(path)));
-}
-
-RSC_Base::RSCRef<RSC_Base> RS_RSCFile::loadAny(const std::string &path) {
-    RS_JSON root = _decode(_readFile(path), _formatOfPath(path));
-    RS_RSCPropertyTreeReader root_reader(root);
-    RS_RSCFileHeader header;
-    header.read(root_reader.getChild("header"));
-    _gate(header);
-
-    RS_JSON &body = root.at("body");
-    if (header.rsc_version < currentVersion()) {
-        _migrate(body, header.rsc_version);
-    }
-
-    RS_RSCPropertyTreeReader reader(body, header.rsc_version);
-    return RS_RSCRegistry::getInstance().make(header.type, reader);
-}
-
 RSE_RSCFileFormat RS_RSCFile::_formatOfPath(const std::string &path) {
     if (endsWith(path, ".rsct")) return RSE_RSC_FILE_FORMAT_TEXT;
     if (endsWith(path, ".rscb")) return RSE_RSC_FILE_FORMAT_BINARY;
     RS_THROW(RS_InvalidArgumentException("RSC file path {} must end with .rsct or .rscb", path));
 }
 
-std::vector<uint8_t> RS_RSCFile::_encode(const RS_JSON &root, RSE_RSCFileFormat format) {
+RS_RSCFileHeader RS_RSCFile::_open(RS_RSCFileTreeReadContext &context, const std::string &path) {
+    RSE_RSCFileFormat format = _formatOfPath(path);
     if (format == RSE_RSC_FILE_FORMAT_TEXT) {
-        std::string text = root.dump(2);
-        return std::vector<uint8_t>(text.begin(), text.end());
+        context.root = _readTextFile(path);
+    } else {
+        context.root = _readBinaryFile(path, context);
     }
-    return RS_JSON::to_msgpack(root);
-}
 
-RS_JSON RS_RSCFile::_decode(const std::vector<uint8_t> &bytes, RSE_RSCFileFormat format) {
-    if (format == RSE_RSC_FILE_FORMAT_TEXT) {
-        return RS_JSON::parse(bytes.begin(), bytes.end());
+    RS_RSCFileTreeReader reader(context);
+    RS_RSCFileHeader header;
+    header.read(reader.getChild("header"));
+    _gate(header);
+    context.version = header.rsc_version;
+    if (header.rsc_version < currentVersion()) {
+        _migrate(context.root.at("body"), header.rsc_version);
     }
-    return RS_JSON::from_msgpack(bytes);
-}
-
-std::vector<uint8_t> RS_RSCFile::_readFile(const std::string &path) {
-    std::ifstream file(path, std::ios::binary);
-    if (!file.is_open()) {
-        RS_THROW(RS_DataException("Cannot open RSC file {}", path));
-    }
-    return std::vector<uint8_t>(
-        std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()
-    );
-}
-
-void RS_RSCFile::_writeFile(const std::string &path, const std::vector<uint8_t> &bytes) {
-    std::ofstream file(path, std::ios::binary);
-    if (!file.is_open()) {
-        RS_THROW(RS_DataException("Cannot write RSC file {}", path));
-    }
-    file.write(reinterpret_cast<const char *>(bytes.data()), static_cast<RBigSize>(bytes.size()));
+    return header;
 }
 
 void RS_RSCFile::_gate(const RS_RSCFileHeader &header) {
@@ -92,20 +89,53 @@ void RS_RSCFile::_gate(const RS_RSCFileHeader &header) {
             "RSC edition mismatch: file is {}, engine is {}", header.edition, RS_RSC_EDITION
         ));
     }
-    RS_Version current = currentVersion();
-    if (header.rsc_version.major != current.major || current < header.rsc_version) {
-        RS_THROW(RS_InvalidCharacterizationException(
-            "Unsupported RSC version {}, engine writes {}",
-            header.rsc_version.toString(),
-            current.toString()
-        ));
-    }
 }
 
 void RS_RSCFile::_migrate(RS_JSON &body, const RS_Version &from) {
     // TODO: when a new schema version arrives, migrate here.
     (void)body;
     (void)from;
+}
+
+void RS_RSCFile::_commit(
+    RS_RSCFileTreeWriteContext &context,
+    const std::string &path,
+    RSE_RSCFileFormat format
+) {
+    if (format == RSE_RSC_FILE_FORMAT_TEXT) {
+        _writeTextFile(path, context.root);
+    } else {
+        _writeBinaryFile(path, context);
+    }
+}
+
+RS_JSON RS_RSCFile::_readTextFile(const std::string &path) {
+    std::ifstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        RS_THROW(RS_DataException("Cannot open RSC file {}", path));
+    }
+    return RS_JSON::parse(file);
+}
+
+void RS_RSCFile::_writeTextFile(const std::string &path, const RS_JSON &root) {
+    std::ofstream file(path, std::ios::binary);
+    if (!file.is_open()) {
+        RS_THROW(RS_DataException("Cannot write RSC file {}", path));
+    }
+    file << root.dump(2);
+}
+
+RS_JSON RS_RSCFile::_readBinaryFile(const std::string &path, RS_RSCFileTreeReadContext &context) {
+    context.unpacker = RS_RSCFilePool::getUnpacker(path);
+    return context.unpacker->getMetaData();
+}
+
+void RS_RSCFile::_writeBinaryFile(const std::string &path, RS_RSCFileTreeWriteContext &context) {
+    RSE_FastPackingCompressionMethod meta_method = context.is_compressing
+                                                       ? RSE_FAST_PACKING_COMPRESSION_METHOD_ZSTD
+                                                       : RSE_FAST_PACKING_COMPRESSION_METHOD_NONE;
+    context.packer->setMetaData(context.root, meta_method);
+    RS_RSCFilePool::pack(*context.packer, path);
 }
 
 }  // namespace rsc

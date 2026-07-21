@@ -23,15 +23,12 @@ class RSC_CameraBase : public RSC_EntityBase {
    public:
     bool operator==(const RSC_CameraBase& other) const { return RSC_EntityBase::operator==(other); }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_EntityBase::serialize(s);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCPropertyTreeReader& tree) override { (void)tree; }
-    void _write(RS_RSCPropertyTreeWriter& tree) const override { (void)tree; }
+    void _read(const RS_RSCFileTreeReader& tree) override { (void)tree; }
+    void _write(RS_RSCFileTreeWriter& tree) const override { (void)tree; }
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /*****************************************************************
@@ -71,23 +68,12 @@ class RSC_CameraPerspectiveRecord : public RSC_RecordBase {
 
     bool operator==(const RSC_CameraPerspectiveRecord& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("has_rgb", has_rgb);
-        s("has_depth", has_depth);
-        s("has_normal", has_normal);
-        s("has_motion", has_motion);
-        s("has_entity_info", has_entity_info);
-        s("is_depth_hyperbolic", is_depth_hyperbolic);
-        s("hyperbolic_near_depth", hyperbolic_near_depth);
-        s("hyperbolic_far_depth", hyperbolic_far_depth);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -109,18 +95,12 @@ class RSC_CameraPerspectiveSignal : public RSC_SignalBase {
 
     bool operator==(const RSC_CameraPerspectiveSignal& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_SignalBase::serialize(s);
-        s("position_signal_num", position_signal_num);
-        s("orientation_signal_num", orientation_signal_num);
-        s("optics_signal_num", optics_signal_num);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -151,10 +131,10 @@ class RSC_CameraPerspectiveBase : public RSC_CameraBase {
     RFloat focus_distance = 1.0;
 
     /// Camera record
-    RSC_CameraPerspectiveRecord record;
+    RSCRef<RSC_CameraPerspectiveRecord> record = RSC_CameraPerspectiveRecord();
 
     /// Camera signal.
-    RSC_CameraPerspectiveSignal signal;
+    RSCRef<RSC_CameraPerspectiveSignal> signal = RSC_CameraPerspectiveSignal();
 
     bool operator==(const RSC_CameraPerspectiveBase& other) const {
         return RSC_CameraBase::operator==(other) && image_width == other.image_width &&
@@ -164,24 +144,13 @@ class RSC_CameraPerspectiveBase : public RSC_CameraBase {
                record == other.record && signal == other.signal;
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CameraBase::serialize(s);
-        s("image_width", image_width);
-        s("image_height", image_height);
-        s("samples_per_pixel", samples_per_pixel);
-        s("max_depth", max_depth);
-        s("field_of_view", field_of_view);
-        s("defocus_angle", defocus_angle);
-        s("focus_distance", focus_distance);
-        s("record", record);
-        s("signal", signal);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
+    void _deepCopyShared(MemoRef memo) override;
 };
 
 /**
@@ -197,16 +166,11 @@ class RSC_CameraPerspectiveFree : public RSC_CameraPerspectiveBase {
 
     bool operator==(const RSC_CameraPerspectiveFree& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CameraPerspectiveBase::serialize(s);
-        s("origin_position", origin_position);
-        s("orientation", orientation);
-    }
-
    protected:
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -233,20 +197,12 @@ class RSC_CameraPerspectiveRigidBodyLinked : public RSC_CameraPerspectiveBase {
 
     bool operator==(const RSC_CameraPerspectiveRigidBodyLinked& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CameraPerspectiveBase::serialize(s);
-        s("structure_name", structure_name);
-        s("body_sid", body_sid);
-        s("segment_bid", segment_bid);
-        s("relative_anchor", relative_anchor);
-        s("relative_orientation", relative_orientation);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -286,23 +242,12 @@ class RSC_CameraStereoRecord : public RSC_RecordBase {
 
     bool operator==(const RSC_CameraStereoRecord& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("has_rgb", has_rgb);
-        s("has_depth", has_depth);
-        s("has_normal", has_normal);
-        s("has_motion", has_motion);
-        s("has_entity_info", has_entity_info);
-        s("is_depth_hyperbolic", is_depth_hyperbolic);
-        s("hyperbolic_near_depth", hyperbolic_near_depth);
-        s("hyperbolic_far_depth", hyperbolic_far_depth);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -315,15 +260,12 @@ class RSC_CameraStereoSignal : public RSC_SignalBase {
 
     bool operator==(const RSC_CameraStereoSignal& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_SignalBase::serialize(s);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -367,10 +309,10 @@ class RSC_CameraStereoBase : public RSC_CameraBase {
     RFloat angle_down = -0.7853981633974483;
 
     /// Camera record.
-    RSC_CameraStereoRecord record;
+    RSCRef<RSC_CameraStereoRecord> record = RSC_CameraStereoRecord();
 
     /// Camera signal.
-    RSC_CameraStereoSignal signal;
+    RSCRef<RSC_CameraStereoSignal> signal = RSC_CameraStereoSignal();
 
     bool operator==(const RSC_CameraStereoBase& other) const {
         return RSC_CameraBase::operator==(other) && image_width == other.image_width &&
@@ -383,27 +325,13 @@ class RSC_CameraStereoBase : public RSC_CameraBase {
                record == other.record && signal == other.signal;
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CameraBase::serialize(s);
-        s("image_width", image_width);
-        s("image_height", image_height);
-        s("samples_per_pixel", samples_per_pixel);
-        s("max_depth", max_depth);
-        s("interpupillary_distance", interpupillary_distance);
-        s("convergence_distance", convergence_distance);
-        s("angle_left", angle_left);
-        s("angle_right", angle_right);
-        s("angle_up", angle_up);
-        s("angle_down", angle_down);
-        s("record", record);
-        s("signal", signal);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
+    void _deepCopyShared(MemoRef memo) override;
 };
 
 /**
@@ -419,16 +347,11 @@ class RSC_CameraStereoFree : public RSC_CameraStereoBase {
 
     bool operator==(const RSC_CameraStereoFree& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CameraStereoBase::serialize(s);
-        s("origin_position", origin_position);
-        s("orientation", orientation);
-    }
-
    protected:
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -438,8 +361,8 @@ class RSC_CameraStereoFree : public RSC_CameraStereoBase {
 class RSC_CameraStereoRigidBodyLinked : public RSC_CameraStereoBase {
    public:
     RSC_CameraStereoRigidBodyLinked() {
-        record.has_depth = true;
-        record.has_entity_info = false;
+        record->has_depth = true;
+        record->has_entity_info = false;
     }
 
     /// The name of the structure that the camera is linked to.
@@ -460,20 +383,12 @@ class RSC_CameraStereoRigidBodyLinked : public RSC_CameraStereoBase {
 
     bool operator==(const RSC_CameraStereoRigidBodyLinked& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_CameraStereoBase::serialize(s);
-        s("structure_name", structure_name);
-        s("body_sid", body_sid);
-        s("segment_bid", segment_bid);
-        s("relative_anchor", relative_anchor);
-        s("relative_orientation", relative_orientation);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 

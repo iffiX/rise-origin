@@ -832,8 +832,10 @@ class StructureVoxel(RSC_StructureVoxel):
         if material_optical_references:
             self.material_optical_references = material_optical_references
         self.is_fixed = is_fixed
-        self.bodies = list(bodies)
-        self.constraints = list(constraints)
+        self.bodies.clear()
+        self.bodies.extend(bodies)
+        self.constraints.clear()
+        self.constraints.extend(constraints)
         if record is not None:
             self.record = record
         if signal is not None:
@@ -1003,7 +1005,11 @@ class StructureVoxel(RSC_StructureVoxel):
             body = cls._make_signature_body(
                 placed,
                 link_voxel_size,
-                cls._get_urdf_signature(robot, link) if is_mimic_visual_signature else None,
+                (
+                    cls._get_urdf_signature(robot, link)
+                    if is_mimic_visual_signature
+                    else None
+                ),
                 cls._get_urdf_inertial(robot, link_name, base),
                 f"{structure_name}/{link_name}",
                 essence_outputs,
@@ -1203,7 +1209,11 @@ class StructureVoxel(RSC_StructureVoxel):
             body = cls._make_signature_body(
                 mesh,
                 body_voxel_size,
-                cls._get_mjcf_signature(model, geom_ids) if is_mimic_visual_signature else None,
+                (
+                    cls._get_mjcf_signature(model, geom_ids)
+                    if is_mimic_visual_signature
+                    else None
+                ),
                 cls._get_mjcf_inertial(model, data, body_id),
                 f"{name}/{body_name}",
                 essence_outputs,
@@ -1409,7 +1419,11 @@ class StructureVoxel(RSC_StructureVoxel):
                 cls._make_signature_body(
                     mesh,
                     node_voxel_size,
-                    cls._get_gltf_signature(mesh) if is_mimic_visual_signature else None,
+                    (
+                        cls._get_gltf_signature(mesh)
+                        if is_mimic_visual_signature
+                        else None
+                    ),
                     None,
                     f"{name}/{node_name}",
                     essence_outputs,
@@ -1882,7 +1896,12 @@ class StructureVoxel(RSC_StructureVoxel):
             com_corner = np.asarray(min_corner) + occupied_min * voxel_size
         if is_mimic_visual_signature:
             palette, index_grid = StructureVoxel._get_voxel_signatures(
-                placed, occupancy, min_corner, voxel_size, signature, visual_signature_num
+                placed,
+                occupancy,
+                min_corner,
+                voxel_size,
+                signature,
+                visual_signature_num,
             )
         else:
             palette = [StructureVoxel._WHITE_SIGNATURE]

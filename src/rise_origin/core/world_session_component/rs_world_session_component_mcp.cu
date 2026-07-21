@@ -39,6 +39,7 @@
 #include "rise_origin/rsc/essence/rsc_material_unary_property.h"
 #include "rise_origin/rsc/record/rsc_intersect_region.h"
 #include "rise_origin/rsc/resource/rsc_texture.h"
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_file.h"
 #include "rise_origin/rsc/rs_rsc_registry.h"
 #include "rise_origin/rsc/rsc_world.h"
@@ -451,7 +452,7 @@ class RS_MCPImpl {
         template <typename T>
         RS_JSON operator()(const T &held) const {
             RS_JSON part;
-            part["type"] = rsc::RS_RSCRegistry::getInstance().getName(typeid(T));
+            part["type"] = rsc::RS_RSCRegistry::getName(typeid(T));
             if constexpr (RS_MCPHasName<T>::value) part["name"] = held.name;
             return part;
         }
@@ -465,7 +466,7 @@ class RS_MCPImpl {
         template <typename Entity>
         void operator()(const Entity &entity) {
             if constexpr (std::is_base_of_v<rsc::RSC_CameraPerspectiveBase, Entity>) {
-                controller = entity.record.target_controller_reference;
+                controller = entity.record->target_controller_reference;
             }
         }
     };
@@ -1054,32 +1055,31 @@ class RS_MCPImpl {
 
     template <typename Variant>
     static RS_JSON _variantToJson(const Variant &variant) {
-        rsc::RS_RSCPropertyTreeWriter writer(rsc::RS_RSCFile::currentVersion());
-        rsc::RS_RSCRegistry::getInstance().write(variant, writer);
-        return *writer.root;
+        RS_JSON json;
+        variant.visit([&json](const auto &held) { json = rsc::RS_RSCArchive::toJSONAny(held); });
+        return json;
     }
 
     template <typename Variant>
     static Variant _jsonToVariant(const RS_JSON &json) {
-        rsc::RS_RSCPropertyTreeReader reader(json, rsc::RS_RSCFile::currentVersion());
+        auto node = rsc::RS_RSCArchive::fromJSONAny(json);
         Variant variant;
-        rsc::RS_RSCRegistry::getInstance().read(variant, reader);
+        if (!rsc::RS_RSCRegistry::tryAssign(variant, node)) {
+            RS_THROW(
+                rsc::RS_RSCArchiveException("JSON holds an RSC type not valid for this section")
+            );
+        }
         return variant;
     }
 
     template <typename Node>
     static RS_JSON _nodeToJson(const Node &node) {
-        rsc::RS_RSCPropertyTreeWriter writer(rsc::RS_RSCFile::currentVersion());
-        node.write(writer);
-        return *writer.root;
+        return rsc::RS_RSCArchive::toJSON(node);
     }
 
     template <typename Node>
     static Node _jsonToNode(const RS_JSON &json) {
-        rsc::RS_RSCPropertyTreeReader reader(json, rsc::RS_RSCFile::currentVersion());
-        Node node;
-        node.read(reader);
-        return node;
+        return rsc::RS_RSCArchive::fromJSON<Node>(json);
     }
 
     template <typename Section>
@@ -1097,13 +1097,8 @@ class RS_MCPImpl {
     }
 
     static RS_JSON _makeExample(const std::string &type) {
-        auto node = rsc::RS_RSCRegistry::getInstance().getExample(type);
-        rsc::RS_RSCPropertyTreeWriter writer(rsc::RS_RSCFile::currentVersion());
-        node->write(writer);
-        RS_JSON out;
-        out["type"] = type;
-        out["data"] = *writer.root;
-        return out;
+        auto node = rsc::RS_RSCRegistry::getExample(type);
+        return rsc::RS_RSCArchive::toJSONAny(*node);
     }
 
     /*****************************************************************
@@ -1117,9 +1112,9 @@ class RS_MCPImpl {
         camera.samples_per_pixel = args.value("samples", 4);
         camera.max_depth = args.value("max_depth", 3);
         camera.field_of_view = args.value("fov", 60.0);
-        camera.record.has_rgb = true;
-        camera.record.target_controller_reference = controller_name;
-        camera.signal.source_controller_reference = controller_name;
+        camera.record->has_rgb = true;
+        camera.record->target_controller_reference = controller_name;
+        camera.signal->source_controller_reference = controller_name;
     }
 
     static void _addGlassMaterial(
@@ -2418,7 +2413,7 @@ class RS_MCPImpl {
         std::string schema() const override { return _emptySchema().dump(); }
         bool isRegistered() const override { return false; }
         APITask call(const RS_JSON &) override {
-            RS_JSON out = rsc::RS_RSCRegistry::getInstance().getCategory();
+            RS_JSON out = rsc::RS_RSCRegistry::getCategory();
             return APITask::makeFinished(_makeTextContent(out.dump()));
         }
     };
@@ -2607,9 +2602,9 @@ class RS_MCPImpl {
             eye.image_width = 1024;
             eye.image_height = 1024;
             eye.field_of_view = 70.0;
-            eye.record.has_rgb = true;
-            eye.record.target_controller_reference = eye_controller;
-            eye.signal.source_controller_reference = eye_controller;
+            eye.record->has_rgb = true;
+            eye.record->target_controller_reference = eye_controller;
+            eye.signal->source_controller_reference = eye_controller;
             handle->addEntity(rsc::RSC_EntityVariant(eye));
 
             impl._cube_extent = RVec3rf(reach, reach, reach);

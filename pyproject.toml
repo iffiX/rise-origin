@@ -84,4 +84,5 @@ markers = [
     "voxel: needs the libigl mesh voxelizer",
     "importer: needs an asset parser (yourdfpy/mujoco/trimesh/cadquery) + a fixture",
     "sim: runs the simulation engine (slow; needs a compute backend)",
+    "perf: slow; large-allocation memory / timing checks; opt-in",
 ]

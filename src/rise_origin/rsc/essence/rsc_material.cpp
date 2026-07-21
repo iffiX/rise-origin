@@ -3,6 +3,7 @@
 
 #include "rise_origin/rsc/essence/rsc_material.h"
 
+#include "rise_origin/rsc/rs_rsc_archive.h"
 #include "rise_origin/rsc/rs_rsc_validator.h"
 
 namespace rise {
@@ -17,9 +18,15 @@ void RSC_Material::_validate(RS_RSCValidator& validator) const {
     RSC_EssenceBase::_validate(validator);
 }
 
-void RSC_Material::_read(const RS_RSCPropertyTreeReader& tree) { RSC_EssenceBase::_read(tree); }
+void RSC_Material::_read(const RS_RSCFileTreeReader& tree) { RSC_EssenceBase::_read(tree); }
 
-void RSC_Material::_write(RS_RSCPropertyTreeWriter& tree) const { RSC_EssenceBase::_write(tree); }
+void RSC_Material::_write(RS_RSCFileTreeWriter& tree) const { RSC_EssenceBase::_write(tree); }
+
+void RSC_Material::_deserialize(RS_RSCArchive& archive) { RSC_EssenceBase::_deserialize(archive); }
+
+void RSC_Material::_serialize(RS_RSCArchive& archive) const {
+    RSC_EssenceBase::_serialize(archive);
+}
 
 }  // namespace rsc
 

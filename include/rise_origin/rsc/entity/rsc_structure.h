@@ -46,19 +46,12 @@ class RSC_StructureBase : public RSC_EntityBase {
                material_optical_references == other.material_optical_references;
     }
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_EntityBase::serialize(s);
-        s("origin_position", origin_position);
-        s("orientation", orientation);
-        s("material_references", material_references);
-        s("material_optical_references", material_optical_references);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
 };
 
 /*****************************************************************
@@ -136,31 +129,33 @@ class RSC_StructureVoxelBody : public RSC_Base {
 
     bool operator==(const RSC_StructureVoxelBody& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("relative_origin_position", relative_origin_position);
-        s("relative_orientation", relative_orientation);
-        s("x_voxels", x_voxels);
-        s("y_voxels", y_voxels);
-        s("z_voxels", z_voxels);
-        s("material_reference_sid", material_reference_sid);
-        s("material_optical_reference_mid", material_optical_reference_mid);
-        s("segment_bid", segment_bid);
-        s("expansion_signal_sid", expansion_signal_sid);
-        s("expansion_control_mode", expansion_control_mode);
-        s("link", link);
-        s("voxel_size", voxel_size);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 
    private:
+    template <typename T>
+    static void _readVoxelArray(
+        const RS_RSCFileTreeReader& tree,
+        const std::string& key,
+        RSize voxel_num,
+        std::vector<T>& out
+    );
+
+    template <typename T>
+    static void _writeVoxelArray(
+        RS_RSCFileTreeWriter& tree,
+        const std::string& key,
+        const std::vector<T>& data
+    );
+
     void _validateNullSegment(RS_RSCValidator& validator) const;
     void _validateLinkAdjacency(RS_RSCValidator& validator) const;
+    void _validateExpansionControlModeValidity(RS_RSCValidator& validator) const;
 };
 
 RS_ENUM(
@@ -340,39 +335,12 @@ class RSC_StructureVoxelConstraint : public RSC_Base {
 
     bool operator==(const RSC_StructureVoxelConstraint& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        s("type", type);
-        s("is_collision_enabled", is_collision_enabled);
-        s("a_body_sid", a_body_sid);
-        s("a_segment_bid", a_segment_bid);
-        s("b_body_sid", b_body_sid);
-        s("b_segment_bid", b_segment_bid);
-        s("relative_anchor", relative_anchor);
-        s("hinge_control_mode", hinge_control_mode);
-        s("hinge_relative_axis", hinge_relative_axis);
-        s("hinge_min", hinge_min);
-        s("hinge_max", hinge_max);
-        s("hinge_position_control_kp", hinge_position_control_kp);
-        s("hinge_position_control_kd", hinge_position_control_kd);
-        s("hinge_max_speed", hinge_max_speed);
-        s("hinge_max_torque", hinge_max_torque);
-        s("hinge_signal_sid", hinge_signal_sid);
-        s("prismatic_control_mode", prismatic_control_mode);
-        s("prismatic_relative_axis", prismatic_relative_axis);
-        s("prismatic_min", prismatic_min);
-        s("prismatic_max", prismatic_max);
-        s("prismatic_position_control_kp", prismatic_position_control_kp);
-        s("prismatic_position_control_kd", prismatic_position_control_kd);
-        s("prismatic_max_speed", prismatic_max_speed);
-        s("prismatic_max_force", prismatic_max_force);
-        s("prismatic_signal_sid", prismatic_signal_sid);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -441,21 +409,12 @@ class RSC_StructureVoxelRecord : public RSC_RecordBase {
 
     bool operator==(const RSC_StructureVoxelRecord& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_RecordBase::serialize(s);
-        s("voxel_record_range", voxel_record_range);
-        s("link_record_range", link_record_range);
-        s("rigid_body_record_range", rigid_body_record_range);
-        s("joint_record_range", joint_record_range);
-        s("voxel_sample_num", voxel_sample_num);
-        s("link_sample_num", link_sample_num);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -478,18 +437,12 @@ class RSC_StructureVoxelSignal : public RSC_SignalBase {
 
     bool operator==(const RSC_StructureVoxelSignal& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_SignalBase::serialize(s);
-        s("expansion_signal_num", expansion_signal_num);
-        s("hinge_signal_num", hinge_signal_num);
-        s("prismatic_signal_num", prismatic_signal_num);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
 };
 
@@ -516,20 +469,12 @@ class RSC_StructureVoxel : public RSC_StructureBase {
 
     bool operator==(const RSC_StructureVoxel& other) const;
 
-    template <typename Serializer>
-    void serialize(Serializer& s) {
-        RSC_StructureBase::serialize(s);
-        s("is_static", is_fixed);
-        s("bodies", bodies);
-        s("constraints", constraints);
-        s("record", record);
-        s("signal", signal);
-    }
-
    protected:
     void _validate(RS_RSCValidator& validator) const override;
-    void _read(const RS_RSCPropertyTreeReader& tree) override;
-    void _write(RS_RSCPropertyTreeWriter& tree) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
     RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
     void _deepCopyShared(MemoRef memo) override;
 
