@@ -24,6 +24,15 @@ bound type is (variants, the world, pickling), and adds an ergonomic
 ``__init__`` with documented defaults that accepts plain tuples for vectors,
 quaternions, and colors.
 
+Pickling any node carries its archive bytes. At the default protocol those bytes
+are copied into the pickle stream. To skip that copy on a large scene, pickle
+with protocol 5 and collect the archive bytes out of band, which hands the fast
+packer's buffer straight to pickle::
+
+    buffers = []
+    data = pickle.dumps(world, protocol=5, buffer_callback=buffers.append)
+    world = pickle.loads(data, buffers=[b.raw() for b in buffers])
+
 For procedural, composed world generation built on top of these primitives, see
 the sibling ``create`` package.
 """

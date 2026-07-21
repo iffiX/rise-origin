@@ -8,7 +8,7 @@
 #include <string>
 
 #include "common/rspy_pybind.h"
-#include "common/rspy_serialize.h"
+#include "common/rspy_rsc_serialize.h"
 
 /**
  * @brief Create a py::class_ for an RSC type with a shared holder, attaching pickle, copy, and file
@@ -24,8 +24,24 @@ py::class_<T, std::shared_ptr<T>, Options...> rspyRSC(py::module &m, const char 
         cls.def(
             py::pickle(
                 [](const T &self) { return rspySerializeRSC(self); },
-                [](py::bytes buffer) { return rspyDeserializeRSC<T>(buffer); }
+                [](const py::object &buffer) { return rspyDeserializeRSC<T>(buffer); }
             )
+        );
+        // Protocol 5 carries the archive bytes as a zero-copy PickleBuffer, so pickling a large
+        // scene skips the extra bytes copy and can go out of band; older protocols keep the plain
+        // bytes state. Both reconstruct through the __setstate__ defined above.
+        cls.def(
+            "__reduce_ex__",
+            [](py::object self, int protocol) {
+                py::object state = protocol >= 5 ? rspySerializeRSCZeroCopy(self.cast<const T &>())
+                                                 : self.attr("__getstate__")();
+                return py::make_tuple(
+                    py::module_::import("copyreg").attr("__newobj__"),
+                    py::make_tuple(self.attr("__class__")),
+                    state
+                );
+            },
+            py::arg("protocol")
         );
         if constexpr (std::is_base_of_v<RSC_Base, T>) {
             cls.def(

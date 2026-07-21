@@ -3,4 +3,7 @@
 
 #include "common/rspy_common.h"
 
-void initRSPYCommon(py::module &m) { rspyRegisterVectorView(m); }
+void initRSPYCommon(py::module &m) {
+    rspyRegisterVectorView(m);
+    rspyRegisterArchiveBytes(m);
+}

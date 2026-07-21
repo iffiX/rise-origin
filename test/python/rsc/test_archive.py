@@ -117,6 +117,33 @@ def test_simulation_only_world_round_trips():
 
 
 # ======================================================================================
+# Pickle protocols and zero-copy out-of-band buffers
+# ======================================================================================
+def test_default_protocol_round_trips():
+    # The default protocol (below 5 on 3.10) carries a plain bytes state.
+    world = rich_world()
+    restored = pickle.loads(pickle.dumps(world))
+    assert state(restored) == state(world)
+
+
+def test_protocol_5_round_trips():
+    world = rich_world()
+    restored = pickle.loads(pickle.dumps(world, protocol=5))
+    assert state(restored) == state(world)
+
+
+def test_out_of_band_buffers_are_zero_copy():
+    world = _shared_world(4)
+    captured = []
+    data = pickle.dumps(world, protocol=5, buffer_callback=captured.append)
+    # The archive bytes leave the main stream and ride out of band, so the stream stays tiny.
+    assert len(captured) == 1
+    assert len(data) < len(captured[0].raw())
+    restored = pickle.loads(data, buffers=[buffer.raw() for buffer in captured])
+    assert state(restored) == state(world)
+
+
+# ======================================================================================
 # Speed
 # ======================================================================================
 @pytest.mark.perf
