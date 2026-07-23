@@ -59,14 +59,14 @@ class RSCF_GenerateMortonSpatialCode
 
         // Base range per unit (meters). 10 bits per axis for 32-bit, 21 bits for 64-bit.
         // range = base_range * unit_scale / MortonResolutionModifier
-        //   base_range: 32-bit = 1024.0, 64-bit = 209715.2 (covers ±range/2 in meters)
+        //   base_range: 32-bit = 1024.0, 64-bit = 2097152.0 (covers ±range/2 in meters)
         //   unit_scale: meters=1, dm=0.1, cm=0.01, mm=0.001
         static constexpr Float unit_scale = Unit == RSE_BVH_UNIT_METERS        ? Float(1.0)
                                             : Unit == RSE_BVH_UNIT_DECIMETERS  ? Float(0.1)
                                             : Unit == RSE_BVH_UNIT_CENTIMETERS ? Float(0.01)
                                                                                : Float(0.001);
         static constexpr Float base_range = sizeof(SpatialCode) == 4 ? Float(1024.0)
-                                                                     : Float(209715.2);
+                                                                     : Float(2097152.0);
         static constexpr Float range = base_range * unit_scale / Float(MortonResolutionModifier);
         static constexpr Float scale = sizeof(SpatialCode) == 4 ? Float(1024) : Float(2097152);
 

@@ -205,6 +205,12 @@ class RS_KernelManager {
     void setIntersectRegionRecords(const std::vector<logic::RS_IntersectRegionPair> &pairs);
 
     /**
+     * @brief Gids of every structure that can move a voxel, rebuilt only when the structure set
+     * changes. The sentinel reads it to pick each structure's world range.
+     */
+    const std::unordered_set<RIndex> &getDynamicStructureGIDs();
+
+    /**
      * @brief Synchronously remove a structure and every dependent signal, controller,
      * and camera etc.
      */
@@ -476,6 +482,10 @@ class RS_KernelManager {
     std::unordered_map<std::string, RIndex> _resource_gids;
     std::unordered_map<std::string, RIndex> _record_gids;
     std::unordered_map<std::string, RIndex> _signal_gids;
+
+    /// Cached gids of movable structures, rebuilt from the structure managers when they change.
+    bool _is_dynamic_structure_gids_dirty = true;
+    std::unordered_set<RIndex> _dynamic_structure_gids;
 
     /// Kernel data managers — singletons.
     RS_KernelSpatialManager _kernel_spatial_manager;

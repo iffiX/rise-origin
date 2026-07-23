@@ -345,6 +345,9 @@ void RS_KernelManager::freeKernel() {
     _kernel_ray_sensor_managers.clear();
     _kernel_floor_manager.reset();
 
+    // Mark dynamic gids as dirty
+    _is_dynamic_structure_gids_dirty = true;
+
     // Cosmic background must release before the texture manager for texture dependencies.
     _kernel_cosmic_background_manager.reset();
 
@@ -885,6 +888,17 @@ void RS_KernelManager::setIntersectRegionRecords(
             manager->setIntersectRegionRecord(pairs, 0, 0, step, time);
         }
     }
+}
+
+const std::unordered_set<RIndex>& RS_KernelManager::getDynamicStructureGIDs() {
+    if (_is_dynamic_structure_gids_dirty) {
+        _dynamic_structure_gids.clear();
+        for (auto& [structure_name, mgr] : _kernel_structure_voxel_managers) {
+            if (mgr->hasDynamicVoxels()) _dynamic_structure_gids.insert(mgr->getEntityGid());
+        }
+        _is_dynamic_structure_gids_dirty = false;
+    }
+    return _dynamic_structure_gids;
 }
 
 std::string RS_KernelManager::purgeStructure(RIndex structure_gid) {
@@ -2123,6 +2137,7 @@ void RS_KernelManager::_addEntity(const RSC_EntityVariant& entity, TaskPromise t
         if constexpr (std::is_same_v<T, RSC_StructureVoxel>) {
             auto mgr = std::make_unique<RS_KernelStructureVoxelManager>(this, c);
             _kernel_structure_voxel_managers[c.name] = std::move(mgr);
+            _is_dynamic_structure_gids_dirty = true;
             _stageCommit(RSE_KERNEL_MANAGER_STRUCTURE_VOXEL, c.name);
         } else if constexpr (std::is_same_v<T, RSC_CameraPerspectiveFree> ||
                              std::is_same_v<T, RSC_CameraPerspectiveRigidBodyLinked>) {
@@ -2174,6 +2189,7 @@ void RS_KernelManager::_removeEntity(const std::string& name, TaskPromise task) 
         }
         it->second->decommit();
         _kernel_structure_voxel_managers.erase(it);
+        _is_dynamic_structure_gids_dirty = true;
         _retractPendingCommit(RSE_KERNEL_MANAGER_STRUCTURE_VOXEL, name);
         _queueResult(task, RS_WorldTaskDataSuccess{});
         return;

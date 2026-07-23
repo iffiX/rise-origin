@@ -83,9 +83,13 @@
 #define RS_WORLD_MESSAGE_BUFFER_DEFAULT_SIZE 4096
 #endif
 
-// World range in meters.
-#ifndef RS_WORLD_MAX_RANGE
-#define RS_WORLD_MAX_RANGE 1000.0
+// World range in meters. Dynamic structures use the tighter range; static geometry the wider one,
+// which must stay under the centimeter-unit Morton broadphase coverage of about 10485 m.
+#ifndef RS_WORLD_MAX_DYNAMIC_RANGE
+#define RS_WORLD_MAX_DYNAMIC_RANGE 1000.0
+#endif
+#ifndef RS_WORLD_MAX_STATIC_RANGE
+#define RS_WORLD_MAX_STATIC_RANGE 10000.0
 #endif
 
 // Hard limit on algorithms.

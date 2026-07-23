@@ -523,8 +523,9 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
          * Voxel bound check
          ****************************************************************/
         if (voxel_handles.size() > 0) {
-            const RFloat range = RFloat(RS_WORLD_MAX_RANGE);
-            RBound3f world_box(-range, -range, -range, range, range, range);
+            // A dynamic structure is held to the tighter dynamic range; a static one may reach the
+            // wider static range, so pick each structure's range by its mobility.
+            const auto &dynamic_gids = _kernel_manager->getDynamicStructureGIDs();
             _resizeReduceBufferIfNeeded(voxel_handles.size() * sizeof(RBound3f), 0);
             p_ptr->template run<
                 RSCF_LaunchSetOrGetWithHandles<RSCF_GetVoxelBoundMetric, KernelType>>(
@@ -537,12 +538,19 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
             );
             for (RSize seg = 0; seg < result.size(); ++seg) {
                 RBound3f bound = result[seg];
+                RIndex gid = voxel_active_ids[seg];
+                bool is_dynamic = dynamic_gids.count(gid) > 0;
+                RFloat range = is_dynamic ? RFloat(RS_WORLD_MAX_DYNAMIC_RANGE)
+                                          : RFloat(RS_WORLD_MAX_STATIC_RANGE);
+                RBound3f world_box(-range, -range, -range, range, range, range);
                 if (voxel_active_sizes[seg] > 0 && bound.isValid() &&
                     !world_box.isContaining(bound))
                     offenders.emplace(
-                        voxel_active_ids[seg],
+                        gid,
                         format(
-                            "out of world bounds min ({}, {}, {}) max ({}, {}, {})",
+                            "out of {} world range +/-{} m min ({}, {}, {}) max ({}, {}, {})",
+                            is_dynamic ? "dynamic" : "static",
+                            range,
                             bound.min_x,
                             bound.min_y,
                             bound.min_z,

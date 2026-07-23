@@ -371,6 +371,12 @@ class RS_KernelStructureVoxelManager {
     ) const;
 
     /**
+     * @brief Whether the structure can ever move a voxel: it is not fixed and holds a soft or
+     *        rigid segment. Reflects inherent mobility, so freezing does not change it.
+     */
+    [[nodiscard]] bool hasDynamicVoxels() const;
+
+    /**
      * @brief Whether the structure currently has any static voxels: it is frozen, permanently
      *        fixed, or holds a fixed or rigid-fixed segment.
      */

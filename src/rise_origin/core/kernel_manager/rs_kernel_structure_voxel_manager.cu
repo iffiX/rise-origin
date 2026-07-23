@@ -30,6 +30,11 @@ using namespace rise::logic;
 
 namespace rise {
 
+static_assert(
+    RS_WORLD_MAX_DYNAMIC_RANGE <= RS_WORLD_MAX_STATIC_RANGE,
+    "The dynamic world range must not exceed the static world range"
+);
+
 RS_KernelStructureVoxelManager::BuildCache RS_KernelStructureVoxelManager::_build_cache;
 std::mutex RS_KernelStructureVoxelManager::_build_cache_mutex;
 
@@ -41,14 +46,18 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     const SupportedRSC &structure_rsc
 )
     : _kernel_manager(kernel_manager), _rsc(structure_rsc) {
-    // Reject a structure whose bounding box leaves the world before doing any expensive work.
+    // Reject a structure whose bounding box leaves the widest world range before doing any
+    // expensive work. A dynamic structure is held to the tighter dynamic range once its segment
+    // types are known, checked after the bodies are built below.
     RBound3f world_bound = _computeWorldBound(_structure());
-    RFloat range = RFLOAT(RS_WORLD_MAX_RANGE);
-    RBound3f world_range(-range, -range, -range, range, range, range);
-    if (world_bound.isValid() && !world_range.isContaining(world_bound)) {
+    RFloat static_range = RFLOAT(RS_WORLD_MAX_STATIC_RANGE);
+    RBound3f static_world_range(
+        -static_range, -static_range, -static_range, static_range, static_range, static_range
+    );
+    if (world_bound.isValid() && !static_world_range.isContaining(world_bound)) {
         RS_THROW(RS_InvalidCharacterizationException(
-            "Structure \"{}\" bounding box [({}, {}, {}), ({}, {}, {})] exceeds the world range of "
-            "+/-{} m in at least one axis",
+            "Structure \"{}\" bounding box [({}, {}, {}), ({}, {}, {})] exceeds the static world "
+            "range of +/-{} m in at least one axis",
             _structure().name,
             world_bound.min_x,
             world_bound.min_y,
@@ -56,7 +65,7 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
             world_bound.max_x,
             world_bound.max_y,
             world_bound.max_z,
-            range
+            static_range
         ));
     }
 
@@ -94,6 +103,30 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
         timer.elapsedTimeString()
     );
     timer.reset();
+
+    // A dynamic structure moves and must stay within the tighter dynamic range. Its segment types
+    // are now known, so hold its whole bound to that range.
+    if (world_bound.isValid() && hasDynamicVoxels()) {
+        RFloat dynamic_range = RFLOAT(RS_WORLD_MAX_DYNAMIC_RANGE);
+        RBound3f dynamic_world_range(
+            -dynamic_range, -dynamic_range, -dynamic_range, dynamic_range, dynamic_range,
+            dynamic_range
+        );
+        if (!dynamic_world_range.isContaining(world_bound)) {
+            RS_THROW(RS_InvalidCharacterizationException(
+                "Dynamic structure \"{}\" bounding box [({}, {}, {}), ({}, {}, {})] exceeds the "
+                "dynamic world range of +/-{} m in at least one axis",
+                _structure().name,
+                world_bound.min_x,
+                world_bound.min_y,
+                world_bound.min_z,
+                world_bound.max_x,
+                world_bound.max_y,
+                world_bound.max_z,
+                dynamic_range
+            ));
+        }
+    }
 
     _precheckStructureLimits();
 
@@ -417,6 +450,19 @@ RSize RS_KernelStructureVoxelManager::getSegmentVoxelNumInRange(
     }
 
     return count;
+}
+
+bool RS_KernelStructureVoxelManager::hasDynamicVoxels() const {
+    // A permanently fixed structure never populates the segment map and holds every voxel static.
+    if (_structure().is_fixed) return false;
+
+    // Otherwise any soft or rigid segment contributes a movable voxel.
+    for (const auto &[key, phys_type] : _segment_phys_type_map) {
+        if (phys_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT ||
+            phys_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID)
+            return true;
+    }
+    return false;
 }
 
 bool RS_KernelStructureVoxelManager::hasStaticVoxels() const {
