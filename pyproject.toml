@@ -15,6 +15,7 @@ license = "Apache-2.0"
 authors = [{ name = "Muhan Li", email = "muhanli@beyond-infinity.top" }]
 dependencies = [
     "numpy>=1.24",
+    "scipy>=1.10",
     # asset import + voxelization
     "trimesh>=4",
     "libigl>=2.5",
@@ -28,6 +29,19 @@ dependencies = [
     "imageio>=2.31",
     "imageio-ffmpeg>=0.4",
     "pyquaternion>=0.9",
+    # create layer
+    "torch>=2.5",
+    "python-fcl>=0.7",
+    "shapely>=2",
+    "filelock>=3",
+    "Pillow>=10",
+    "resolvelib>=1.2",
+    "requests>=2",
+    "connected-components-3d>=3",
+    # agent kernel connection
+    "ipykernel>=6",
+    "jupyter-client>=8",
+    "pyzmq>=25",
 ]
 
 [project.optional-dependencies]
@@ -68,7 +82,7 @@ include = ["rise_origin", "rise_origin.*"]
 exclude = ["rise_origin.cpu*", "rise_origin.cuda12*", "rise_origin.cuda13*"]
 
 [tool.setuptools.package-data]
-rise_origin = ["py.typed"]
+rise_origin = ["py.typed", "skills/*/*.md", "skills/*/examples/*.py"]
 
 [tool.setuptools.dynamic]
 version = { file = "VERSION" }

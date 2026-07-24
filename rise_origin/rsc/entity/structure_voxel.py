@@ -195,7 +195,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             A populated :class:`StructureVoxelBody`.
         """
         occ = np.ones((x_voxels, y_voxels, z_voxels), dtype=bool)
-        return cls.from_grid(
+        return cls.from_occupancy(
             occ,
             material_sid=material_sid,
             segment_sid=segment_sid,
@@ -229,7 +229,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         Returns:
             A populated :class:`StructureVoxelBody`.
         """
-        return cls.from_grid(
+        return cls.from_occupancy(
             cls._make_sphere_mask(radius_voxels),
             material_sid=material_sid,
             segment_sid=segment_sid,
@@ -267,7 +267,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         Returns:
             A populated :class:`StructureVoxelBody`.
         """
-        return cls.from_grid(
+        return cls.from_occupancy(
             cls._make_cylinder_mask(radius_voxels, height_voxels, axis),
             material_sid=material_sid,
             segment_sid=segment_sid,
@@ -308,7 +308,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         Returns:
             A populated :class:`StructureVoxelBody`.
         """
-        return cls.from_grid(
+        return cls.from_occupancy(
             cls._make_capsule_mask(radius_voxels, height_voxels, axis),
             material_sid=material_sid,
             segment_sid=segment_sid,
@@ -318,40 +318,30 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         )
 
     @classmethod
-    def from_grid(
+    def from_occupancy(
         cls,
         occupancy,
         *,
         material_sid: int = 0,
         segment_sid: int = 0,
         voxel_size: float,
-        material_grid=None,
-        material_optical_reference_mid_grid=None,
-        segment_grid=None,
-        expansion_signal_grid=None,
         relative_origin_position: RVec3rf = RVec3rf.zero(),
         relative_orientation: RQuat3rf = RQuat3rf.unit(),
     ) -> "StructureVoxelBody":
-        """Build a body from an occupancy grid (the kernel every generator uses).
+        """Build a body from a boolean mask filled with one uniform material.
 
-        Occupied cells take ``material_sid`` / ``segment_sid``; empty cells are
-        left unfilled (``RS_NULL_INDEX``). Pass ``material_grid`` / ``segment_grid``
-        to assign these per voxel instead, overriding the scalar defaults.
+        The convenience path for a solid shape: present cells all take
+        ``material_sid`` and ``segment_sid``, empty cells stay unfilled. It
+        turns the mask into the material and segment grids that
+        :meth:`from_grid` speaks and delegates, so the grid path stays the one
+        source of truth for which cell is present. Per-voxel looks belong to
+        the grid path, so this convenience carries no grids of its own.
 
         Args:
             occupancy: ``(X, Y, Z)`` boolean array; truthy cells are present.
             material_sid: Uniform material reference id for present voxels.
             segment_sid: Uniform rigid segment id for present voxels.
             voxel_size: Edge length of one voxel, in meters.
-            material_grid: Optional ``(X, Y, Z)`` per-voxel material id grid;
-                overrides ``material_sid``.
-            material_optical_reference_mid_grid: Optional ``(X, Y, Z)`` per-voxel
-                material optical reference id grid; empty uses each material's
-                default optical property.
-            segment_grid: Optional ``(X, Y, Z)`` per-voxel segment id grid;
-                overrides ``segment_sid``.
-            expansion_signal_grid: Optional ``(X, Y, Z)`` per-voxel expansion
-                signal id grid; ``RS_NULL_INDEX`` for voxels with no expansion.
             relative_origin_position: Min-corner of the grid relative to the
                 structure origin, ``(x, y, z)`` in meters.
             relative_orientation: Body orientation ``(x, y, z, w)``.
@@ -360,15 +350,59 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             A populated :class:`StructureVoxelBody`.
         """
         occ = np.asarray(occupancy, dtype=bool)
-        mats = (
-            np.asarray(material_grid)
-            if material_grid is not None
-            else np.where(occ, material_sid, RS_NULL_INDEX)
+        material_grid = np.where(occ, np.uint32(material_sid), np.uint32(RS_NULL_INDEX))
+        segment_grid = np.where(occ, np.uint32(segment_sid), np.uint32(RS_NULL_INDEX))
+        return cls.from_grid(
+            material_grid,
+            segment_grid=segment_grid,
+            voxel_size=voxel_size,
+            relative_origin_position=relative_origin_position,
+            relative_orientation=relative_orientation,
         )
+
+    @classmethod
+    def from_grid(
+        cls,
+        material_grid,
+        *,
+        segment_grid=None,
+        material_optical_reference_mid_grid=None,
+        expansion_signal_grid=None,
+        voxel_size: float,
+        relative_origin_position: RVec3rf = RVec3rf.zero(),
+        relative_orientation: RQuat3rf = RQuat3rf.unit(),
+    ) -> "StructureVoxelBody":
+        """Build a body from per-voxel grids (the kernel every generator uses).
+
+        The ``material_grid`` is the one source of truth for which cell is
+        present: a cell holding ``RS_NULL_INDEX`` is empty, anything else is a
+        filled voxel of that material. There is no separate occupancy mask and
+        no scalar material or segment id; :meth:`from_occupancy` covers the
+        uniform-fill convenience by building these grids.
+
+        Args:
+            material_grid: ``(X, Y, Z)`` per-voxel material reference id;
+                ``RS_NULL_INDEX`` marks an empty cell.
+            segment_grid: Optional ``(X, Y, Z)`` per-voxel segment id; when
+                omitted every present cell defaults to segment zero.
+            material_optical_reference_mid_grid: Optional ``(X, Y, Z)`` per-voxel
+                material optical reference id grid; empty uses each material's
+                default optical property.
+            expansion_signal_grid: Optional ``(X, Y, Z)`` per-voxel expansion
+                signal id grid; ``RS_NULL_INDEX`` for voxels with no expansion.
+            voxel_size: Edge length of one voxel, in meters.
+            relative_origin_position: Min-corner of the grid relative to the
+                structure origin, ``(x, y, z)`` in meters.
+            relative_orientation: Body orientation ``(x, y, z, w)``.
+
+        Returns:
+            A populated :class:`StructureVoxelBody`.
+        """
+        mats = np.asarray(material_grid)
         segs = (
             np.asarray(segment_grid)
             if segment_grid is not None
-            else np.where(occ, segment_sid, RS_NULL_INDEX)
+            else np.where(mats != RS_NULL_INDEX, 0, RS_NULL_INDEX)
         )
         optical = (
             np.asarray(material_optical_reference_mid_grid)
@@ -384,7 +418,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         # Trim empty borders: crop to the tight box of voxels that carry data so
         # the dense arrays do not store the surrounding empty space, then shift
         # the origin so the kept voxels stay in the same place.
-        present = occ | (mats != RS_NULL_INDEX) | (segs != RS_NULL_INDEX)
+        present = (mats != RS_NULL_INDEX) | (segs != RS_NULL_INDEX)
         if present.any():
             present_x, present_y, present_z = np.nonzero(present)
             x0, y0, z0 = (
@@ -472,7 +506,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
         zs = min_z + (np.arange(nz) + 0.5) * voxel_size
         gx, gy, gz = np.meshgrid(xs, ys, zs, indexing="ij")
         occ = np.asarray(fn(gx, gy, gz)) <= 0.0
-        return cls.from_grid(
+        return cls.from_occupancy(
             occ,
             material_sid=material_sid,
             segment_sid=segment_sid,
@@ -512,7 +546,7 @@ class StructureVoxelBody(RSC_StructureVoxelBody):
             A populated :class:`StructureVoxelBody`.
         """
         occupancy, min_corner = _voxelize_mesh(mesh, voxel_size)
-        return cls.from_grid(
+        return cls.from_occupancy(
             occupancy,
             material_sid=material_sid,
             segment_sid=segment_sid,
@@ -900,10 +934,7 @@ class StructureVoxel(RSC_StructureVoxel):
         material_grid = np.full((size_x, size_y, size_z), RS_NULL_INDEX, dtype=np.int64)
         xs, ys, zs, colors = voxels[:, 0], voxels[:, 1], voxels[:, 2], voxels[:, 3]
         material_grid[xs, ys, zs] = colors.astype(np.int64) - 1  # palette is 1-based
-        occupancy = material_grid != RS_NULL_INDEX
-        body = StructureVoxelBody.from_grid(
-            occupancy, material_grid=material_grid, voxel_size=voxel_size
-        )
+        body = StructureVoxelBody.from_grid(material_grid, voxel_size=voxel_size)
         return cls(name, bodies=[body])
 
     @classmethod
@@ -1920,8 +1951,7 @@ class StructureVoxel(RSC_StructureVoxel):
             material_optical_references.append(optical_names)
             optical_mid_grid = np.where(occupancy, index_grid, RS_NULL_INDEX)
         return StructureVoxelBody.from_grid(
-            occupancy,
-            material_grid=material_grid,
+            material_grid,
             material_optical_reference_mid_grid=optical_mid_grid,
             voxel_size=voxel_size,
             relative_origin_position=min_corner,

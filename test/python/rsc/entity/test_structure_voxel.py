@@ -49,10 +49,10 @@ def test_body_from_sdf_torus_is_nonempty():
     assert any(m != rs.RS_NULL_INDEX for m in body.material_reference_sid)
 
 
-def test_body_from_grid_trims_empty_borders():
+def test_body_from_occupancy_trims_empty_borders():
     occ = np.zeros((5, 6, 7), dtype=bool)
     occ[2, 3, 4] = True  # one voxel inside a larger empty grid
-    body = StructureVoxelBody.from_grid(
+    body = StructureVoxelBody.from_occupancy(
         occ, material_sid=9, voxel_size=VS, relative_origin_position=(1.0, 2.0, 3.0)
     )
     # The dense lattice shrinks to just the occupied voxel and keeps its material.

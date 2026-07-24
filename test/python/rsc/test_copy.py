@@ -12,7 +12,7 @@ def _body():
     occ = np.zeros((2, 1, 1), dtype=bool)
     occ[0, 0, 0] = True
     occ[1, 0, 0] = True
-    return rsc.entity.StructureVoxelBody.from_grid(
+    return rsc.entity.StructureVoxelBody.from_occupancy(
         occ, material_sid=0, segment_sid=0, voxel_size=0.01
     )
 

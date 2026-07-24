@@ -24,8 +24,11 @@ _CONSTRAINT = rs.RSE_StructureVoxelConstraintType
 def body(voxels=4, voxel_size=0.01, material_sid=0, segment_sid=0):
     """Build a solid cubic voxel body of the given side length."""
     occupancy = np.ones((voxels, voxels, voxels), dtype=bool)
-    return rsc.entity.StructureVoxelBody.from_grid(
-        occupancy, material_sid=material_sid, segment_sid=segment_sid, voxel_size=voxel_size
+    return rsc.entity.StructureVoxelBody.from_occupancy(
+        occupancy,
+        material_sid=material_sid,
+        segment_sid=segment_sid,
+        voxel_size=voxel_size,
     )
 
 

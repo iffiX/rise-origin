@@ -256,7 +256,9 @@ voxels = int(sys.argv[1])
 compress = sys.argv[2] == "1"
 
 occ = np.ones((voxels, voxels, voxels), dtype=bool)
-b = rsc.entity.StructureVoxelBody.from_grid(occ, material_sid=0, segment_sid=0, voxel_size=0.01)
+b = rsc.entity.StructureVoxelBody.from_occupancy(
+    occ, material_sid=0, segment_sid=0, voxel_size=0.01
+)
 count = len(list(b.segment_bid))
 # The bulk arrays a full body populates, each a uint32 per voxel.
 array_bytes = count * 4 * 3
