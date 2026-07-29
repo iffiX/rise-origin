@@ -2211,6 +2211,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                     voxel_out.radius = half_voxel_size * std::sqrt(FloatM(3));
 
                     bool is_fixed =
+                        _structure().is_fixed ||
                         voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED ||
                         voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_FIXED;
                     RS_VoxelStateUnion state{0};

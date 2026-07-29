@@ -198,7 +198,16 @@ class RSCF_UpdateStructureRootRecord
    public:
     template <typename Kernel, typename Buffer, typename... Sizes>
     HOST_DEVICE_INLINE_QUALIFIER static void
-    run(const Kernel *k, Buffer &buffer, RS_WorldStructureVoxelRecord &record, Sizes... record_sizes) {
+    run(const Kernel *k,
+        Buffer &buffer,
+        RS_WorldStructureVoxelRecord &record,
+        bool is_active,
+        Sizes... record_sizes) {
+        // A frozen structure stores nothing this step, so its record carries no reading at all.
+        if (!is_active) {
+            record.is_valid = false;
+            return;
+        }
         RBigSize record_data_size = RS_WorldStructureVoxelRecord::getRequiredMemorySize(record_sizes...);
         RS_MemoryPtr chunk = buffer.pushDevice(record_data_size);
         if (chunk == nullptr) {

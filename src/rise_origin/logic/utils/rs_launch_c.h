@@ -245,6 +245,7 @@ class RSCF_LaunchUpdateRootRecord
             device::RS_ConstantMemory::as<Kernel>(),
             buffers[i],
             root_records[i],
+            (handle_layouts.isSegmentActive(i) && ...),
             handle_layouts.segmentSize(i)...
         );
     }

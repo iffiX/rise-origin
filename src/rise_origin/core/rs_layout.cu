@@ -164,15 +164,15 @@ void RS_CompactLayout::syncDeviceLayout(device::RS_DeviceLayout& device_layout) 
     }
     vector<device::RS_DeviceLayout::SegmentInfo> tmp_segments;
     vector<RSize> tmp_segment_size_prefix_sums;
+    // Inactive segments still cross, sized zero, so a segment keeps the same index on both sides.
     for (auto&& [size, offset, segment_id, is_active] :
          zip(_segment_sizes, _segment_offsets, _segment_indices, _segment_is_active)) {
-        if (is_active) {
-            tmp_segments.emplace_back(size, offset, segment_id);
-            tmp_segment_size_prefix_sums.push_back(
-                (tmp_segment_size_prefix_sums.empty() ? 0 : tmp_segment_size_prefix_sums.back()) +
-                size
-            );
-        }
+        RSize active_size = is_active ? size : 0;
+        tmp_segments.emplace_back(active_size, offset, segment_id, is_active);
+        tmp_segment_size_prefix_sums.push_back(
+            (tmp_segment_size_prefix_sums.empty() ? 0 : tmp_segment_size_prefix_sums.back()) +
+            active_size
+        );
     }
     device_layout.version_id = _version_id;
     device_layout.total_size = size();
@@ -369,15 +369,15 @@ void RS_PooledLayout::syncDeviceLayout(device::RS_DeviceLayout& device_layout) c
     }
     vector<device::RS_DeviceLayout::SegmentInfo> tmp_segments;
     vector<RSize> tmp_segment_size_prefix_sums;
+    // Inactive segments still cross, sized zero, so a segment keeps the same index on both sides.
     for (auto&& [size, offset, segment_id, is_active] :
          zip(_segment_sizes, _segment_offsets, _segment_indices, _segment_is_active)) {
-        if (is_active) {
-            tmp_segments.emplace_back(size, offset, segment_id);
-            tmp_segment_size_prefix_sums.push_back(
-                (tmp_segment_size_prefix_sums.empty() ? 0 : tmp_segment_size_prefix_sums.back()) +
-                size
-            );
-        }
+        RSize active_size = is_active ? size : 0;
+        tmp_segments.emplace_back(active_size, offset, segment_id, is_active);
+        tmp_segment_size_prefix_sums.push_back(
+            (tmp_segment_size_prefix_sums.empty() ? 0 : tmp_segment_size_prefix_sums.back()) +
+            active_size
+        );
     }
     device_layout.version_id = _version_id;
     device_layout.total_size = size();

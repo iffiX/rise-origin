@@ -20,9 +20,11 @@ class RS_DeviceLayout {
         RSize size;
         RSize offset;
         RIndex segment_id;
+        bool is_active;
 
-        HOST_DEVICE_INLINE_QUALIFIER SegmentInfo(RSize size, RSize offset, RIndex segment_id)
-            : size(size), offset(offset), segment_id(segment_id) {}
+        HOST_DEVICE_INLINE_QUALIFIER
+        SegmentInfo(RSize size, RSize offset, RIndex segment_id, bool is_active = true)
+            : size(size), offset(offset), segment_id(segment_id), is_active(is_active) {}
     };
 
     struct SegmentSearchResult {
@@ -84,6 +86,11 @@ class RS_DeviceLayout {
     HOST_DEVICE_INLINE_QUALIFIER RSize segmentOffset(RIndex index) const {
         assert(index < segments.size());
         return segments[index].offset;
+    }
+
+    HOST_DEVICE_INLINE_QUALIFIER bool isSegmentActive(RIndex index) const {
+        assert(index < segments.size());
+        return segments[index].is_active;
     }
 
     HOST_DEVICE_INLINE_QUALIFIER SegmentSearchResult
