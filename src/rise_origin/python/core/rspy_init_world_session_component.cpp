@@ -83,7 +83,10 @@ void initRSPYWorldSessionComponent(py::module &m) {
                         RSize max_depth,
                         RFloat field_of_view,
                         RFloat defocus_angle,
-                        RFloat focus_distance) {
+                        RFloat focus_distance,
+                        RFloat min_distance,
+                        RFloat max_distance,
+                        RFloat zoom_factor) {
                 RS_WorldSessionComponentCamera::Callback cpp_callback;
                 if (!callback.is_none()) {
                     std::shared_ptr<py::object> py_object(
@@ -112,7 +115,10 @@ void initRSPYWorldSessionComponent(py::module &m) {
                     max_depth,
                     field_of_view,
                     defocus_angle,
-                    focus_distance
+                    focus_distance,
+                    min_distance,
+                    max_distance,
+                    zoom_factor
                 );
             }),
             py::arg("name"),
@@ -126,6 +132,9 @@ void initRSPYWorldSessionComponent(py::module &m) {
             py::arg("field_of_view") = 60.0,
             py::arg("defocus_angle") = 0.0,
             py::arg("focus_distance") = 1.0,
+            py::arg("min_distance") = 0.05,
+            py::arg("max_distance") = RS_MAX_FLOAT,
+            py::arg("zoom_factor") = 0.95,
             R"doc(
             Orbit-camera component: injects one free perspective camera and drives its pose.
         )doc"

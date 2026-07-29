@@ -9,6 +9,7 @@
 #include "rise_origin/core/rs_world_record.h"
 #include "rise_origin/core/rs_world_session_component.h"
 #include "rise_origin/core/rs_world_signal.h"
+#include "rise_origin/core/world_session_component/rs_world_session_component_shared_data.h"
 #include "rise_origin/rsc/controller/rsc_controller.h"
 #include "rise_origin/rsc/entity/rsc_camera.h"
 #include "rise_origin/utils/math/rs_mat.h"
@@ -25,7 +26,10 @@ RS_WorldSessionComponentCamera::RS_WorldSessionComponentCamera(
     RSize max_depth,
     RFloat field_of_view,
     RFloat defocus_angle,
-    RFloat focus_distance
+    RFloat focus_distance,
+    RFloat min_distance,
+    RFloat max_distance,
+    RFloat zoom_factor
 )
     : _name(std::move(name)),
       _controller_name(_name + "#controller"),
@@ -40,7 +44,15 @@ RS_WorldSessionComponentCamera::RS_WorldSessionComponentCamera(
       _position(position),
       _focus(focus),
       _orientation(_lookAt(position, focus)),
-      _distance((focus - position).length()) {}
+      _distance((focus - position).length()),
+      _min_distance(min_distance),
+      _max_distance(max_distance),
+      _zoom_factor(zoom_factor) {
+    // Seat the camera inside its orbit range here, so the entity it injects on attach already
+    // stands where the first step would put it.
+    _distance = std::clamp(_distance, _min_distance, _max_distance);
+    _position = _focus - _orientation.toOrthoAxisX() * _distance;
+}
 
 void RS_WorldSessionComponentCamera::onAttach(RS_WorldSessionAccess access) {
     _access = std::move(access);
@@ -59,6 +71,7 @@ void RS_WorldSessionComponentCamera::onCallback(RBigFloat time, RS_ThreadPool& p
     pool.detachTask([this] {
         _applyPending();
         _writeCameraSignal();
+        _publishUserView();
     });
     pool.detachTask([this, copy, time] {
         copy->wait();
@@ -128,10 +141,14 @@ void RS_WorldSessionComponentCamera::_applyPending() {
 }
 
 void RS_WorldSessionComponentCamera::_applyZoom() {
-    if (_pending_zoom == 0) return;
-    _distance *= 1.0f - _pending_zoom * 0.1f;
-    _distance = std::clamp(_distance, RFloat(0.05), RFloat(100.0));
-    _pending_zoom = 0;
+    // Each notch scales the distance rather than subtracting from it, so any number of notches
+    // arriving in one step still leaves the camera on this side of the focus.
+    if (_pending_zoom != 0) {
+        _distance *= std::pow(_zoom_factor, _pending_zoom);
+        _pending_zoom = 0;
+    }
+    // Held every step, so a camera built outside its range is seated on the first one.
+    _distance = std::clamp(_distance, _min_distance, _max_distance);
 }
 
 void RS_WorldSessionComponentCamera::_applyPan() {
@@ -177,6 +194,23 @@ void RS_WorldSessionComponentCamera::_writeCameraSignal() {
             }
         });
     }
+}
+
+void RS_WorldSessionComponentCamera::_publishUserView() {
+    RS_WorldSessionUserView view;
+    view.name = _name;
+    view.position = _position;
+    RS_WorldSessionUserAim vision;
+    vision.name = RS_WORLD_SESSION_USER_AIM_VISION;
+    vision.is_valid = true;
+    vision.origin = _position;
+    vision.direction = _orientation.toOrthoAxisX();
+    // The camera always looks at its orbit focus, so the vision ray ends there.
+    vision.position = _focus;
+    view.aims.push_back(vision);
+    _access->publish<RS_WorldSessionUserView>(
+        RS_WORLD_SESSION_CHANNEL_USER_VIEW, std::make_shared<const RS_WorldSessionUserView>(view)
+    );
 }
 
 RQuat3rf RS_WorldSessionComponentCamera::_lookAt(const RVec3rf& eye, const RVec3rf& at) {

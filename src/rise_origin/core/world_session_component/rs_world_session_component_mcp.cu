@@ -46,7 +46,7 @@
 #include "rise_origin/rsc/signal/rsc_mechanical.h"
 #include "rise_origin/utils/interchange/rs_json.h"
 #include "rise_origin/utils/rs_logging.h"
-#include "rs_world_session_component_vr_data.h"
+#include "rs_world_session_component_shared_data.h"
 
 namespace rise {
 
@@ -95,7 +95,7 @@ class RS_MCPImpl {
           _token(std::move(token)),
           _is_python_exec_enabled(is_python_exec_enabled) {
         if (logging::get("root")) _logger = logging::get("root")->clone("mcp service");
-        _subscribeUserChannels();
+        _subscribeUserView();
         _registerBasicApis();
         _registerConvenienceApis();
         _registerEmbodimentApis();
@@ -648,13 +648,11 @@ class RS_MCPImpl {
     RVec3rf _cube_extent;
     RVec3rf _cube_eye_anchor;
 
-    // Latest user state carried on the communication channels, drained on demand.
+    // Latest user view of every component that publishes one, keyed by that component's name and
+    // drained on demand.
     std::mutex _user_mutex;
-    RVec3rf _user_position;
-    bool _has_user_position = false;
-    RS_WorldSessionVRUserHandAims _user_hand_aims;
-    RS_WorldSessionMessageBroker::Subscription _user_position_subscription;
-    RS_WorldSessionMessageBroker::Subscription _user_hand_aims_subscription;
+    std::unordered_map<std::string, RS_WorldSessionUserView> _user_views;
+    RS_WorldSessionMessageBroker::Subscription _user_view_subscription;
 
     /*****************************************************************
      * Registration
@@ -733,8 +731,7 @@ class RS_MCPImpl {
     }
 
     void _registerCommunicationApis() {
-        _addApi(std::make_unique<GetUserPositionApi>(*this));
-        _addApi(std::make_unique<GetUserHandAimsApi>(*this));
+        _addApi(std::make_unique<GetUserViewApi>(*this));
         _addApi(std::make_unique<ReadChannelApi>(*this));
     }
 
@@ -1821,53 +1818,41 @@ class RS_MCPImpl {
     /*****************************************************************
      * Communication draining
      *****************************************************************/
-    void _subscribeUserChannels() {
-        _user_position_subscription = _access.subscribe<RS_WorldSessionVRUserPosition>(
-            RS_VR_CHANNEL_USER_POSITION,
-            std::bind(&RS_MCPImpl::_onUserPosition, this, std::placeholders::_1)
-        );
-        _user_hand_aims_subscription = _access.subscribe<RS_WorldSessionVRUserHandAims>(
-            RS_VR_CHANNEL_USER_HAND_AIMS,
-            std::bind(&RS_MCPImpl::_onUserHandAims, this, std::placeholders::_1)
+    void _subscribeUserView() {
+        _user_view_subscription = _access.subscribe<RS_WorldSessionUserView>(
+            RS_WORLD_SESSION_CHANNEL_USER_VIEW,
+            std::bind(&RS_MCPImpl::_onUserView, this, std::placeholders::_1)
         );
     }
 
-    void _onUserPosition(std::shared_ptr<const RS_WorldSessionVRUserPosition> message) {
+    void _onUserView(std::shared_ptr<const RS_WorldSessionUserView> message) {
         std::scoped_lock lock(_user_mutex);
-        _user_position = message->position;
-        _has_user_position = true;
+        _user_views[message->name] = *message;
     }
 
-    void _onUserHandAims(std::shared_ptr<const RS_WorldSessionVRUserHandAims> message) {
+    RS_JSON _drainUserView() {
+        _user_view_subscription.drain();
         std::scoped_lock lock(_user_mutex);
-        _user_hand_aims = *message;
+        RS_JSON views = RS_JSON::array();
+        for (const auto &[name, view] : _user_views) views.push_back(_getUserViewJson(view));
+        return _makeTextContent(RS_JSON{{"views", views}}.dump());
     }
 
-    RS_JSON _drainUserPosition() {
-        _user_position_subscription.drain();
-        std::scoped_lock lock(_user_mutex);
-        if (!_has_user_position) return _makeTextContent(R"({"valid":false})");
+    static RS_JSON _getUserViewJson(const RS_WorldSessionUserView &view) {
+        RS_JSON aims = RS_JSON::array();
+        for (const RS_WorldSessionUserAim &aim : view.aims) {
+            RS_JSON entry;
+            entry["name"] = aim.name;
+            entry["valid"] = aim.is_valid;
+            entry["origin"] = {aim.origin.x, aim.origin.y, aim.origin.z};
+            entry["direction"] = {aim.direction.x, aim.direction.y, aim.direction.z};
+            entry["position"] = {aim.position.x, aim.position.y, aim.position.z};
+            aims.push_back(entry);
+        }
         RS_JSON result;
-        result["valid"] = true;
-        result["position"] = {_user_position.x, _user_position.y, _user_position.z};
-        return _makeTextContent(result.dump());
-    }
-
-    RS_JSON _drainHandAims() {
-        _user_hand_aims_subscription.drain();
-        std::scoped_lock lock(_user_mutex);
-        RS_JSON result;
-        result["left"] = _getHandAimJson(_user_hand_aims.left);
-        result["right"] = _getHandAimJson(_user_hand_aims.right);
-        return _makeTextContent(result.dump());
-    }
-
-    static RS_JSON _getHandAimJson(const RS_WorldSessionVRHandAim &aim) {
-        RS_JSON result;
-        result["valid"] = aim.is_valid;
-        result["origin"] = {aim.aim_origin.x, aim.aim_origin.y, aim.aim_origin.z};
-        result["direction"] = {aim.aim_direction.x, aim.aim_direction.y, aim.aim_direction.z};
-        result["position"] = {aim.aim_position.x, aim.aim_position.y, aim.aim_position.z};
+        result["name"] = view.name;
+        result["position"] = {view.position.x, view.position.y, view.position.z};
+        result["aims"] = aims;
         return result;
     }
 
@@ -3062,25 +3047,16 @@ class RS_MCPImpl {
     /*****************************************************************
      * (f) Communication
      *****************************************************************/
-    struct GetUserPositionApi : APIBase {
+    struct GetUserViewApi : APIBase {
         using APIBase::APIBase;
-        std::string name() const override { return "get_user_position"; }
-        std::string description() const override { return "Get the user's latest world position."; }
-        std::string schema() const override { return _emptySchema().dump(); }
-        bool isRegistered() const override { return false; }
-        APITask call(const RS_JSON &) override {
-            return APITask::makeFinished(impl._drainUserPosition());
+        std::string name() const override { return "get_user_view"; }
+        std::string description() const override {
+            return "Get where the user is and what the user aims at, one view per publisher.";
         }
-    };
-
-    struct GetUserHandAimsApi : APIBase {
-        using APIBase::APIBase;
-        std::string name() const override { return "get_hand_aims"; }
-        std::string description() const override { return "Get the user's latest hand aim rays."; }
         std::string schema() const override { return _emptySchema().dump(); }
         bool isRegistered() const override { return false; }
         APITask call(const RS_JSON &) override {
-            return APITask::makeFinished(impl._drainHandAims());
+            return APITask::makeFinished(impl._drainUserView());
         }
     };
 
@@ -3096,10 +3072,8 @@ class RS_MCPImpl {
         bool isRegistered() const override { return false; }
         APITask call(const RS_JSON &params) override {
             std::string channel = _getString(params, "channel");
-            if (channel == RS_VR_CHANNEL_USER_POSITION)
-                return APITask::makeFinished(impl._drainUserPosition());
-            if (channel == RS_VR_CHANNEL_USER_HAND_AIMS)
-                return APITask::makeFinished(impl._drainHandAims());
+            if (channel == RS_WORLD_SESSION_CHANNEL_USER_VIEW)
+                return APITask::makeFinished(impl._drainUserView());
             return APITask::makeFinished(_makeErrorContent("unknown channel: " + channel));
         }
     };

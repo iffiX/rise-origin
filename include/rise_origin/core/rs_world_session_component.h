@@ -69,7 +69,10 @@ class RS_WorldSessionComponentCamera : public RS_WorldSessionComponent {
         RSize max_depth = 3,
         RFloat field_of_view = 60.0,
         RFloat defocus_angle = 0.0,
-        RFloat focus_distance = 1.0
+        RFloat focus_distance = 1.0,
+        RFloat min_distance = 0.05,
+        RFloat max_distance = RS_MAX_FLOAT,
+        RFloat zoom_factor = 0.95
     );
 
     void onAttach(RS_WorldSessionAccess access) override;
@@ -114,6 +117,13 @@ class RS_WorldSessionComponentCamera : public RS_WorldSessionComponent {
     RQuat3rf _orientation;
     RFloat _distance;
 
+    // The range the orbit distance is held in, enforced every step.
+    RFloat _min_distance;
+    RFloat _max_distance;
+
+    // What one wheel notch scales the orbit distance by.
+    RFloat _zoom_factor;
+
     // Pending gesture deltas accumulated by move() on the GUI thread.
     std::mutex _pending_mutex;
     RFloat _pending_orbit_pitch = 0;
@@ -129,6 +139,7 @@ class RS_WorldSessionComponentCamera : public RS_WorldSessionComponent {
     void _applyPan();
     void _applyOrbit();
     void _writeCameraSignal();
+    void _publishUserView();
     static RQuat3rf _lookAt(const RVec3rf &eye, const RVec3rf &at);
     [[nodiscard]] rsc::RSC_EntityVariant _makeCamera() const;
     [[nodiscard]] rsc::RSC_ControllerVariant _makeController() const;
@@ -250,7 +261,7 @@ class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
     void _writeManipulationSignal(RIndex hand);
     void _updateRay();
     void _updateInfo(RBigFloat time);
-    void _publishUserState();
+    void _publishUserView();
 
     [[nodiscard]] bool
     _readRayHit(RIndex hand, RIndex &gid, RFloat &distance, RIndex &body_sid, RIndex &segment_bid);

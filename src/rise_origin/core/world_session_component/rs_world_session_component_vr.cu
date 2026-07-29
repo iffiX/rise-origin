@@ -30,7 +30,7 @@
 #include "imgui.h"
 #include "rise_origin/core/rs_world_record.h"
 #include "rise_origin/core/rs_world_signal.h"
-#include "rise_origin/core/world_session_component/rs_world_session_component_vr_data.h"
+#include "rise_origin/core/world_session_component/rs_world_session_component_shared_data.h"
 #include "rise_origin/rsc/controller/rsc_controller.h"
 #include "rise_origin/rsc/entity/rsc_camera.h"
 #include "rise_origin/rsc/entity/rsc_ray_sensor.h"
@@ -2698,7 +2698,7 @@ void RS_WorldSessionComponentVR::onCallback(RBigFloat time, RS_ThreadPool& pool)
     }
 
     _updateRay();
-    if (_vr_state.load() == VRState::ENGAGED) _publishUserState();
+    if (_vr_state.load() == VRState::ENGAGED) _publishUserView();
 
     pool.detachTask([this] {
         _syncVRCharacterization();
@@ -3132,33 +3132,44 @@ void RS_WorldSessionComponentVR::_updateInfo(RBigFloat time) {
     _xr->setHudInfo(info);
 }
 
-void RS_WorldSessionComponentVR::_publishUserState() {
+void RS_WorldSessionComponentVR::_publishUserView() {
+    RS_WorldSessionUserView view;
+    view.name = _name;
+
+    // The head sits between the eyes, and both eyes share the head orientation.
     auto [left, right] = _xr->getEyes();
-    RS_WorldSessionVRUserPosition user_position;
-    user_position.position = (left.position + right.position) * 0.5;
-    _access->publish<RS_WorldSessionVRUserPosition>(
-        RS_VR_CHANNEL_USER_POSITION,
-        std::make_shared<const RS_WorldSessionVRUserPosition>(user_position)
-    );
+    view.position = (left.position + right.position) * 0.5;
+    RS_WorldSessionUserAim vision;
+    vision.name = RS_WORLD_SESSION_USER_AIM_VISION;
+    vision.is_valid = true;
+    vision.origin = view.position;
+    vision.direction = left.orientation.toOrthoAxisX();
+    // No ray sensor follows the head, so the vision ray always ends at the far depth.
+    vision.position = vision.origin + vision.direction * static_cast<RFloat>(_far_depth);
+    view.aims.push_back(vision);
 
     auto intents = _xr->getHandIntents();
     const RS_VRImpl::HandIntent* hands[2] = {&intents.first, &intents.second};
-    RS_WorldSessionVRUserHandAims aims;
-    RS_WorldSessionVRHandAim* out[2] = {&aims.left, &aims.right};
+    const std::string* hand_names[2] = {
+        &RS_WORLD_SESSION_USER_AIM_LEFT_HAND, &RS_WORLD_SESSION_USER_AIM_RIGHT_HAND
+    };
     for (RIndex hand = 0; hand < 2; ++hand) {
         RIndex gid = RS_NULL_INDEX;
         RIndex body_sid = RS_NULL_INDEX;
         RIndex segment_bid = RS_NULL_INDEX;
         RFloat distance = static_cast<RFloat>(_far_depth);
         static_cast<void>(_readRayHit(hand, gid, distance, body_sid, segment_bid));
-        RVec3rf direction = hands[hand]->aim_orientation.toOrthoAxisX();
-        out[hand]->is_valid = hands[hand]->is_aim_valid;
-        out[hand]->aim_origin = hands[hand]->aim_origin;
-        out[hand]->aim_direction = direction;
-        out[hand]->aim_position = hands[hand]->aim_origin + direction * distance;
+        RS_WorldSessionUserAim aim;
+        aim.name = *hand_names[hand];
+        aim.is_valid = hands[hand]->is_aim_valid;
+        aim.origin = hands[hand]->aim_origin;
+        aim.direction = hands[hand]->aim_orientation.toOrthoAxisX();
+        aim.position = aim.origin + aim.direction * distance;
+        view.aims.push_back(aim);
     }
-    _access->publish<RS_WorldSessionVRUserHandAims>(
-        RS_VR_CHANNEL_USER_HAND_AIMS, std::make_shared<const RS_WorldSessionVRUserHandAims>(aims)
+
+    _access->publish<RS_WorldSessionUserView>(
+        RS_WORLD_SESSION_CHANNEL_USER_VIEW, std::make_shared<const RS_WorldSessionUserView>(view)
     );
 }
 
