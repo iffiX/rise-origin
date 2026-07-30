@@ -92,14 +92,56 @@ class _PalmShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        height=cr.Float(3.0, 12.0, default=8.0),
-        age=cr.Float(0.0, 1.0, default=0.7),
-        lean=cr.Float(0.0, 0.6, default=0.1),
-        season=cr.Choice("spring", "summer", "autumn", "winter", default="summer"),
-        leaf_fall=cr.Float(0.0, 1.0, default=0.0),
-        is_leaf_soft=cr.Bool(default=False),
-        trunk_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
-        canopy_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
+        height=cr.Float(
+            3.0, 12.0, default=8.0, doc="The tree's overall height (unit: m)."
+        ),
+        age=cr.Float(
+            0.0,
+            1.0,
+            default=0.7,
+            doc="The age of the tree, from young and sparse at 0 to full "
+            "and mature at 1.",
+        ),
+        lean=cr.Float(
+            0.0,
+            0.6,
+            default=0.1,
+            doc="How far the trunk tilts off vertical, giving it a "
+            "seaside slant (unit: radians).",
+        ),
+        season=cr.Choice(
+            "spring",
+            "summer",
+            "autumn",
+            "winter",
+            default="summer",
+            doc="Has no effect on the crown color; palms keep their green "
+            "fronds in every season.",
+        ),
+        leaf_fall=cr.Float(
+            0.0,
+            1.0,
+            default=0.0,
+            doc="The share of the naturally loose leaflet parts kept "
+            "unattached and ready to shed.",
+        ),
+        is_leaf_soft=cr.Bool(
+            default=False,
+            doc="True swaps the fronds onto the soft leaf material so the "
+            "world can simulate and sway them.",
+        ),
+        trunk_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted wood voxel edge.",
+        ),
+        canopy_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted leaf voxel edge.",
+        ),
     ),
     dependencies=(f"{plant.MODULE}@^1",),
     tags=("nature", "tree", "palm", "evergreen"),
@@ -107,10 +149,20 @@ class _PalmShape:
 def coconut_palm(editor_access, settings):
     """A coconut palm, one curving trunk under drooping fronds.
 
-    ``season`` never bares the crown, since palms keep their fronds;
-    ``lean`` gives the trunk its seaside slant, ``is_leaf_soft`` lets
-    the world sway the fronds, and ``leaf_fall`` keeps that share of
-    the naturally loose leaflet parts unattached.
+    Settings:
+        height: The tree's overall height (unit: m).
+        age: The age of the tree, from young and sparse at 0 to full
+            and mature at 1.
+        lean: How far the trunk tilts off vertical, giving it a
+            seaside slant (unit: radians).
+        season: Has no effect on the crown color; palms keep their
+            green fronds in every season.
+        leaf_fall: The share of the naturally loose leaflet parts kept
+            unattached and ready to shed.
+        is_leaf_soft: True swaps the fronds onto the soft leaf
+            material so the world can simulate and sway them.
+        trunk_voxel_size: The emitted wood voxel edge.
+        canopy_voxel_size: The emitted leaf voxel edge.
     """
     return TreeBuild.make_draft(
         editor_access,

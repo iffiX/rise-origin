@@ -9,11 +9,17 @@ answer what is installed and how to call it.
 """
 
 from .types import (
+    Array1D,
+    Array2D,
+    Array3D,
     Bool,
     Bounds,
     Choice,
     Float,
-    FloatList,
+    StaticArray1D,
+    StaticArray2D,
+    StaticArray3D,
+    Vector,
     VoxelSize,
     Int,
     Settings,
@@ -34,11 +40,17 @@ from .module import (
 )
 
 __all__ = [
+    "Array1D",
+    "Array2D",
+    "Array3D",
     "Bool",
     "Bounds",
     "Choice",
     "Float",
-    "FloatList",
+    "StaticArray1D",
+    "StaticArray2D",
+    "StaticArray3D",
+    "Vector",
     "VoxelSize",
     "Int",
     "Settings",

@@ -91,14 +91,56 @@ class _BaobabShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        height=cr.Float(4.0, 14.0, default=7.0),
-        age=cr.Float(0.0, 1.0, default=0.7),
-        lean=cr.Float(0.0, 0.3, default=0.0),
-        season=cr.Choice("spring", "summer", "autumn", "winter", default="summer"),
-        leaf_fall=cr.Float(0.0, 1.0, default=0.0),
-        is_leaf_soft=cr.Bool(default=False),
-        trunk_voxel_size=cr.VoxelSize(default="5cm", min="1cm", max="10cm"),
-        canopy_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
+        height=cr.Float(
+            4.0, 14.0, default=7.0, doc="The tree's overall height (unit: m)."
+        ),
+        age=cr.Float(
+            0.0,
+            1.0,
+            default=0.7,
+            doc="The age of the tree, from young and sparse at 0 to full "
+            "and mature at 1.",
+        ),
+        lean=cr.Float(
+            0.0,
+            0.3,
+            default=0.0,
+            doc="How far the tree tilts off vertical, toward a random "
+            "horizontal direction (unit: radians).",
+        ),
+        season=cr.Choice(
+            "spring",
+            "summer",
+            "autumn",
+            "winter",
+            default="summer",
+            doc="Picks the sparse leaf color for the season; the crown "
+            "stands bare in winter.",
+        ),
+        leaf_fall=cr.Float(
+            0.0,
+            1.0,
+            default=0.0,
+            doc="The share of the naturally loose leaf parts kept "
+            "unattached and ready to shed.",
+        ),
+        is_leaf_soft=cr.Bool(
+            default=False,
+            doc="True swaps what little foliage there is onto the soft "
+            "leaf material so the world can simulate and sway it.",
+        ),
+        trunk_voxel_size=cr.VoxelSize(
+            default="5cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted wood voxel edge.",
+        ),
+        canopy_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted leaf voxel edge.",
+        ),
     ),
     dependencies=(f"{plant.MODULE}@^1",),
     tags=("nature", "tree", "baobab"),
@@ -106,10 +148,20 @@ class _BaobabShape:
 def baobab(editor_access, settings):
     """A baobab, a massive bottle trunk under a sparse flat crown.
 
-    ``season`` picks the sparse leaf optical mids; winter stands bare.
-    ``is_leaf_soft`` lets the world sway what little foliage there is
-    and ``leaf_fall`` keeps that share of the naturally loose parts
-    unattached.
+    Settings:
+        height: The tree's overall height (unit: m).
+        age: The age of the tree, from young and sparse at 0 to full
+            and mature at 1.
+        lean: How far the tree tilts off vertical, toward a random
+            horizontal direction (unit: radians).
+        season: Picks the sparse leaf color for the season; the crown
+            stands bare in winter.
+        leaf_fall: The share of the naturally loose leaf parts kept
+            unattached and ready to shed.
+        is_leaf_soft: True swaps what little foliage there is onto the
+            soft leaf material so the world can simulate and sway it.
+        trunk_voxel_size: The emitted wood voxel edge.
+        canopy_voxel_size: The emitted leaf voxel edge.
     """
     return TreeBuild.make_draft(
         editor_access,

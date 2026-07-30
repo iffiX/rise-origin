@@ -38,8 +38,17 @@ is refused. The seed rules still apply in full.
 | `cr.Bool(default=...)` | | |
 | `cr.Str(default=...)` | | |
 | `cr.Choice(options, default=...)` | sequence of strings | |
-| `cr.FloatList(min, max, default=..., length=None)` | per-item range | `length=None` accepts any count |
+| `cr.Array1D/2D/3D(dtype=..., min=None, max=None, cell_cap=..., default=None)` | per-cell range for numeric dtypes | variable shape of the declared rank; dtypes `"bool"`, `"uint8"`, `"int32"`, `"float32"`; the body reads a numpy array; `default=None` makes it optional |
+| `cr.StaticArray1D/2D/3D(shape=..., dtype=..., min=None, max=None, default=None)` | per-cell range for numeric dtypes | exact required shape; same dtypes; the body reads a numpy array |
 | `cr.VoxelSize(default="2cm", min="5mm", max="10cm")` | unit texts from the one ladder | the body reads meters (float); callers pass the text |
+
+Every field also takes a trailing `doc="..."` text shown in the module
+manual. Array fields are dimensionless data: nothing in them carries
+meters, and your module stretches the grid over its own size settings
+(a bool `Array3D` over the module's box is the occupancy form). Their
+cells are inlined into the build identity and journal as packed base64
+text, so `cell_cap` bounds that cost — keep grids coarse controls, not
+voxel data.
 
 Every resolution a module exposes goes through `cr.VoxelSize`. The ladder
 is fixed for the whole catalog, in 1-2-5 steps:

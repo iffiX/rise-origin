@@ -55,15 +55,24 @@ class _CumulonimbusFieldShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        size=cr.Float(1200.0, 4000.0, default=2000.0),
+        size=cr.Float(
+            1200.0, 4000.0, default=2000.0, doc="The width of each cloud (unit: m)."
+        ),
         span=cr.Bounds(
             -12000.0,
             12000.0,
             default=((-9000.0, -9000.0, -400.0), (9000.0, 9000.0, 400.0)),
+            doc="The box the clouds scatter in (unit: m).",
         ),
-        cloud_num=cr.Int(1, 100, default=6),
-        is_rainy=cr.Bool(default=False),
-        voxel_size=cr.VoxelSize(default="20m", min="10m", max="50m"),
+        cloud_num=cr.Int(1, 100, default=6, doc="How many clouds the field scatters."),
+        is_rainy=cr.Bool(
+            default=False,
+            doc="Whether the clouds take the translucent rainy material "
+            "instead of opaque white.",
+        ),
+        voxel_size=cr.VoxelSize(
+            default="20m", min="10m", max="50m", doc="The emitted voxel edge."
+        ),
     ),
     dependencies=(f"{cloud.MODULE}@^1",),
     tags=("nature", "cloud", "cumulonimbus", "field"),

@@ -58,8 +58,10 @@ class _CumulusShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        size=cr.Float(400.0, 2000.0, default=700.0),
-        voxel_size=cr.VoxelSize(default="20m", min="10m", max="50m"),
+        size=cr.Float(400.0, 2000.0, default=700.0, doc="The cloud width (unit: m)."),
+        voxel_size=cr.VoxelSize(
+            default="20m", min="10m", max="50m", doc="The emitted voxel edge."
+        ),
     ),
     dependencies=(f"{cloud.MODULE}@^1",),
     tags=("nature", "cloud", "cumulus"),

@@ -94,14 +94,56 @@ class _PineShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        height=cr.Float(6.0, 20.0, default=13.0),
-        age=cr.Float(0.0, 1.0, default=0.7),
-        lean=cr.Float(0.0, 0.6, default=0.0),
-        season=cr.Choice("spring", "summer", "autumn", "winter", default="summer"),
-        leaf_fall=cr.Float(0.0, 1.0, default=0.0),
-        is_leaf_soft=cr.Bool(default=False),
-        trunk_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
-        canopy_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
+        height=cr.Float(
+            6.0, 20.0, default=13.0, doc="The tree's overall height (unit: m)."
+        ),
+        age=cr.Float(
+            0.0,
+            1.0,
+            default=0.7,
+            doc="The age of the tree, from young and sparse at 0 to full "
+            "and mature at 1.",
+        ),
+        lean=cr.Float(
+            0.0,
+            0.6,
+            default=0.0,
+            doc="How far the tree tilts off vertical, toward a random "
+            "horizontal direction (unit: radians).",
+        ),
+        season=cr.Choice(
+            "spring",
+            "summer",
+            "autumn",
+            "winter",
+            default="summer",
+            doc="Has no effect on the crown color; pines keep their green "
+            "needles in every season.",
+        ),
+        leaf_fall=cr.Float(
+            0.0,
+            1.0,
+            default=0.0,
+            doc="The share of the naturally loose needle clusters kept "
+            "unattached and ready to shed.",
+        ),
+        is_leaf_soft=cr.Bool(
+            default=False,
+            doc="True swaps the needles onto the soft leaf material so "
+            "the world can simulate and sway them.",
+        ),
+        trunk_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted wood voxel edge.",
+        ),
+        canopy_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted leaf voxel edge.",
+        ),
     ),
     dependencies=(f"{plant.MODULE}@^1",),
     tags=("nature", "tree", "pine", "evergreen"),
@@ -109,9 +151,20 @@ class _PineShape:
 def pine(editor_access, settings):
     """A pine, conical with whorled branches and evergreen needles.
 
-    ``season`` never bares the crown, since pines keep their needles;
-    ``is_leaf_soft`` lets the world sway them and ``leaf_fall`` keeps
-    that share of the naturally loose needle clusters unattached.
+    Settings:
+        height: The tree's overall height (unit: m).
+        age: The age of the tree, from young and sparse at 0 to full
+            and mature at 1.
+        lean: How far the tree tilts off vertical, toward a random
+            horizontal direction (unit: radians).
+        season: Has no effect on the crown color; pines keep their
+            green needles in every season.
+        leaf_fall: The share of the naturally loose needle clusters
+            kept unattached and ready to shed.
+        is_leaf_soft: True swaps the needles onto the soft leaf
+            material so the world can simulate and sway them.
+        trunk_voxel_size: The emitted wood voxel edge.
+        canopy_voxel_size: The emitted leaf voxel edge.
     """
     return TreeBuild.make_draft(
         editor_access,

@@ -132,17 +132,74 @@ class _MapleShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        height=cr.Float(3.0, 15.0, default=8.0),
-        age=cr.Float(0.0, 1.0, default=0.7),
-        gnarl=cr.Float(0.0, 1.0, default=0.2),
-        spread=cr.Float(0.0, 1.0, default=0.5),
-        lean=cr.Float(0.0, 0.6, default=0.0),
-        trunk_count=cr.Int(1, 5, default=1),
-        season=cr.Choice("spring", "summer", "autumn", "winter", default="summer"),
-        leaf_fall=cr.Float(0.0, 1.0, default=0.0),
-        is_leaf_soft=cr.Bool(default=False),
-        trunk_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
-        canopy_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
+        height=cr.Float(
+            3.0, 15.0, default=8.0, doc="The tree's overall height (unit: m)."
+        ),
+        age=cr.Float(
+            0.0,
+            1.0,
+            default=0.7,
+            doc="The age of the tree, from young and sparse at 0 to full "
+            "and mature at 1.",
+        ),
+        gnarl=cr.Float(
+            0.0,
+            1.0,
+            default=0.2,
+            doc="How much the stems twist and the splits loosen, from an "
+            "upright red maple at 0 to a gnarled Japanese maple at 1.",
+        ),
+        spread=cr.Float(
+            0.0,
+            1.0,
+            default=0.5,
+            doc="How much the crown trades height for width, 0 narrow to "
+            "1 wide-spreading.",
+        ),
+        lean=cr.Float(
+            0.0,
+            0.6,
+            default=0.0,
+            doc="How far the whole tree tilts off vertical, toward a "
+            "random horizontal direction (unit: radians).",
+        ),
+        trunk_count=cr.Int(
+            1, 5, default=1, doc="The number of trunk stems grown from the base."
+        ),
+        season=cr.Choice(
+            "spring",
+            "summer",
+            "autumn",
+            "winter",
+            default="summer",
+            doc="Picks the leaf color for the season; the crown stands "
+            "bare in winter.",
+        ),
+        leaf_fall=cr.Float(
+            0.0,
+            1.0,
+            default=0.0,
+            doc="The share of the naturally loose leaf parts kept "
+            "unattached, so a soft tree sheds them when the world starts "
+            "running.",
+        ),
+        is_leaf_soft=cr.Bool(
+            default=False,
+            doc="True swaps the canopy onto the soft leaf material so the "
+            "world can simulate and sway it.",
+        ),
+        trunk_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted wood voxel edge.",
+        ),
+        canopy_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted leaf voxel edge.",
+        ),
     ),
     dependencies=(f"{plant.MODULE}@^1",),
     tags=("nature", "tree", "maple"),
@@ -150,13 +207,26 @@ class _MapleShape:
 def maple(editor_access, settings):
     """A maple tree, upright to gnarled, across four seasons.
 
-    ``gnarl`` twists the stems and loosens the splits, ``spread`` trades
-    height for crown width, ``trunk_count`` grows several stems from the
-    base, ``lean`` tilts the whole tree, and ``season`` picks the leaf
-    optical mids; winter stands bare. ``is_leaf_soft`` swaps the canopy onto the
-    soft leaf material and lets the world simulate it; ``leaf_fall``
-    keeps that share of the naturally loose leaf parts unattached, so a
-    soft tree sheds them when the world starts running.
+    Settings:
+        height: The tree's overall height (unit: m).
+        age: The age of the tree, from young and sparse at 0 to full
+            and mature at 1.
+        gnarl: How much the stems twist and the splits loosen, from an
+            upright red maple at 0 to a gnarled Japanese maple at 1.
+        spread: How much the crown trades height for width, 0 narrow
+            to 1 wide-spreading.
+        lean: How far the whole tree tilts off vertical, toward a
+            random horizontal direction (unit: radians).
+        trunk_count: The number of trunk stems grown from the base.
+        season: Picks the leaf color for the season; the crown stands
+            bare in winter.
+        leaf_fall: The share of the naturally loose leaf parts kept
+            unattached, so a soft tree sheds them when the world
+            starts running.
+        is_leaf_soft: True swaps the canopy onto the soft leaf
+            material so the world can simulate and sway it.
+        trunk_voxel_size: The emitted wood voxel edge.
+        canopy_voxel_size: The emitted leaf voxel edge.
     """
     return TreeBuild.make_draft(
         editor_access,

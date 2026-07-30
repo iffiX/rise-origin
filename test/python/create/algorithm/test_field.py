@@ -122,8 +122,8 @@ class TestLayeredNoiseFields:
 
     def test_same_stream_same_field(self):
         points = make_points()
-        first = TurbulenceNoiseField(Rng(6).split("bed"), 0.6)(points)
-        second = TurbulenceNoiseField(Rng(6).split("bed"), 0.6)(points)
+        first = TurbulenceNoiseField(Rng(6).split("layer"), 0.6)(points)
+        second = TurbulenceNoiseField(Rng(6).split("layer"), 0.6)(points)
         assert np.array_equal(first, second)
 
     def test_a_field_travels_by_pickle(self):

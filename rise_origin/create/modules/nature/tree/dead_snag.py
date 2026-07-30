@@ -92,10 +92,30 @@ class _SnagShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        height=cr.Float(2.0, 12.0, default=7.0),
-        decay=cr.Float(0.0, 1.0, default=0.6),
-        lean=cr.Float(0.0, 0.6, default=0.05),
-        trunk_voxel_size=cr.VoxelSize(default="2cm", min="1cm", max="10cm"),
+        height=cr.Float(
+            2.0, 12.0, default=7.0, doc="The tree's overall height (unit: m)."
+        ),
+        decay=cr.Float(
+            0.0,
+            1.0,
+            default=0.6,
+            doc="How decayed the dead wood is, shortening the stem "
+            "breaks and peeling more bark away, 0 a fresh break to 1 "
+            "heavily decayed.",
+        ),
+        lean=cr.Float(
+            0.0,
+            0.6,
+            default=0.05,
+            doc="How far the trunk tilts off vertical, toward a random "
+            "horizontal direction (unit: radians).",
+        ),
+        trunk_voxel_size=cr.VoxelSize(
+            default="2cm",
+            min="1cm",
+            max="10cm",
+            doc="The emitted wood voxel edge.",
+        ),
     ),
     dependencies=(f"{plant.MODULE}@^1",),
     tags=("nature", "tree", "dead", "snag"),
@@ -103,9 +123,17 @@ class _SnagShape:
 def dead_snag(editor_access, settings):
     """A dead snag, a broken weathered trunk with splintered stubs.
 
-    ``decay`` shortens the breaks and peels more bark off the gray
-    dead wood; there are no leaves in any season, and the snag stands
-    as a static fixture.
+    There are no leaves in any season; the snag stands as a static
+    fixture.
+
+    Settings:
+        height: The tree's overall height (unit: m).
+        decay: How decayed the dead wood is, shortening the stem
+            breaks and peeling more bark away, 0 a fresh break to 1
+            heavily decayed.
+        lean: How far the trunk tilts off vertical, toward a random
+            horizontal direction (unit: radians).
+        trunk_voxel_size: The emitted wood voxel edge.
     """
     return TreeBuild.make_draft(
         editor_access,

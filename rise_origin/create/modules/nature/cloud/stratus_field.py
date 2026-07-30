@@ -56,15 +56,24 @@ class _StratusFieldShape:
     name=MODULE,
     version="1.0.0",
     settings=cr.settings(
-        size=cr.Float(800.0, 3000.0, default=1600.0),
+        size=cr.Float(
+            800.0, 3000.0, default=1600.0, doc="The width of each cloud (unit: m)."
+        ),
         span=cr.Bounds(
             -10000.0,
             10000.0,
             default=((-8000.0, -8000.0, -200.0), (8000.0, 8000.0, 200.0)),
+            doc="The box the clouds scatter in (unit: m).",
         ),
-        cloud_num=cr.Int(1, 200, default=20),
-        is_rainy=cr.Bool(default=False),
-        voxel_size=cr.VoxelSize(default="20m", min="10m", max="50m"),
+        cloud_num=cr.Int(1, 200, default=20, doc="How many clouds the field scatters."),
+        is_rainy=cr.Bool(
+            default=False,
+            doc="Whether the clouds take the translucent rainy material "
+            "instead of opaque white.",
+        ),
+        voxel_size=cr.VoxelSize(
+            default="20m", min="10m", max="50m", doc="The emitted voxel edge."
+        ),
     ),
     dependencies=(f"{cloud.MODULE}@^1",),
     tags=("nature", "cloud", "stratus", "field"),

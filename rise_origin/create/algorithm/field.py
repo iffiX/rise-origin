@@ -144,6 +144,32 @@ class Field:
         return h
 
     @staticmethod
+    def _make_lattice_id(
+        ix: object, iy: object, iz: object, salt: int, xp: object
+    ) -> object:
+        """Return collision-hardened 32-bit lattice ids carried in int64.
+
+        The plain lattice hash folds its coordinates by one xor, and
+        the two's-complement wrap of negative coordinates makes
+        mirrored cells collide by the thousands on a centered grid, so
+        anything naming cells by that hash welds mirror twins together.
+        Mixing each coordinate through the avalanche before folding the
+        next removes the structure; ids are for identity, so they need
+        this hardness where the jitter values do not.
+        """
+        h = ((ix & _HASH_MASK) * 73856093 ^ (salt & _HASH_MASK)) & _HASH_MASK
+        h = h ^ (h >> 13)
+        h = (h * 0x5BD1E995) & _HASH_MASK
+        h = (h ^ (iy & _HASH_MASK) * 19349663) & _HASH_MASK
+        h = h ^ (h >> 13)
+        h = (h * 0x5BD1E995) & _HASH_MASK
+        h = (h ^ (iz & _HASH_MASK) * 83492791) & _HASH_MASK
+        h = h ^ (h >> 13)
+        h = (h * 0x5BD1E995) & _HASH_MASK
+        h = h ^ (h >> 15)
+        return h
+
+    @staticmethod
     def _hash_lattice(
         ix: object, iy: object, iz: object, salt: int, dtype: object, xp: object
     ) -> object:
@@ -396,7 +422,7 @@ class RidgedNoiseField(_LayerNoiseField):
 
 
 class TurbulenceNoiseField(_LayerNoiseField):
-    """Layered folded noise in [0, 1]: the marble vein and bed warp shape.
+    """Layered folded noise in [0, 1]: the marble vein and layer warp shape.
 
     Args:
         rng_or_salt: The random stream each layer's salt is drawn from,
@@ -423,11 +449,19 @@ class CellSample:
             point (unit: feature size).
         cell_id: The 32-bit hash naming the owning feature point's cell,
             carried in int64.
+        second_cell_id: The 32-bit hash naming the second nearest
+            feature point's cell, carried in int64; the pair with
+            ``cell_id`` names the wall the query sits on.
+        third_distance: The distance to the third nearest feature point
+            (unit: feature size); near the second where three cells meet
+            at a wall junction.
     """
 
     nearest_distance: object
     second_distance: object
     cell_id: object
+    second_cell_id: object
+    third_distance: object
 
 
 class CellNoise:
@@ -481,7 +515,9 @@ class CellNoise:
         big = (px + py + pz) * 0.0 + 1.0e9
         nearest = big
         second = big
+        third = big
         owner = bx * 0
+        second_owner = bx * 0
         for dx in (-1, 0, 1):
             for dy in (-1, 0, 1):
                 for dz in (-1, 0, 1):
@@ -499,9 +535,19 @@ class CellNoise:
                     gy = sy - (Field._cast(cy, self.dtype, xp) + oy)
                     gz = sz - (Field._cast(cz, self.dtype, xp) + oz)
                     distance = xp.sqrt(gx * gx + gy * gy + gz * gz)
-                    bits = Field._make_lattice_bits(cx, cy, cz, self.salt, xp)
+                    bits = Field._make_lattice_id(cx, cy, cz, self.salt, xp)
                     is_nearest = distance < nearest
+                    is_second = (~is_nearest) & (distance < second)
+                    is_third = (~is_nearest) & (~is_second) & (distance < third)
+                    third = xp.where(
+                        is_nearest | is_second,
+                        second,
+                        xp.where(is_third, distance, third),
+                    )
+                    second_owner = xp.where(
+                        is_nearest, owner, xp.where(is_second, bits, second_owner)
+                    )
                     second = xp.where(is_nearest, nearest, xp.minimum(second, distance))
                     nearest = xp.minimum(nearest, distance)
                     owner = xp.where(is_nearest, bits, owner)
-        return CellSample(nearest, second, owner)
+        return CellSample(nearest, second, owner, second_owner, third)

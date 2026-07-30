@@ -79,6 +79,9 @@ class Viewer:
         focus_distance: float = 1.0,
         camera_position: Tuple[float, float, float] = (0.0, 0.0, 0.4),
         camera_focus: Tuple[float, float, float] = (0.0, 0.0, 0.15),
+        camera_min_distance: float = 0.05,
+        camera_max_distance: float = float("inf"),
+        camera_zoom_factor: float = 0.95,
     ) -> None:
         """Configure a viewer over a local or remote instance.
 
@@ -110,6 +113,14 @@ class Viewer:
                 non-zero defocus_angle.
             camera_position: Initial camera position in world meters.
             camera_focus: Initial point the camera looks at and orbits.
+            camera_min_distance: Closest the camera may orbit its focus, in
+                meters. The distance is held inside this range every step, so a
+                camera built nearer than this is seated before its first frame.
+            camera_max_distance: Farthest the camera may orbit its focus, in
+                meters. Infinite by default, so a distant focus is left alone.
+            camera_zoom_factor: What one wheel notch scales the orbit distance
+                by. Below 1 zooms in, and the scaling holds however many notches
+                arrive between two control steps.
         """
         self.time: float = 0.0
         self.frame_index: int = 0
@@ -133,6 +144,9 @@ class Viewer:
             field_of_view,
             defocus_angle,
             focus_distance,
+            camera_min_distance,
+            camera_max_distance,
+            camera_zoom_factor,
         )
         self._keys: set = set()
         self._is_stop_requested = False

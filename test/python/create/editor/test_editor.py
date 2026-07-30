@@ -10,6 +10,7 @@ import math
 import os
 import threading
 
+import numpy as np
 import pytest
 
 from rise_origin import create as cr
@@ -91,6 +92,30 @@ def cube(editor_access, settings):
         boxes=[cr.Box((0, 0, 0), (size, size, size), "static")],
         rscs=[make_structure("cube", f"{CLAY}:clay")],
         requires=[cr.MaterialRequire(f"{CLAY}@^1", "clay", 0.1)],
+    )
+
+
+BRICK = "rise_origin.test.block.brick"
+
+
+@cr.module(
+    name=BRICK,
+    version="1.0.0",
+    settings=cr.settings(
+        voxel_size=cr.VoxelSize(default="10cm"),
+        occupancy=cr.Array3D(default=None),
+    ),
+    dependencies=(CLAY,),
+)
+def brick(editor_access, settings):
+    """A fixed clay block reading decoded rich setting values."""
+    size = 2.0 * settings.voxel_size
+    return cr.Draft(
+        editor_access,
+        "brick",
+        boxes=[cr.Box((0, 0, 0), (size, size, size), "static")],
+        rscs=[make_structure("brick", f"{CLAY}:clay", voxel_size=settings.voxel_size)],
+        requires=[cr.MaterialRequire(f"{CLAY}@^1", "clay", settings.voxel_size)],
     )
 
 
@@ -321,6 +346,25 @@ class TestEditorCreate:
                 if instruction.op == "add"
             ]
             assert "cube/cube" in names
+
+    def test_an_evicted_entry_with_rich_settings_rebuilds(self, tmp_path):
+        with make_editor(tmp_path) as editor:
+            block = editor.create(
+                BRICK,
+                {
+                    "voxel_size": "10cm",
+                    "occupancy": np.ones((2, 2, 2), dtype=bool),
+                },
+            )
+            editor.cache.prune(0)
+            editor.insert(block, cr.Pose())
+            update = editor.compile()
+            names = [
+                instruction.rsc.name
+                for instruction in update.instructions
+                if instruction.op == "add"
+            ]
+            assert "brick/brick" in names
 
 
 class TestEditorNonDeterministic:

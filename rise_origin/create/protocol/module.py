@@ -568,21 +568,38 @@ class ModuleRegistry:
         """Return one settings line of the help manual."""
         kind = field_json["type"]
         if kind in ("float", "int"):
-            return (
+            line = (
                 f"{name}: {kind} in [{field_json['min']:g}, "
                 f"{field_json['max']:g}], default {field_json['default']:g}"
             )
-        if kind == "float_list":
-            length = field_json["length"]
-            count = "any number of" if length is None else f"exactly {length}"
-            return (
-                f"{name}: {count} floats in [{field_json['min']:g}, "
-                f"{field_json['max']:g}], default {field_json['default']}"
-            )
-        if kind in ("choice", "voxel_size"):
+        elif kind in ("choice", "voxel_size"):
             options = ", ".join(field_json["options"])
-            return f"{name}: one of {options}, default {field_json['default']}"
-        return f"{name}: {kind}, default {field_json['default']!r}"
+            line = f"{name}: one of {options}, default {field_json['default']}"
+        elif kind in ("array1d", "array2d", "array3d"):
+            line = (
+                f"{name}: {kind} of {field_json['dtype']} cells, up to "
+                f"{field_json['cell_cap']} total, default "
+                + ModuleRegistry._describe_array_default(field_json["default"])
+            )
+        elif kind in ("static_array1d", "static_array2d", "static_array3d"):
+            sides = "x".join(str(side) for side in field_json["shape"])
+            line = (
+                f"{name}: {kind} of {field_json['dtype']} cells, shape "
+                f"{sides}, default "
+                + ModuleRegistry._describe_array_default(field_json["default"])
+            )
+        else:
+            line = f"{name}: {kind}, default {field_json['default']!r}"
+        doc = field_json.get("doc", "")
+        return f"{line}; {doc}" if doc else line
+
+    @staticmethod
+    def _describe_array_default(default_json: Optional[dict]) -> str:
+        """Return the short text of an array field's default value."""
+        if default_json is None:
+            return "none"
+        sides = "x".join(str(side) for side in default_json["cell_num"])
+        return f"{sides} cells"
 
 
 registry = ModuleRegistry()

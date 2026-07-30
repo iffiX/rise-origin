@@ -9,6 +9,7 @@ imports this package once when a name it does not know is asked for.
 
 from .material.nature import (  # noqa: F401 registers on import
     cloud,
+    mineral,
     plant,
 )
 from .nature.cloud import (  # noqa: F401 registers on import
@@ -18,6 +19,19 @@ from .nature.cloud import (  # noqa: F401 registers on import
     cumulus_field,
     stratus,
     stratus_field,
+)
+from .nature.rock import (  # noqa: F401 registers on import
+    basalt_columns,
+    granite_block,
+    granite_boulder,
+    limestone_block,
+    limestone_boulder,
+    marble_block,
+    marble_boulder,
+    sandstone_block,
+    sandstone_boulder,
+    slate_block,
+    slate_boulder,
 )
 from .nature.tree import (  # noqa: F401 registers on import
     acacia,
