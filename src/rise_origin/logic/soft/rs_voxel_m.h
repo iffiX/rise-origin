@@ -7,19 +7,20 @@
 #include <cstdint>
 #include <functional>
 
+#include "rise_origin/device/data/rs_bvh.h"
 #include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_float.h"
+#include "rise_origin/utils/math/rs_normal.h"
 #include "rise_origin/utils/math/rs_quat.h"
 #include "rise_origin/utils/math/rs_vec.h"
-#include "rise_origin/device/data/rs_bvh.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
 namespace logic {
 
 RS_ENUM(
-    RSE_VoxelFrictionState,
+    RSE_VoxelFloorFrictionState,
     RState,
     (RSE_VOXEL_NO_CONTACT_FRICTION, 0),  //!< Not in contact; no friction state.
     (RSE_VOXEL_STATIC_FRICTION, 1),      //!< In contact, sticking (static) friction.
@@ -47,8 +48,8 @@ RS_ENUM(
 union RS_VoxelStateUnion {
     RState voxel_state_packed;
     struct RS_VoxelState {
-        /// Friction regime recorded on the previous step.
-        RState previous_friction_state : 2;
+        /// Floor friction regime recorded on the previous step.
+        RState previous_floor_friction_state : 2;
         /// Whether the voxel participates in the world.
         RState is_enabled : 1;
         /// Whether the voxel lies on its body surface.
@@ -111,13 +112,33 @@ union RS_VoxelContactFilterKeyUnion {
     struct RS_VoxelContactFilterKey {
         RBigIndex body_sid : 20;
         RBigIndex constrained_rigid_body_sid : 8;
+        RBigIndex segment_bid : 16;
         RBigIndex index_x_res : 4;
         RBigIndex index_y_res : 4;
         RBigIndex index_z_res : 4;
+        RBigIndex connectivity : 6;
     } contact_filter_key;
 };
 
 static constexpr RBigIndex RS_VOXEL_CONTACT_FILTER_KEY_NULL_CONSTRAINED_RIGID_BODY_SID = 0xFF;
+
+static_assert(
+    RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM <= (1ull << 20),
+    "body_sid field must fit in 20 bits"
+);
+static_assert(
+    RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_RIGID_BODY_CONSTRAINED_NUM <=
+        RS_VOXEL_CONTACT_FILTER_KEY_NULL_CONSTRAINED_RIGID_BODY_SID,
+    "constrained_rigid_body_sid field must fit in 8 bits, leaving the null sentinel"
+);
+static_assert(
+    RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_SEGMENT_NUM <= (1ull << 16),
+    "segment_bid field must fit in 16 bits"
+);
+static_assert(
+    sizeof(RS_VoxelContactFilterKeyUnion) == sizeof(RBigIndex),
+    "contact filter key fields must fit in 64 bits"
+);
 
 /// Voxel-BVH leaf: caches the contact broad-phase payload inline.
 struct RS_VoxelBVHObjectIdentifier {
@@ -157,6 +178,7 @@ class RS_VoxelMem {
     using Vec3M = RS_Vec3DMem<FloatMemAccuracy>;
     using Quat3M = RS_Quat3DMem<FloatMemAccuracy>;
     using PositionVec = RS_Vec3DMem<RS_FloatCapAccuracy<FloatMemAccuracy, RSE_FLOAT_32>::Type>;
+    using OffsetVec = RS_Vec3DMem<RSE_FLOAT_16>;
 
     /**
      * Pre-set attributes
@@ -237,11 +259,11 @@ class RS_VoxelMem {
     /// Contact voxel 0
     RHandle contact_voxel_0 = RS_NULL_HANDLE;
 
-    /// Contact position of contact voxel 0
-    PositionVec contact_position_0 = PositionVec::zero();
+    /// Contact position of contact voxel 0, as an offset from this voxel's centre
+    OffsetVec contact_position_offset_0 = OffsetVec::zero();
 
-    /// Contact normal of contact voxel 0
-    Vec3M contact_normal_0 = Vec3M::zero();
+    /// Contact normal of contact voxel 0, unit, pointing from it toward this voxel
+    RS_NormalOctMem contact_normal_0 = RS_NormalOctMem::zero();
 
     /// Contact force of contact voxel 0, includes bounce force and friction force
     Vec3M contact_force_0 = Vec3M::zero();
@@ -258,11 +280,11 @@ class RS_VoxelMem {
     /// Contact voxel 1
     RHandle contact_voxel_1 = RS_NULL_HANDLE;
 
-    /// Contact position of contact voxel 1
-    PositionVec contact_position_1 = PositionVec::zero();
+    /// Contact position of contact voxel 1, as an offset from this voxel's centre
+    OffsetVec contact_position_offset_1 = OffsetVec::zero();
 
-    /// Contact normal of contact voxel 1
-    Vec3M contact_normal_1 = Vec3M::zero();
+    /// Contact normal of contact voxel 1, unit, pointing from it toward this voxel
+    RS_NormalOctMem contact_normal_1 = RS_NormalOctMem::zero();
 
     /// Contact force of contact voxel 1, includes bounce force and friction force
     Vec3M contact_force_1 = Vec3M::zero();
@@ -275,6 +297,12 @@ class RS_VoxelMem {
 
     /// Accumulated tangent friction contact lambda for contact voxel 1
     Vec3M contact_lambda_t_1 = Vec3M::zero();
+
+    /// How far the voxel box reaches under the floor, negative when clear
+    FloatM contact_depth_floor = 0;
+
+    /// Floor up-normal under the voxel
+    RS_NormalOctMem contact_normal_floor = RS_NormalOctMem::zero();
 
     /// Accumulated normal contact lambda for the static floor contact
     FloatM contact_lambda_n_floor = 0;
@@ -344,19 +372,21 @@ class RS_VoxelMem {
         field(links),                     \
         field(neighbor_voxels),           \
         field(contact_voxel_0),           \
-        field(contact_position_0),        \
+        field(contact_position_offset_0), \
         field(contact_normal_0),          \
         field(contact_force_0),           \
         field(contact_depth_0),           \
         field(contact_lambda_n_0),        \
         field(contact_lambda_t_0),        \
         field(contact_voxel_1),           \
-        field(contact_position_1),        \
+        field(contact_position_offset_1), \
         field(contact_normal_1),          \
         field(contact_force_1),           \
         field(contact_depth_1),           \
         field(contact_lambda_n_1),        \
         field(contact_lambda_t_1),        \
+        field(contact_depth_floor),       \
+        field(contact_normal_floor),      \
         field(contact_lambda_n_floor),    \
         field(contact_lambda_t_floor),    \
         field(position),                  \

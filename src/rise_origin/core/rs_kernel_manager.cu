@@ -1946,6 +1946,7 @@ void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, TaskP
     kernel.softbody_integration_frequency_multiplier =
         simulation.soft_body.integration_frequency_multiplier;
     kernel.softbody_link_max_compression = simulation.soft_body.link_max_compression;
+    kernel.softbody_friction_max_penetration_ratio = simulation.soft_body.friction_max_penetration_ratio;
 
     // Rigid body constraint solver
     kernel.rigidbody_constraint_iterations = simulation.rigid_body.constraint_iterations;
@@ -1968,6 +1969,7 @@ void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, TaskP
     kernel.rigidbody_contact_iterations = simulation.rigid_body.contact_iterations;
     kernel.rigidbody_contact_position_correction_iterations =
         simulation.rigid_body.contact_position_correction_iterations;
+    kernel.rigidbody_contact_manifold_size = simulation.rigid_body.contact_manifold_size;
     kernel.rigidbody_contact_position_correction_ratio =
         simulation.rigid_body.contact_position_correction_ratio;
     kernel.rigidbody_contact_warm_start_damping_z =

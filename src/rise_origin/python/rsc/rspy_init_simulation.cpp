@@ -72,7 +72,10 @@ void initRSPYSimulation(py::module &m) {
             "integration_frequency_multiplier",
             &RSC_SimulationSoftBody::integration_frequency_multiplier
         )
-        .def_readwrite("link_max_compression", &RSC_SimulationSoftBody::link_max_compression);
+        .def_readwrite("link_max_compression", &RSC_SimulationSoftBody::link_max_compression)
+        .def_readwrite(
+            "friction_max_penetration_ratio", &RSC_SimulationSoftBody::friction_max_penetration_ratio
+        );
 
     rspyRSC<RSC_SimulationRigidBody, RSC_Base>(m, "RSC_SimulationRigidBody")
         .def(py::init<>())
@@ -109,6 +112,7 @@ void initRSPYSimulation(py::module &m) {
             "contact_position_correction_iterations",
             &RSC_SimulationRigidBody::contact_position_correction_iterations
         )
+        .def_readwrite("contact_manifold_size", &RSC_SimulationRigidBody::contact_manifold_size)
         .def_readwrite(
             "contact_position_correction_ratio",
             &RSC_SimulationRigidBody::contact_position_correction_ratio

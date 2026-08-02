@@ -131,7 +131,8 @@ bool RSC_SimulationSoftBody::operator==(const RSC_SimulationSoftBody &other) con
            contact_damping_z == other.contact_damping_z &&
            global_damping_z == other.global_damping_z &&
            integration_frequency_multiplier == other.integration_frequency_multiplier &&
-           link_max_compression == other.link_max_compression;
+           link_max_compression == other.link_max_compression &&
+           friction_max_penetration_ratio == other.friction_max_penetration_ratio;
 }
 
 void RSC_SimulationSoftBody::_validate(RS_RSCValidator &validator) const {
@@ -145,6 +146,8 @@ void RSC_SimulationSoftBody::_validate(RS_RSCValidator &validator) const {
         RSC_EXPECT_GT(RSC_SimulationSoftBody, integration_frequency_multiplier, 0);
         RSC_EXPECT_GE(RSC_SimulationSoftBody, link_max_compression, 0);
         RSC_EXPECT_LT(RSC_SimulationSoftBody, link_max_compression, 1);
+        RSC_EXPECT_GT(RSC_SimulationSoftBody, friction_max_penetration_ratio, 0);
+        RSC_EXPECT_LE(RSC_SimulationSoftBody, friction_max_penetration_ratio, 1);
     });
 }
 
@@ -155,6 +158,7 @@ void RSC_SimulationSoftBody::_read(const RS_RSCFileTreeReader &tree) {
     integration_frequency_multiplier =
         tree.get("integration_frequency_multiplier", integration_frequency_multiplier);
     link_max_compression = tree.get("link_max_compression", link_max_compression);
+    friction_max_penetration_ratio = tree.get("friction_max_penetration_ratio", friction_max_penetration_ratio);
 }
 
 void RSC_SimulationSoftBody::_write(RS_RSCFileTreeWriter &tree) const {
@@ -163,6 +167,7 @@ void RSC_SimulationSoftBody::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("global_damping_z", global_damping_z);
     tree.add("integration_frequency_multiplier", integration_frequency_multiplier);
     tree.add("link_max_compression", link_max_compression);
+    tree.add("friction_max_penetration_ratio", friction_max_penetration_ratio);
 }
 
 void RSC_SimulationSoftBody::_deserialize(RS_RSCArchive &archive) {
@@ -171,6 +176,7 @@ void RSC_SimulationSoftBody::_deserialize(RS_RSCArchive &archive) {
     archive.deserialize("global_damping_z", global_damping_z);
     archive.deserialize("integration_frequency_multiplier", integration_frequency_multiplier);
     archive.deserialize("link_max_compression", link_max_compression);
+    archive.deserialize("friction_max_penetration_ratio", friction_max_penetration_ratio);
 }
 
 void RSC_SimulationSoftBody::_serialize(RS_RSCArchive &archive) const {
@@ -179,6 +185,7 @@ void RSC_SimulationSoftBody::_serialize(RS_RSCArchive &archive) const {
     archive.serialize("global_damping_z", global_damping_z);
     archive.serialize("integration_frequency_multiplier", integration_frequency_multiplier);
     archive.serialize("link_max_compression", link_max_compression);
+    archive.serialize("friction_max_penetration_ratio", friction_max_penetration_ratio);
 }
 
 bool RSC_SimulationRigidBody::operator==(const RSC_SimulationRigidBody &other) const {
@@ -193,6 +200,7 @@ bool RSC_SimulationRigidBody::operator==(const RSC_SimulationRigidBody &other) c
            constraint_stiffness_auto_adjust_step == other.constraint_stiffness_auto_adjust_step &&
            contact_iterations == other.contact_iterations &&
            contact_position_correction_iterations == other.contact_position_correction_iterations &&
+           contact_manifold_size == other.contact_manifold_size &&
            contact_position_correction_ratio == other.contact_position_correction_ratio &&
            contact_warm_start_damping_z == other.contact_warm_start_damping_z &&
            contact_slop == other.contact_slop && linear_damping_z == other.linear_damping_z &&
@@ -216,6 +224,8 @@ void RSC_SimulationRigidBody::_validate(RS_RSCValidator &validator) const {
         RSC_EXPECT_LE(RSC_SimulationRigidBody, constraint_stiffness_auto_adjust_step, 1);
         RSC_EXPECT_GE(RSC_SimulationRigidBody, contact_iterations, 0);
         RSC_EXPECT_GE(RSC_SimulationRigidBody, contact_position_correction_iterations, 0);
+        RSC_EXPECT_GE(RSC_SimulationRigidBody, contact_manifold_size, 1);
+        RSC_EXPECT_LE(RSC_SimulationRigidBody, contact_manifold_size, 8);
         RSC_EXPECT_GE(RSC_SimulationRigidBody, contact_position_correction_ratio, 0);
         RSC_EXPECT_LE(RSC_SimulationRigidBody, contact_position_correction_ratio, 1);
         RSC_EXPECT_GE(RSC_SimulationRigidBody, contact_warm_start_damping_z, 0);
@@ -249,6 +259,7 @@ void RSC_SimulationRigidBody::_read(const RS_RSCFileTreeReader &tree) {
     contact_iterations = tree.get("contact_iterations", contact_iterations);
     contact_position_correction_iterations =
         tree.get("contact_position_correction_iterations", contact_position_correction_iterations);
+    contact_manifold_size = tree.get("contact_manifold_size", contact_manifold_size);
     contact_position_correction_ratio =
         tree.get("contact_position_correction_ratio", contact_position_correction_ratio);
     contact_warm_start_damping_z =
@@ -272,6 +283,7 @@ void RSC_SimulationRigidBody::_write(RS_RSCFileTreeWriter &tree) const {
     tree.add("constraint_stiffness_auto_adjust_step", constraint_stiffness_auto_adjust_step);
     tree.add("contact_iterations", contact_iterations);
     tree.add("contact_position_correction_iterations", contact_position_correction_iterations);
+    tree.add("contact_manifold_size", contact_manifold_size);
     tree.add("contact_position_correction_ratio", contact_position_correction_ratio);
     tree.add("contact_warm_start_damping_z", contact_warm_start_damping_z);
     tree.add("contact_slop", contact_slop);
@@ -299,6 +311,7 @@ void RSC_SimulationRigidBody::_deserialize(RS_RSCArchive &archive) {
     archive.deserialize(
         "contact_position_correction_iterations", contact_position_correction_iterations
     );
+    archive.deserialize("contact_manifold_size", contact_manifold_size);
     archive.deserialize("contact_position_correction_ratio", contact_position_correction_ratio);
     archive.deserialize("contact_warm_start_damping_z", contact_warm_start_damping_z);
     archive.deserialize("contact_slop", contact_slop);
@@ -324,6 +337,7 @@ void RSC_SimulationRigidBody::_serialize(RS_RSCArchive &archive) const {
     archive.serialize(
         "contact_position_correction_iterations", contact_position_correction_iterations
     );
+    archive.serialize("contact_manifold_size", contact_manifold_size);
     archive.serialize("contact_position_correction_ratio", contact_position_correction_ratio);
     archive.serialize("contact_warm_start_damping_z", contact_warm_start_damping_z);
     archive.serialize("contact_slop", contact_slop);
@@ -794,6 +808,7 @@ void RSC_SimulationRuntime::_validate(RS_RSCValidator &validator) const {
     validator.submitValidatorIfNotExists("RSC_SimulationRuntime::_validate", this, [this] {
         RSC_EXPECT_GT(RSC_SimulationRuntime, max_time, 0);
         RSC_EXPECT_GT(RSC_SimulationRuntime, record_buffer_size, 0);
+        RSC_EXPECT_NE(RSC_SimulationRuntime, compute_accuracy, RSE_FLOAT_16);
     });
 }
 

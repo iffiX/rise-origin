@@ -31,7 +31,7 @@ from rise_origin import RS_WorldForceSignal, rsc
 
 VOXEL = 0.02
 BALL_R = 3  # ball radius in voxels -> 0.06 m
-DISPLAY_HZ = 72.0  # control rate = headset display rate
+DISPLAY_HZ = 30.0  # control rate = headset display rate
 PUSH = 8.0  # steering force (N); must beat the ball's weight times friction to move it
 
 FLOOR_FILL = (210 / 255.0, 208 / 255.0, 202 / 255.0)

@@ -128,8 +128,7 @@ def build():
     seg = mat.copy()
 
     main_body = rsc.entity.StructureVoxelBody.from_grid(
-        mat != RS_NULL_INDEX,
-        material_grid=mat,
+        mat,
         segment_grid=seg,
         voxel_size=VOXEL,
         relative_origin_position=(

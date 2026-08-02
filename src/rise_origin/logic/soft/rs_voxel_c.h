@@ -264,6 +264,7 @@ class RS_VoxelCompute {
    public:
     using FloatC = typename RS_FloatDataType<FloatComputeAccuracy>::DataType;
     using Vec3C = RS_Vec3D<FloatC>;
+    using Mat3C = RS_Mat3D<FloatC>;
     using Quat3C = RS_Quat3D<FloatC>;
     using FI = RS_FloatIntrinsics<FloatC>;
     using LinkCompute = RS_LinkCompute<FloatComputeAccuracy>;
@@ -382,11 +383,12 @@ class RS_VoxelCompute {
 
                     // Note: previous_friction state is "current" after being updated by
                     // _computeTotalForceWithFloorFriction
-                    bool is_static_friction = state_union.voxel_state.previous_friction_state ==
-                                              RSE_VOXEL_STATIC_FRICTION;
+                    bool is_floor_static_friction =
+                        state_union.voxel_state.previous_floor_friction_state ==
+                        RSE_VOXEL_STATIC_FRICTION;
                     // if we're in a state of static friction, zero out all linear momentum
                     // in plane
-                    if (is_static_friction) {
+                    if (is_floor_static_friction) {
                         linear_momentum = linear_momentum.project(normal_vec);
                     }
 
@@ -394,7 +396,7 @@ class RS_VoxelCompute {
                     Vec3C translate(linear_momentum * (dt * mass_inverse));
                     // if we're in a state of static friction, zero out all translation in
                     // plane
-                    if (is_static_friction) {
+                    if (is_floor_static_friction) {
                         translate = translate.project(normal_vec);
                     }
 
@@ -474,8 +476,10 @@ class RS_VoxelCompute {
 
             auto link_sid = V_G(link_sid);
             auto links = V_G(links);
+            auto neighbor_voxels = V_G(neighbor_voxels);
             bool has_link = false;
             bool has_null_link = false;
+            RBigIndex torn_link_mask = 0;
 
             if (state_union_in_out.voxel_state.has_link) {
                 device::loop<0, 2>([&](auto dir_const) {
@@ -487,14 +491,14 @@ class RS_VoxelCompute {
                             if (link_state_union.link_state.is_failed) {
                                 link_sid[i] = RS_NULL_INDEX;
                                 links[i] = RS_NULL_HANDLE;
+                                neighbor_voxels[i] = RS_NULL_HANDLE;
                                 link = RS_NULL_HANDLE;
                                 has_null_link = true;
-                                // A torn bond exposes this face of a soft voxel to air.
-                                if (!state_union_in_out.voxel_state.is_rigid) {
-                                    setFaceRole(
-                                        state_union_in_out.voxel_state_packed, i, RSE_VOXEL_FACE_AIR
-                                    );
-                                }
+                                torn_link_mask |= RBigIndex(1) << i;
+                                // A torn bond exposes this face to air on both sides.
+                                setFaceRole(
+                                    state_union_in_out.voxel_state_packed, i, RSE_VOXEL_FACE_AIR
+                                );
                             } else {
                                 if (link) {
                                     has_link = true;
@@ -521,6 +525,14 @@ class RS_VoxelCompute {
                 state_union_in_out.voxel_state.is_surface =
                     (!state_union_in_out.voxel_state.is_rigid && has_null_link) ||
                     state_union_in_out.voxel_state.is_surface;
+
+                // A torn face is no longer held by a link, so the broad phase must stop
+                // filtering that neighbor out.
+                if (torn_link_mask != 0) {
+                    RS_VoxelContactFilterKeyUnion filter_key_union{V_G(contact_filter_key)};
+                    filter_key_union.contact_filter_key.connectivity &= ~torn_link_mask;
+                    V_S(contact_filter_key, filter_key_union.contact_filter_key_packed);
+                }
             }
 
             // from local to global coordinates
@@ -595,9 +607,11 @@ class RS_VoxelCompute {
             // Translation
             unsigned int current_friction_state = RSE_VOXEL_NO_CONTACT_FRICTION;
 
-            FloatC floor_height;
-            if (floorHeightAndNormal(k, position, floor_height, normal_vec_out)) {
-                FloatC floor_penetration = floorPenetration(voxel_size, position.z, floor_height);
+            if (hasFloor(k)) {
+                FloatC floor_penetration = V_G(voxel, contact_depth_floor);
+                normal_vec_out = isFloorFlat(k)
+                                     ? Vec3C(FloatC(0), FloatC(0), FloatC(1))
+                                     : V_G(voxel, contact_normal_floor).template toVec3D<FloatC>();
                 if (floor_penetration >= 0) {
                     Vec3C velocity = linearVelocity(linear_momentum_in_out, mass_inverse);
                     FloatC normal_force_norm = VM_G(penetration_stiffness) * floor_penetration;
@@ -613,12 +627,18 @@ class RS_VoxelCompute {
                     );
 
                     // in the normal direction: k*x-C*v - spring and damping
-                    total_force_in_out += normal_force_norm * normal_vec_out;
-                    total_force_in_out -= VM_G(contact_damping_translate_c) * velocity;
+                    FloatC separating_speed = velocity.dot(normal_vec_out);
+                    total_force_in_out +=
+                        RS_MAX(
+                            normal_force_norm -
+                                VM_G(contact_damping_translate_c) * separating_speed,
+                            FloatC(0)
+                        ) *
+                        normal_vec_out;
                     Vec3C plane_force =
                         total_force_in_out - total_force_in_out.project(normal_vec_out);
                     Vec3C plane_velocity = velocity - velocity.project(normal_vec_out);
-                    if (state_union_in_out.voxel_state.previous_friction_state !=
+                    if (state_union_in_out.voxel_state.previous_floor_friction_state !=
                         RSE_VOXEL_DYNAMIC_FRICTION) {
                         // If voxel is previously in static friction mode (no lateral
                         // motion) check whether the voxel will continue to stay in static
@@ -670,7 +690,7 @@ class RS_VoxelCompute {
                 } else
                     current_friction_state = RSE_VOXEL_NO_CONTACT_FRICTION;
             }
-            state_union_in_out.voxel_state.previous_friction_state = current_friction_state;
+            state_union_in_out.voxel_state.previous_floor_friction_state = current_friction_state;
         }
 
         template <typename Kernel>
@@ -859,6 +879,11 @@ class RS_VoxelCompute {
             RIndex self_structure_gid = V_G(structure_gid);
             RS_VoxelContactFilterKeyUnion self_filter_key{V_G(contact_filter_key)};
 
+            // A non-soft voxel is held by its segment rather than by a link, so its
+            // segment mates stay filtered out even with no link between them.
+            bool is_self_non_soft = state_union.voxel_state.is_rigid ||
+                                    state_union.voxel_state.is_fixed;
+
             // Load the connected-body mask as two register words. Only constrained
             // structures own a mask; everything else leaves both words zero.
             bool is_structure_constrained = meta.meta.is_structure_constrained;
@@ -896,6 +921,7 @@ class RS_VoxelCompute {
                     radius,
                     self_structure_gid,
                     self_filter_key,
+                    is_self_non_soft,
                     is_structure_constrained,
                     self_mask_0,
                     self_mask_1,
@@ -916,6 +942,7 @@ class RS_VoxelCompute {
                     radius,
                     self_structure_gid,
                     self_filter_key,
+                    is_self_non_soft,
                     is_structure_constrained,
                     self_mask_0,
                     self_mask_1,
@@ -961,6 +988,24 @@ class RS_VoxelCompute {
             return d >= 8 ? d - 16 : d;
         }
 
+        // Direction from this voxel towards a face adjacent neighbor, or RSE_NO_DIRECTION
+        // for an edge or corner adjacent one. The differences run from the neighbor to
+        // this voxel, so a positive difference points the negative way.
+        HOST_DEVICE_INLINE_QUALIFIER static RSE_LinkDirection
+        _getNeighborLinkDirection(int dx, int dy, int dz) {
+            if (dy == 0 && dz == 0) {
+                if (dx == 1) return RSE_X_NEG;
+                if (dx == -1) return RSE_X_POS;
+            } else if (dx == 0 && dz == 0) {
+                if (dy == 1) return RSE_Y_NEG;
+                if (dy == -1) return RSE_Y_POS;
+            } else if (dx == 0 && dy == 0) {
+                if (dz == 1) return RSE_Z_NEG;
+                if (dz == -1) return RSE_Z_POS;
+            }
+            return RSE_NO_DIRECTION;
+        }
+
         // Walk one voxel BVH starting from the root currently held by
         // bvh_accessor_in_out and apply same-body / connected-body filtering
         // to each candidate leaf, keeping the two largest sphere-overlap
@@ -974,6 +1019,7 @@ class RS_VoxelCompute {
             FloatC radius,
             RIndex self_structure_gid,
             const RS_VoxelContactFilterKeyUnion &self_filter_key,
+            bool is_self_non_soft,
             bool is_structure_constrained,
             RBigIndex self_mask_0,
             RBigIndex self_mask_1,
@@ -1007,13 +1053,17 @@ class RS_VoxelCompute {
                     if (self_structure_gid == obj->structure_gid) {
                         RS_VoxelContactFilterKeyUnion other_filter_key{obj->contact_filter_key};
 
-                        // Same body + Chebyshev-1 in voxel grid → linked neighbor, skip.
-                        // Indices are stored as mod-16 residuals; the signed mod-16
-                        // difference recovers the true gap because sphere overlap
-                        // bounds candidates to one grid unit per axis. Another voxel
-                        // in the same structure physically cannot self collide out of
-                        // radius with another same structure while having same residual
-                        // in indices.
+                        // Same body + Chebyshev-1 in voxel grid → face, edge or corner
+                        // adjacent neighbor. Indices are stored as mod-16 residuals; the
+                        // signed mod-16 difference recovers the true gap because sphere
+                        // overlap bounds candidates to one grid unit per axis.
+                        // A1: face adjacent, linked -> skip, the link carries the force
+                        // A2: face adjacent, no link, one non-soft segment -> skip, the
+                        //     segment holds both and a non-soft pair never gets a link
+                        // A3: face adjacent, no link, anything else -> contact, the bond
+                        //     was authored away or torn at runtime
+                        // B1: edge or corner adjacent, same segment -> skip, degenerate touch
+                        // B2: edge or corner adjacent, other segment -> contact, moves apart
                         if (self_filter_key.contact_filter_key.body_sid ==
                             other_filter_key.contact_filter_key.body_sid) {
                             int dx = _mod16Difference(
@@ -1028,7 +1078,31 @@ class RS_VoxelCompute {
                                 int(self_filter_key.contact_filter_key.index_z_res),
                                 int(other_filter_key.contact_filter_key.index_z_res)
                             );
-                            if (RS_ABS(dx) <= 1 && RS_ABS(dy) <= 1 && RS_ABS(dz) <= 1) continue;
+                            if (RS_ABS(dx) <= 1 && RS_ABS(dy) <= 1 && RS_ABS(dz) <= 1) {
+                                RSE_LinkDirection direction = _getNeighborLinkDirection(dx, dy, dz);
+                                bool is_same_segment =
+                                    self_filter_key.contact_filter_key.segment_bid ==
+                                    other_filter_key.contact_filter_key.segment_bid;
+                                if (direction != RSE_NO_DIRECTION) {
+                                    // A1 and A2 are handled here. Links are symmetric so
+                                    // reading our own bit is enough, and a non-soft pair is
+                                    // held by its segment instead of by a link.
+                                    RS_VoxelBVHLeafMetadataUnion other_meta{obj->object_metadata};
+                                    bool is_other_non_soft = other_meta.meta.is_rigid ||
+                                                             other_meta.meta.is_static;
+                                    if ((self_filter_key.contact_filter_key.connectivity >>
+                                         direction) &
+                                        RBigIndex(1))
+                                        continue;
+                                    if (is_same_segment && is_self_non_soft && is_other_non_soft)
+                                        continue;
+                                } else if (is_same_segment) {
+                                    // B1 is handled here
+                                    continue;
+                                }
+                                // A3 and B2 are handled here, they fall through to the
+                                // sphere overlap test below
+                            }
                         }
 
                         // Constraint-connected rigid-body pair, skip.
@@ -1080,6 +1154,12 @@ class RS_VoxelCompute {
      * friction force stored back on the voxel. A voxel with no contact partner clears its stale
      * floor accumulator and returns early.
      *
+     * Two limits are deliberate. A pair is solved from whichever side recorded it, so a voxel
+     * whose partner dropped it takes the force alone and the partner takes none. And a voxel
+     * pair carries dynamic friction only, since sticking is a constraint that has to be
+     * solved, which a force based contact neither needs nor can afford. Both are accepted for
+     * the fidelity they cost; the requirement here is only that a resting pair does not creep.
+     *
      * @param k     simulation kernel.
      * @param voxel handle of the voxel to update.
      */
@@ -1092,19 +1172,35 @@ class RS_VoxelCompute {
                 RS_VoxelStateUnion state_union{V_G(state)};
                 if (!state_union.voxel_state.is_enabled) return;
 
-                // Detect floor contact for rigid air-exposed voxels; clear the stale floor
+                // Measure the floor once for every moving voxel and keep the depth, so the
+                // paths that need it later read one number instead of the whole box again.
+                // Flag the rigid air-exposed ones for the manifold, and clear the stale floor
                 // accumulator.
                 bool floor_contact = false;
-                if (state_union.voxel_state.is_rigid &&
-                    isContactActive(state_union.voxel_state_packed) &&
-                    !state_union.voxel_state.is_static) {
+                if (!state_union.voxel_state.is_static) {
                     Vec3C voxel_pos = V_G(position);
-                    FloatC voxel_size = VM_G(V_G(voxel_material), voxel_size);
                     FloatC floor_height;
-                    Vec3C floor_normal;
-                    if (floorHeightAndNormal(k, voxel_pos, floor_height, floor_normal) &&
-                        floorPenetration(voxel_size, voxel_pos.z, floor_height) > FloatC(0))
-                        floor_contact = true;
+                    Vec3C floor_normal(FloatC(0), FloatC(0), FloatC(1));
+                    FloatC floor_depth = FloatC(-1);
+                    if (floorHeightAndNormal(k, voxel_pos, floor_height, floor_normal)) {
+                        // A corner sits at most its own size from the center, so a voxel
+                        // riding higher than that is clear and never needs the corner walk.
+                        FloatC reach = VM_G(V_G(voxel_material), voxel_size);
+                        floor_depth = reach - (voxel_pos.z - floor_height) * floor_normal.z;
+                        if (floor_depth > FloatC(0))
+                            floor_depth = floorPenetration(
+                                V_G(orientation),
+                                V_G(nnn_offset),
+                                V_G(ppp_offset),
+                                voxel_pos,
+                                floor_normal,
+                                floor_height
+                            );
+                    }
+                    V_S(contact_depth_floor, floor_depth);
+                    if (!isFloorFlat(k)) V_S(contact_normal_floor, floor_normal);
+                    floor_contact = floor_depth > FloatC(0) && state_union.voxel_state.is_rigid &&
+                                    isContactActive(state_union.voxel_state_packed);
                     if (!floor_contact) {
                         V_S(contact_lambda_n_floor, FloatC(0));
                         V_S(contact_lambda_t_floor, Vec3C::zero());
@@ -1122,27 +1218,32 @@ class RS_VoxelCompute {
                 // Build OBB once for the current voxel
                 OBB obb_a = _buildOBB(k, voxel);
 
+                // Friction may only slow a slide within this step, so it needs the same step
+                // the integration will take.
+                FloatC dt =
+                    k->getDeviceTimeSinceLastOperation(RSE_KERNEL_UPDATE_OPERATION_SOFT_BODY);
+
                 // Process contact #0
                 if (state_union.voxel_state.has_contact_voxel_0)
-                    _updateOneContact<0>(k, voxel, obb_a, V_G(contact_voxel_0), state_union);
+                    _updateOneContact<0>(k, voxel, obb_a, V_G(contact_voxel_0), dt, state_union);
 
                 // Process contact #1
                 if (state_union.voxel_state.has_contact_voxel_1)
-                    _updateOneContact<1>(k, voxel, obb_a, V_G(contact_voxel_1), state_union);
+                    _updateOneContact<1>(k, voxel, obb_a, V_G(contact_voxel_1), dt, state_union);
 
                 V_S(state, state_union.voxel_state_packed);
             }
         }
 
        private:
-        /// @brief OBB struct for SAT
+        /** @brief OBB struct for SAT */
         struct OBB {
             Vec3C center;    // world-space center
             Vec3C axis[3];   // orthonormal axes
             Vec3C half_ext;  // half extents along each axis
         };
 
-        /// @brief Build an OBB from the voxel data
+        /** @brief Build an OBB from the voxel data */
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static OBB _buildOBB(Kernel *k, RHandle v) {
             auto &ctx = k->ctx;
@@ -1169,13 +1270,14 @@ class RS_VoxelCompute {
             return box;
         }
 
-        /// @brief Handle one contact partner
+        /** @brief Handle one contact partner */
         template <RIndex ContactIndex, typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void _updateOneContact(
             Kernel *k,
             RHandle voxel,
             const OBB &obb_a,     // OBB for this voxel
             RHandle other_voxel,  // in/out handle for the contact partner
+            FloatC dt,
             RS_VoxelStateUnion &state_union_in_out
         ) {
             auto &ctx = k->ctx;
@@ -1183,10 +1285,18 @@ class RS_VoxelCompute {
             // Build OBB for the other voxel
             OBB obb_b = _buildOBB(k, other_voxel);
 
-            // Perform SAT check
+            // Perform SAT check, which orients the normal by the faces the pair can separate
+            // along, so it already points from the other voxel toward this one.
             Vec3C contact_normal = Vec3C::zero();
             FloatC penetration_depth = FloatC(0);
-            bool intersects = _SAT(obb_a, obb_b, contact_normal, penetration_depth);
+            bool intersects = _SAT(
+                obb_a,
+                obb_b,
+                state_union_in_out.voxel_state_packed,
+                V_G(other_voxel, state),
+                contact_normal,
+                penetration_depth
+            );
 
             if (!intersects) {
                 // No contact => clear
@@ -1195,7 +1305,7 @@ class RS_VoxelCompute {
                 if constexpr (ContactIndex == 0) {
                     state_union_in_out.voxel_state.has_contact_voxel_0 = false;
                     V_S(contact_voxel_0, null_handle);
-                    V_S(contact_position_0, Vec3C::zero());
+                    V_S(contact_position_offset_0, Vec3C::zero());
                     V_S(contact_normal_0, Vec3C::zero());
                     V_S(contact_depth_0, FloatC(0));
                     V_S(contact_lambda_n_0, FloatC(0));
@@ -1203,19 +1313,13 @@ class RS_VoxelCompute {
                 } else {
                     state_union_in_out.voxel_state.has_contact_voxel_1 = false;
                     V_S(contact_voxel_1, null_handle);
-                    V_S(contact_position_1, Vec3C::zero());
+                    V_S(contact_position_offset_1, Vec3C::zero());
                     V_S(contact_normal_1, Vec3C::zero());
                     V_S(contact_depth_1, FloatC(0));
                     V_S(contact_lambda_n_1, FloatC(0));
                     V_S(contact_lambda_t_1, Vec3C::zero());
                 }
             } else {
-                // Flip normal if it doesn't point from B to A
-                Vec3C center_diff = obb_a.center - obb_b.center;
-                if (center_diff.dot(contact_normal) < FloatC(0)) {
-                    contact_normal = -contact_normal;
-                }
-
                 // Approx contact position (note the normal points from b to a)
                 FloatC ra = _projectionRange(obb_a, contact_normal);
                 Vec3C contact_pos =
@@ -1228,20 +1332,22 @@ class RS_VoxelCompute {
                     other_voxel,
                     penetration_depth,
                     contact_normal,
+                    contact_pos,
+                    dt,
                     contact_force,
                     state_union_in_out
                 );
 
-                // Store back to current voxel memory
+                Vec3C contact_position_offset = contact_pos - Vec3C(V_G(position));
                 if constexpr (ContactIndex == 0) {
                     state_union_in_out.voxel_state.has_contact_voxel_0 = true;
-                    V_S(contact_position_0, contact_pos);
+                    V_S(contact_position_offset_0, contact_position_offset);
                     V_S(contact_normal_0, contact_normal);
                     V_S(contact_force_0, contact_force);
                     V_S(contact_depth_0, penetration_depth);
                 } else {
                     state_union_in_out.voxel_state.has_contact_voxel_1 = true;
-                    V_S(contact_position_1, contact_pos);
+                    V_S(contact_position_offset_1, contact_position_offset);
                     V_S(contact_normal_1, contact_normal);
                     V_S(contact_force_1, contact_force);
                     V_S(contact_depth_1, penetration_depth);
@@ -1256,6 +1362,8 @@ class RS_VoxelCompute {
             RHandle other_voxel,
             FloatC contact_depth,
             const Vec3C &contact_normal,
+            const Vec3C &contact_position,
+            FloatC dt,
             Vec3C &contact_force_out,
             RS_VoxelStateUnion &state_union_in_out
         ) {
@@ -1288,63 +1396,146 @@ class RS_VoxelCompute {
                 RHandle voxel_material = V_G(voxel, voxel_material);
                 RHandle other_voxel_material = V_G(other_voxel, voxel_material);
 
-                // 1. Solve the contact force. A rigid or static side is immovable and cannot
-                // deform, so a free side governs; with both sides free the softer one governs.
-                // The effective stiffness is identical from either voxel, so the contact force
-                // is symmetric across the pair.
+                // 1. Pick the stiffness and damping. A rigid or static side is immovable and
+                // cannot deform, so a free side governs; with both sides free the softer one
+                // governs. Both are identical from either voxel, so the contact force is
+                // symmetric across the pair.
                 FloatC self_stiffness = VM_G(voxel_material, penetration_stiffness);
                 FloatC other_stiffness = VM_G(other_voxel_material, penetration_stiffness);
-                FloatC stiffness;
-                if (!is_self_rigid_or_static && !is_other_rigid_or_static)
+                FloatC self_damping = VM_G(voxel_material, contact_damping_translate_c);
+                FloatC other_damping = VM_G(other_voxel_material, contact_damping_translate_c);
+                FloatC stiffness, damping;
+                if (!is_self_rigid_or_static && !is_other_rigid_or_static) {
                     stiffness = self_stiffness < other_stiffness ? self_stiffness : other_stiffness;
-                else if (!is_self_rigid_or_static)
+                    damping = self_damping < other_damping ? self_damping : other_damping;
+                } else if (!is_self_rigid_or_static) {
                     stiffness = self_stiffness;
-                else if (!is_other_rigid_or_static)
+                    damping = self_damping;
+                } else if (!is_other_rigid_or_static) {
                     stiffness = other_stiffness;
-                else
+                    damping = other_damping;
+                } else {
                     stiffness = FloatC(0);
-                contact_force_out = stiffness * contact_depth * contact_normal;
+                    damping = FloatC(0);
+                }
 
-                // 2. Solve the friction force
-                // Note: for efficiency, for now we just have dynamic friction, and since
-                // the friction coefficient is only between material and ground, for friction
-                // coefficient between materials, we use the harmonic mean of the dynamic
-                // friction coefficients of the two materials.
-
-                FloatC mass_inverse = VM_G(voxel_material, mass_inverse);
-                FloatC other_mass_inverse = VM_G(other_voxel_material, mass_inverse);
-
-                Vec3C velocity = linearVelocity(V_G(voxel, linear_momentum), mass_inverse);
+                Vec3C velocity = _readVoxelVelocity(k, voxel, state_union_in_out, contact_position);
                 Vec3C other_velocity =
-                    linearVelocity(V_G(other_voxel, linear_momentum), other_mass_inverse);
-
-                // Calculate relative velocity in contact plane
+                    _readVoxelVelocity(k, other_voxel, contact_voxel_state_union, contact_position);
                 Vec3C rel_velocity = velocity - other_velocity;
-                Vec3C tangent_vel = rel_velocity - rel_velocity.project(contact_normal);
-                FloatC tangent_speed = tangent_vel.length();
 
-                if (tangent_speed > 0) {
-                    FloatC normal_force = contact_force_out.length();
+                // 2. Solve the normal force. The normal points from the other voxel to this
+                // one, so a positive speed along it means the pair is coming apart, and
+                // damping along it is what lets a resting contact lose energy instead of
+                // ringing. A contact pushes and never pulls, so the damping may cancel the
+                // bounce but never reverse it into adhesion.
+                FloatC separating_speed = rel_velocity.dot(contact_normal);
+                FloatC spring_force = stiffness * contact_depth;
+                contact_force_out =
+                    RS_MAX(spring_force - damping * separating_speed, FloatC(0)) * contact_normal;
+
+                // 3. Solve the friction force from the spring alone. The damper resists
+                // closing without pressing the surfaces together, so it must not widen the
+                // cone. A voxel pair carries dynamic friction only, since choosing between the
+                // two coefficients needs a solve this force based contact cannot afford.
+                //
+                // The tangent lambda accumulates across steps, one sweep per step, warm
+                // started from the last. A resting pair grows it until it cancels whatever
+                // drives the slide and then holds there, which is what a per step force cannot
+                // do: its rest point is a fixed creep speed, this one's rest point is zero.
+                FloatC self_mass_inverse =
+                    is_self_rigid_or_static ? FloatC(0) : VM_G(voxel_material, mass_inverse);
+                FloatC other_mass_inverse =
+                    is_other_rigid_or_static ? FloatC(0) : VM_G(other_voxel_material, mass_inverse);
+                FloatC mass_inverse_sum = self_mass_inverse + other_mass_inverse;
+
+                // The normal moves between steps, so the carried lambda is reprojected onto
+                // the plane it now acts in.
+                Vec3C lambda_t = ContactIndex == 0 ? Vec3C(V_G(voxel, contact_lambda_t_0))
+                                                   : Vec3C(V_G(voxel, contact_lambda_t_1));
+                lambda_t = lambda_t - lambda_t.project(contact_normal);
+
+                if (mass_inverse_sum > FloatC(0) && dt > FloatC(0)) {
+                    Vec3C tangent_vel = rel_velocity - rel_velocity.project(contact_normal);
+
+                    // Only the increment needs a slide to work on. The lambda already earned
+                    // is applied either way, since dropping it is what lets a stopped pair
+                    // start drifting again.
+                    lambda_t -= tangent_vel / mass_inverse_sum;
+
+                    // Only dynamic friction, since static requires solving and in a force
+                    // based scheme that is both unnecessary and inefficient.
                     RIndex mat_gid_a = VM_G(voxel_material, material_gid);
                     RIndex mat_gid_b = VM_G(other_voxel_material, material_gid);
-                    FloatC u_dynamic = FloatC(
+                    FloatC u = FloatC(
                         ctx.material_friction_dynamic_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]
                     );
+                    // Bounding the depth to protect from degenerate voxel penetrating too deep
+                    // case.
+                    FloatC cone_depth = RS_MIN(
+                        contact_depth,
+                        FloatC(k->softbody_friction_max_penetration_ratio) *
+                            RS_MIN(
+                                VM_G(voxel_material, voxel_size),
+                                VM_G(other_voxel_material, voxel_size)
+                            )
+                    );
+                    FloatC cone = u * stiffness * cone_depth * dt;
+                    FloatC lambda_length = lambda_t.length();
+                    if (lambda_length > cone) lambda_t = lambda_t * (cone / lambda_length);
 
-                    // Apply dynamic friction
-                    Vec3C friction_force =
-                        -(tangent_vel / tangent_speed) * (u_dynamic * normal_force);
-                    contact_force_out += friction_force;
+                    contact_force_out += lambda_t / dt;
                 }
+
+                if constexpr (ContactIndex == 0)
+                    V_S(voxel, contact_lambda_t_0, lambda_t);
+                else
+                    V_S(voxel, contact_lambda_t_1, lambda_t);
             }
         }
 
-        /// @brief Full SAT for OBB vs OBB
-        /// @returns true if in contact, and also returns min-overlap axis + depth
-        HOST_DEVICE_INLINE_QUALIFIER static bool
-        _SAT(const OBB &a, const OBB &b, Vec3C &contact_normal, FloatC &penetration_depth) {
+        /** @brief Read a voxel's velocity at a point in world coordinates */
+        template <typename Kernel>
+        HOST_DEVICE_INLINE_QUALIFIER static Vec3C _readVoxelVelocity(
+            Kernel *k,
+            RHandle voxel,
+            const RS_VoxelStateUnion &state,
+            const Vec3C &point
+        ) {
+            auto &ctx = k->ctx;
+
+            // A rigid voxel is driven by its body and never updates its own momentum, so its
+            // velocity comes from the body and is carried out by the body spin.
+            if (!state.voxel_state.is_rigid) {
+                return linearVelocity(
+                    Vec3C(V_G(voxel, linear_momentum)),
+                    VM_G(V_G(voxel, voxel_material), mass_inverse)
+                );
+            }
+            RHandle rigid_body = V_G(voxel, rigid_body);
+            if (rigid_body == RS_NULL_HANDLE || state.voxel_state.is_static) return Vec3C::zero();
+            Vec3C body_velocity =
+                Vec3C(RB_G(rigid_body, linear_momentum)) * FloatC(RB_G(rigid_body, mass_inverse));
+            Vec3C body_spin = Mat3C(RB_G(rigid_body, moment_inertia_inverse)) *
+                              Vec3C(RB_G(rigid_body, angular_momentum));
+            return body_velocity + body_spin.cross(point - Vec3C(RB_G(rigid_body, com)));
+        }
+
+        /**
+         * @brief Full SAT for OBB vs OBB
+         * @returns true if in contact, and also returns min-overlap axis + depth
+         */
+        HOST_DEVICE_INLINE_QUALIFIER static bool _SAT(
+            const OBB &a,
+            const OBB &b,
+            RState state_a,
+            RState state_b,
+            Vec3C &contact_normal_out,
+            FloatC &penetration_depth_out
+        ) {
             FloatC min_overlap = RS_NumTraits<FloatC>::highest();
             Vec3C best_axis = Vec3C::zero();
+            bool has_axis = false;
 
             Vec3C center_diff = b.center - a.center;
 
@@ -1352,9 +1543,12 @@ class RS_VoxelCompute {
             for (int i = 0; i < 3; i++) {
                 FloatC overlap = _overlapOnAxis(a, b, a.axis[i], center_diff);
                 if (overlap < FloatC(0)) return false;
-                if (overlap < min_overlap) {
+                Vec3C oriented;
+                if (!_orientContactAxis(state_a, i, a.axis[i], center_diff, oriented)) continue;
+                if (!has_axis || overlap < min_overlap) {
                     min_overlap = overlap;
-                    best_axis = a.axis[i];
+                    best_axis = oriented;
+                    has_axis = true;
                 }
             }
 
@@ -1362,13 +1556,19 @@ class RS_VoxelCompute {
             for (int i = 0; i < 3; i++) {
                 FloatC overlap = _overlapOnAxis(a, b, b.axis[i], center_diff);
                 if (overlap < FloatC(0)) return false;
-                if (overlap < min_overlap) {
+                // The helper points from the partner toward the voxel owning the axis, which
+                // for b is the way back, so it is flipped to point from b toward a.
+                Vec3C oriented;
+                if (!_orientContactAxis(state_b, i, b.axis[i], -center_diff, oriented)) continue;
+                if (!has_axis || overlap < min_overlap) {
                     min_overlap = overlap;
-                    best_axis = b.axis[i];
+                    best_axis = -oriented;
+                    has_axis = true;
                 }
             }
 
-            // 3) Check cross products
+            // 3) Check cross products. An edge axis belongs to no face, so it keeps the
+            // centre-difference orientation.
             for (int i = 0; i < 3; i++) {
                 for (int j = 0; j < 3; j++) {
                     Vec3C cross_axis = a.axis[i].cross(b.axis[j]);
@@ -1378,20 +1578,63 @@ class RS_VoxelCompute {
                     cross_axis = cross_axis / len;
                     FloatC overlap = _overlapOnAxis(a, b, cross_axis, center_diff);
                     if (overlap < FloatC(0)) return false;
-                    if (overlap < min_overlap) {
+                    if (!has_axis || overlap < min_overlap) {
                         min_overlap = overlap;
-                        best_axis = cross_axis;
+                        best_axis = center_diff.dot(cross_axis) < FloatC(0) ? cross_axis
+                                                                            : -cross_axis;
+                        has_axis = true;
                     }
                 }
             }
 
-            // If no separating axis, contact
-            contact_normal = best_axis;
-            penetration_depth = min_overlap;
+            // Every face the pair could separate along is covered by a neighbor, so the two
+            // cannot push each other apart and there is no contact to solve.
+            if (!has_axis) return false;
+
+            contact_normal_out = best_axis;
+            penetration_depth_out = min_overlap;
             return true;
         }
 
-        /// @brief Overlap test on one axis
+        /**
+         * @brief Point one face axis out through the face the voxel can separate along.
+         * @details A face with a neighbor cannot carry a contact, since pushing along it would
+         * drive the voxel into its own body. With one face of the axis open the direction is
+         * forced, which is what keeps the normal steady once the two centres are close enough
+         * that their difference no longer decides a sign. With both open the centre difference
+         * decides, and with neither the axis is unusable.
+         *
+         * @param state      packed state of the voxel owning the axis.
+         * @param axis_index axis of that voxel, 0 for x, 1 for y and 2 for z.
+         * @param axis       that axis in world coordinates, unit.
+         * @param to_partner centre of the partner less centre of this voxel.
+         * @param normal_out oriented normal, pointing from the partner toward this voxel.
+         * @returns whether the axis can carry a contact at all.
+         */
+        HOST_DEVICE_INLINE_QUALIFIER static bool _orientContactAxis(
+            RState state,
+            int axis_index,
+            const Vec3C &axis,
+            const Vec3C &to_partner,
+            Vec3C &normal_out
+        ) {
+            bool is_positive_open = getFaceRole(state, axis_index * 2) == RSE_VOXEL_FACE_AIR;
+            bool is_negative_open = getFaceRole(state, axis_index * 2 + 1) == RSE_VOXEL_FACE_AIR;
+
+            // The open face is the one the partner touches, so the partner lies on that side
+            // and the normal points back the other way.
+            if (is_positive_open && is_negative_open)
+                normal_out = to_partner.dot(axis) < FloatC(0) ? axis : -axis;
+            else if (is_positive_open)
+                normal_out = -axis;
+            else if (is_negative_open)
+                normal_out = axis;
+            else
+                return false;
+            return true;
+        }
+
+        /** @brief Overlap test on one axis */
         HOST_DEVICE_INLINE_QUALIFIER static FloatC
         _overlapOnAxis(const OBB &a, const OBB &b, const Vec3C &axis, const Vec3C &center_diff) {
             FloatC dist = RS_ABS(center_diff.dot(axis));
@@ -1401,7 +1644,7 @@ class RS_VoxelCompute {
             return ra + rb - dist;  // negative => no overlap
         }
 
-        /// @brief Computes projection range (half extent) of an OBB on a normalized axis
+        /** @brief Computes projection range (half extent) of an OBB on a normalized axis */
         HOST_DEVICE_INLINE_QUALIFIER static FloatC
         _projectionRange(const OBB &box, const Vec3C &axis) {
             FloatC r = box.half_ext.dot(
@@ -1461,10 +1704,52 @@ class RS_VoxelCompute {
         }
     }
 
-    /** @brief Interference in meters between the voxel and the floor, negative if clear. */
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC
-    floorPenetration(FloatC v_voxel_size, FloatC v_position_z, FloatC floor_z = 0) {
-        return v_voxel_size * FloatC(0.5) - (v_position_z - floor_z);
+    /** @brief Whether the world stands on a floor at all. */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static bool hasFloor(Kernel *k) {
+        RSE_VisionFloorDataType floor_data_type = k->ctx.floor_vision_mem.data_type;
+        return floor_data_type == RSE_VISION_FLOOR_DATA_FLAT ||
+               floor_data_type == RSE_VISION_FLOOR_DATA_ARRAY;
+    }
+
+    /** @brief Whether the floor is one level plane, so its up-normal is always (0, 0, 1). */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static bool isFloorFlat(Kernel *k) {
+        return k->ctx.floor_vision_mem.data_type == RSE_VISION_FLOOR_DATA_FLAT;
+    }
+
+    /**
+     * @brief Interference in meters between the voxel box and the floor, negative if clear.
+     *
+     * @details Reaches along the floor normal with the turned box, so the answer is the depth
+     * of whichever corner hangs lowest. A box lying square gives back half its size, the same
+     * as measuring straight down, while a tilted one reaches further and is caught earlier.
+     *
+     * @param orientation voxel orientation.
+     * @param nnn         box corner offset on the low side of each local axis.
+     * @param ppp         box corner offset on the high side of each local axis.
+     * @param position    voxel center in global coords.
+     * @param floor_normal floor up-normal under the voxel, unit.
+     * @param floor_z     floor height under the voxel.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC floorPenetration(
+        const Quat3C &orientation,
+        const Vec3C &nnn,
+        const Vec3C &ppp,
+        const Vec3C &position,
+        const Vec3C &floor_normal,
+        FloatC floor_z = 0
+    ) {
+        Vec3C axis_x = orientation.rotateVec3D(Vec3C(FloatC(1), FloatC(0), FloatC(0)));
+        Vec3C axis_y = orientation.rotateVec3D(Vec3C(FloatC(0), FloatC(1), FloatC(0)));
+        Vec3C axis_z = orientation.rotateVec3D(Vec3C(FloatC(0), FloatC(0), FloatC(1)));
+        FloatC along_x = axis_x.dot(floor_normal);
+        FloatC along_y = axis_y.dot(floor_normal);
+        FloatC along_z = axis_z.dot(floor_normal);
+        FloatC reach = RS_MAX(-along_x * nnn.x, -along_x * ppp.x) +
+                       RS_MAX(-along_y * nnn.y, -along_y * ppp.y) +
+                       RS_MAX(-along_z * nnn.z, -along_z * ppp.z);
+        return reach - (position.z - floor_z) * floor_normal.z;
     }
 
     /** @brief Sample the floor height and up-normal under a position, false when no floor. */

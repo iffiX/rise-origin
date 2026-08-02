@@ -17,6 +17,9 @@ namespace rise {
  * Collection of commonly used vector types
  */
 
+template <RSE_FloatType Type>
+class RS_Vec2DMem;
+
 /**
  * @brief Template of generic 2D vectors. The template parameter is assumed to be
  * either float or double depending on the desired numerical resolution.
@@ -42,6 +45,12 @@ struct RS_Vec2D {
     /// Copy constructor
     template <typename U>
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec2D(const RS_Vec2D<U> &v) : x(v.x), y(v.y) {}
+
+    /// Copy constructor for memory format
+    template <RSE_FloatType Type>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec2D(const RS_Vec2DMem<Type> &v) {
+        v.get(x, y);
+    }
 
     /// Returns a vector of all zeros
     HOST_DEVICE_INLINE_QUALIFIER static RS_Vec2D zero() { return RS_Vec2D(0, 0); }
@@ -89,6 +98,13 @@ struct RS_Vec2D {
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec2D operator=(const RS_Vec2D<U> &v) {
         x = v.x;
         y = v.y;
+        return *this;
+    }
+
+    /// Assign operator from memory format
+    template <RSE_FloatType Type>
+    HOST_DEVICE_QUALIFIER RS_Vec2D operator=(const RS_Vec2DMem<Type> &v) {
+        v.get(x, y);
         return *this;
     }
 
@@ -447,6 +463,107 @@ struct RS_Vec2D {
     void serialize(Serializer &s) {
         s("x", x);
         s("y", y);
+    }
+};
+
+// Helper struct to determine data array based on Type
+template <RSE_FloatType Type>
+struct RS_Vec2DMemDataType;
+
+template <>
+struct RS_Vec2DMemDataType<RSE_FLOAT_16> {
+    using DataType = unsigned short[2];
+    using ElementType = unsigned short;
+};
+
+template <>
+struct RS_Vec2DMemDataType<RSE_FLOAT_32> {
+    using DataType = float[2];
+    using ElementType = float;
+};
+
+template <>
+struct RS_Vec2DMemDataType<RSE_FLOAT_64> {
+    using DataType = double[2];
+    using ElementType = double;
+};
+
+/**
+ * @brief Template of 2D vectors stored in memory.
+ */
+template <RSE_FloatType Type>
+class RS_Vec2DMem {
+   public:
+    using DataType = typename RS_Vec2DMemDataType<Type>::DataType;
+    using ElementType = typename RS_Vec2DMemDataType<Type>::ElementType;
+    DataType data;  ///< Internal storage.
+
+    /// Default constructor
+    RS_Vec2DMem() = default;
+
+    HOST_DEVICE_INLINE_QUALIFIER static RS_Vec2DMem zero() {
+        RS_Vec2DMem vec;
+        vec.data[0] = 0;
+        vec.data[1] = 0;
+        return vec;
+    }
+
+    /// Constructor taking x, y as input
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec2DMem(T x, T y) {
+        set(x, y);
+    }
+
+    /// Constructor from RS_Vec2D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER explicit RS_Vec2DMem(const RS_Vec2D<T> &v) {
+        set(v.x, v.y);
+    }
+
+    /// Assignment operator from RS_Vec2D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec2DMem &operator=(const RS_Vec2D<T> &v) {
+        set(v.x, v.y);
+        return *this;
+    }
+
+    /// Assignment operator from RS_Vec2DMem
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec2DMem &operator=(const RS_Vec2DMem &v) {
+        data[0] = v.data[0];
+        data[1] = v.data[1];
+        return *this;
+    }
+
+    /// Convert to RS_Vec2D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec2D<T> toVec2D() const {
+        RS_Vec2D<T> v;
+        get(v.x, v.y);
+        return v;
+    }
+
+    /// Helper function to set data from x, y
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER void set(const T &x, const T &y) {
+        if constexpr (Type == RSE_FLOAT_16) {
+            data[0] = RS_FloatConvert::floatToHalf(static_cast<float>(x));
+            data[1] = RS_FloatConvert::floatToHalf(static_cast<float>(y));
+        } else {
+            data[0] = static_cast<ElementType>(x);
+            data[1] = static_cast<ElementType>(y);
+        }
+    }
+
+    /// Helper function to get data into RS_Vec2D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER void get(T &x, T &y) const {
+        if constexpr (Type == RSE_FLOAT_16) {
+            x = static_cast<T>(RS_FloatConvert::halfToFloat(data[0]));
+            y = static_cast<T>(RS_FloatConvert::halfToFloat(data[1]));
+        } else {
+            x = static_cast<T>(data[0]);
+            y = static_cast<T>(data[1]);
+        }
     }
 };
 
@@ -1121,15 +1238,21 @@ template <RSE_FloatType Type>
 struct RS_Vec3DMemDataType;
 
 template <>
-struct RS_Vec3DMemDataType<RSE_FLOAT_64> {
-    using DataType = double[3];
-    using ElementType = double;
+struct RS_Vec3DMemDataType<RSE_FLOAT_16> {
+    using DataType = unsigned short[3];
+    using ElementType = unsigned short;
 };
 
 template <>
 struct RS_Vec3DMemDataType<RSE_FLOAT_32> {
     using DataType = float[3];
     using ElementType = float;
+};
+
+template <>
+struct RS_Vec3DMemDataType<RSE_FLOAT_64> {
+    using DataType = double[3];
+    using ElementType = double;
 };
 
 /**
@@ -1149,9 +1272,7 @@ class RS_Vec3DMem {
         RS_Vec3DMem vec;
         vec.data[0] = 0;
         vec.data[1] = 0;
-        if constexpr (Type == RSE_FLOAT_32 || Type == RSE_FLOAT_64) {
-            vec.data[2] = 0;
-        }
+        vec.data[2] = 0;
         return vec;
     }
 
@@ -1178,9 +1299,7 @@ class RS_Vec3DMem {
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec3DMem &operator=(const RS_Vec3DMem &v) {
         data[0] = v.data[0];
         data[1] = v.data[1];
-        if constexpr (Type == RSE_FLOAT_32 || Type == RSE_FLOAT_64) {
-            data[2] = v.data[2];
-        }
+        data[2] = v.data[2];
         return *this;
     }
 
@@ -1195,17 +1314,25 @@ class RS_Vec3DMem {
     /// Helper function to set data from x, y, z
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER void set(const T &x, const T &y, const T &z) {
-        if constexpr (Type == RSE_FLOAT_32 || Type == RSE_FLOAT_64) {
-            data[0] = static_cast<T>(x);
-            data[1] = static_cast<T>(y);
-            data[2] = static_cast<T>(z);
+        if constexpr (Type == RSE_FLOAT_16) {
+            data[0] = RS_FloatConvert::floatToHalf(static_cast<float>(x));
+            data[1] = RS_FloatConvert::floatToHalf(static_cast<float>(y));
+            data[2] = RS_FloatConvert::floatToHalf(static_cast<float>(z));
+        } else {
+            data[0] = static_cast<ElementType>(x);
+            data[1] = static_cast<ElementType>(y);
+            data[2] = static_cast<ElementType>(z);
         }
     }
 
     /// Helper function to get data into RS_Vec3D<T>
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER void get(T &x, T &y, T &z) const {
-        if constexpr (Type == RSE_FLOAT_32 || Type == RSE_FLOAT_64) {
+        if constexpr (Type == RSE_FLOAT_16) {
+            x = static_cast<T>(RS_FloatConvert::halfToFloat(data[0]));
+            y = static_cast<T>(RS_FloatConvert::halfToFloat(data[1]));
+            z = static_cast<T>(RS_FloatConvert::halfToFloat(data[2]));
+        } else {
             x = static_cast<T>(data[0]);
             y = static_cast<T>(data[1]);
             z = static_cast<T>(data[2]);
@@ -1218,6 +1345,9 @@ using RVec3df = RS_Vec3D<double>;
 using RVec3rf = RS_Vec3D<RFloat>;
 using RVec3i = RS_Vec3D<int>;
 using RVec3ui = RS_Vec3D<unsigned int>;
+
+template <RSE_FloatType Type>
+class RS_Vec4DMem;
 
 /**
  * @brief Template of generic 4D vectors. The template parameter is assumed to be
@@ -1246,6 +1376,12 @@ struct RS_Vec4D {
     /// Copy constructor
     template <typename U>
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec4D(const RS_Vec4D<U> &v) : x(v.x), y(v.y), z(v.z), w(v.w) {}
+
+    /// Copy constructor for memory format
+    template <RSE_FloatType Type>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec4D(const RS_Vec4DMem<Type> &v) {
+        v.get(x, y, z, w);
+    }
 
     /// Returns a vector of all zeros
     HOST_DEVICE_INLINE_QUALIFIER static RS_Vec4D zero() { return RS_Vec4D(0, 0, 0, 0); }
@@ -1308,6 +1444,13 @@ struct RS_Vec4D {
         y = v.y;
         z = v.z;
         w = v.w;
+        return *this;
+    }
+
+    /// Assign operator from memory format
+    template <RSE_FloatType Type>
+    HOST_DEVICE_QUALIFIER RS_Vec4D operator=(const RS_Vec4DMem<Type> &v) {
+        v.get(x, y, z, w);
         return *this;
     }
 
@@ -1771,6 +1914,119 @@ struct RS_Vec4D {
     }
 };
 
+// Helper struct to determine data array based on Type
+template <RSE_FloatType Type>
+struct RS_Vec4DMemDataType;
+
+template <>
+struct RS_Vec4DMemDataType<RSE_FLOAT_16> {
+    using DataType = unsigned short[4];
+    using ElementType = unsigned short;
+};
+
+template <>
+struct RS_Vec4DMemDataType<RSE_FLOAT_32> {
+    using DataType = float[4];
+    using ElementType = float;
+};
+
+template <>
+struct RS_Vec4DMemDataType<RSE_FLOAT_64> {
+    using DataType = double[4];
+    using ElementType = double;
+};
+
+/**
+ * @brief Template of 4D vectors stored in memory.
+ */
+template <RSE_FloatType Type>
+class RS_Vec4DMem {
+   public:
+    using DataType = typename RS_Vec4DMemDataType<Type>::DataType;
+    using ElementType = typename RS_Vec4DMemDataType<Type>::ElementType;
+    DataType data;  ///< Internal storage.
+
+    /// Default constructor
+    RS_Vec4DMem() = default;
+
+    HOST_DEVICE_INLINE_QUALIFIER static RS_Vec4DMem zero() {
+        RS_Vec4DMem vec;
+        vec.data[0] = 0;
+        vec.data[1] = 0;
+        vec.data[2] = 0;
+        vec.data[3] = 0;
+        return vec;
+    }
+
+    /// Constructor taking x, y, z, w as input
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec4DMem(T x, T y, T z, T w) {
+        set(x, y, z, w);
+    }
+
+    /// Constructor from RS_Vec4D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER explicit RS_Vec4DMem(const RS_Vec4D<T> &v) {
+        set(v.x, v.y, v.z, v.w);
+    }
+
+    /// Assignment operator from RS_Vec4D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec4DMem &operator=(const RS_Vec4D<T> &v) {
+        set(v.x, v.y, v.z, v.w);
+        return *this;
+    }
+
+    /// Assignment operator from RS_Vec4DMem
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec4DMem &operator=(const RS_Vec4DMem &v) {
+        data[0] = v.data[0];
+        data[1] = v.data[1];
+        data[2] = v.data[2];
+        data[3] = v.data[3];
+        return *this;
+    }
+
+    /// Convert to RS_Vec4D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec4D<T> toVec4D() const {
+        RS_Vec4D<T> v;
+        get(v.x, v.y, v.z, v.w);
+        return v;
+    }
+
+    /// Helper function to set data from x, y, z, w
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER void set(const T &x, const T &y, const T &z, const T &w) {
+        if constexpr (Type == RSE_FLOAT_16) {
+            data[0] = RS_FloatConvert::floatToHalf(static_cast<float>(x));
+            data[1] = RS_FloatConvert::floatToHalf(static_cast<float>(y));
+            data[2] = RS_FloatConvert::floatToHalf(static_cast<float>(z));
+            data[3] = RS_FloatConvert::floatToHalf(static_cast<float>(w));
+        } else {
+            data[0] = static_cast<ElementType>(x);
+            data[1] = static_cast<ElementType>(y);
+            data[2] = static_cast<ElementType>(z);
+            data[3] = static_cast<ElementType>(w);
+        }
+    }
+
+    /// Helper function to get data into RS_Vec4D<T>
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER void get(T &x, T &y, T &z, T &w) const {
+        if constexpr (Type == RSE_FLOAT_16) {
+            x = static_cast<T>(RS_FloatConvert::halfToFloat(data[0]));
+            y = static_cast<T>(RS_FloatConvert::halfToFloat(data[1]));
+            z = static_cast<T>(RS_FloatConvert::halfToFloat(data[2]));
+            w = static_cast<T>(RS_FloatConvert::halfToFloat(data[3]));
+        } else {
+            x = static_cast<T>(data[0]);
+            y = static_cast<T>(data[1]);
+            z = static_cast<T>(data[2]);
+            w = static_cast<T>(data[3]);
+        }
+    }
+};
+
 using RVec4f = RS_Vec4D<float>;
 using RVec4df = RS_Vec4D<double>;
 using RVec4rf = RS_Vec4D<RFloat>;
@@ -1782,16 +2038,28 @@ using RVec4ui = RS_Vec4D<unsigned int>;
 REFL_AUTO(type(rise::RVec2f), field(x), field(y))
 REFL_AUTO(type(rise::RVec2df), field(x), field(y))
 REFL_AUTO(type(rise::RVec2i), field(x), field(y))
+REFL_AUTO(type(rise::RVec2ui), field(x), field(y))
 
 REFL_AUTO(type(rise::RVec3f), field(x), field(y), field(z))
 REFL_AUTO(type(rise::RVec3df), field(x), field(y), field(z))
 REFL_AUTO(type(rise::RVec3i), field(x), field(y), field(z))
+REFL_AUTO(type(rise::RVec3ui), field(x), field(y), field(z))
 
 REFL_AUTO(type(rise::RVec4f), field(x), field(y), field(z), field(w))
 REFL_AUTO(type(rise::RVec4df), field(x), field(y), field(z), field(w))
 REFL_AUTO(type(rise::RVec4i), field(x), field(y), field(z), field(w))
+REFL_AUTO(type(rise::RVec4ui), field(x), field(y), field(z), field(w))
 
+REFL_AUTO(type(rise::RS_Vec2DMem<rise::RSE_FLOAT_16>), field(data))
+REFL_AUTO(type(rise::RS_Vec2DMem<rise::RSE_FLOAT_32>), field(data))
+REFL_AUTO(type(rise::RS_Vec2DMem<rise::RSE_FLOAT_64>), field(data))
+
+REFL_AUTO(type(rise::RS_Vec3DMem<rise::RSE_FLOAT_16>), field(data))
 REFL_AUTO(type(rise::RS_Vec3DMem<rise::RSE_FLOAT_32>), field(data))
 REFL_AUTO(type(rise::RS_Vec3DMem<rise::RSE_FLOAT_64>), field(data))
+
+REFL_AUTO(type(rise::RS_Vec4DMem<rise::RSE_FLOAT_16>), field(data))
+REFL_AUTO(type(rise::RS_Vec4DMem<rise::RSE_FLOAT_32>), field(data))
+REFL_AUTO(type(rise::RS_Vec4DMem<rise::RSE_FLOAT_64>), field(data))
 
 #endif  // RS_VEC3D_H

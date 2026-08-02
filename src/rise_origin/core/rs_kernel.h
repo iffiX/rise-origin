@@ -236,6 +236,7 @@ struct alignas(8) RS_KernelBase {
     RFloat softbody_global_damping_z = 0;
     RFloat softbody_integration_frequency_multiplier = 3.5;
     RFloat softbody_link_max_compression = 0.8;
+    RFloat softbody_friction_max_penetration_ratio = 0.1;
 
     RSize rigidbody_constraint_iterations = 0;
     RFloat rigidbody_constraint_position_correction_ratio = 0;
@@ -247,6 +248,7 @@ struct alignas(8) RS_KernelBase {
     RFloat rigidbody_constraint_stiffness_auto_adjust_step = 0;
     RSize rigidbody_contact_iterations = 0;
     RSize rigidbody_contact_position_correction_iterations = 0;
+    RSize rigidbody_contact_manifold_size = 4;
     RFloat rigidbody_contact_position_correction_ratio = 0;
     RFloat rigidbody_contact_warm_start_damping_z = 0;
     RFloat rigidbody_contact_slop = 0;

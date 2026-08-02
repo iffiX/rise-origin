@@ -7,10 +7,20 @@
 #include <cmath>
 #include <cstring>
 
+#ifdef __CUDACC__
+#include <cuda_fp16.h>
+#endif
+
 #include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/rs_exception.h"
 
 namespace rise {
+
+//! Defines the type of a floating point number.
+RS_ENUM(RSE_FloatType, unsigned int, (RSE_FLOAT_16, 0), (RSE_FLOAT_32, 1), (RSE_FLOAT_64, 2))
+
+static constexpr RSE_FloatType RS_DEFAULT_FLOAT_TYPE = RSE_FLOAT_32;
+
 template <typename T>
 struct RS_FloatIntrinsics;
 
@@ -341,24 +351,75 @@ struct RS_FloatConvert {
         u.i = x;
         return u.f;
     }
+
+    //! Helper functions for half precision storage, rounding to nearest even
+    HOST_DEVICE_QUALIFIER static unsigned short floatToHalf(float x) {
+#ifdef __CUDACC__
+        return __half_as_ushort(__float2half_rn(x));
+#else
+        unsigned int bits = floatingToInteger(x);
+        unsigned int sign = (bits >> 16) & 0x8000u;
+        unsigned int mag = bits & 0x7FFFFFFFu;
+
+        if (mag > 0x7F800000u) return static_cast<unsigned short>(sign | 0x7E00u);
+        if (mag >= 0x477FF000u) return static_cast<unsigned short>(sign | 0x7C00u);
+        if (mag >= 0x38800000u) {
+            unsigned int value = mag - 0x38000000u;
+            unsigned int round = ((value >> 13) & 1u) + 0x0FFFu;
+            return static_cast<unsigned short>(sign | ((value + round) >> 13));
+        }
+        if (mag < 0x33000000u) return static_cast<unsigned short>(sign);
+
+        int shift = 126 - static_cast<int>(mag >> 23);
+        unsigned int mantissa = (mag & 0x007FFFFFu) | 0x00800000u;
+        unsigned int value = mantissa >> shift;
+        unsigned int remainder = mantissa & ((1u << shift) - 1u);
+        unsigned int middle = 1u << (shift - 1);
+        if (remainder > middle || (remainder == middle && (value & 1u))) value++;
+        return static_cast<unsigned short>(sign | value);
+#endif
+    }
+
+    HOST_DEVICE_QUALIFIER static float halfToFloat(unsigned short x) {
+#ifdef __CUDACC__
+        return __half2float(__ushort_as_half(x));
+#else
+        unsigned int sign = static_cast<unsigned int>(x & 0x8000u) << 16;
+        unsigned int exponent = (x >> 10) & 0x1Fu;
+        unsigned int mantissa = x & 0x03FFu;
+
+        if (exponent == 0x1Fu)
+            return integerToFloating(sign | 0x7F800000u | (mantissa << 13));
+        if (exponent == 0) {
+            if (mantissa == 0) return integerToFloating(sign);
+            exponent = 1;
+            while ((mantissa & 0x0400u) == 0) {
+                mantissa <<= 1;
+                exponent--;
+            }
+            mantissa &= 0x03FFu;
+        }
+        return integerToFloating(sign | ((exponent + 112u) << 23) | (mantissa << 13));
+#endif
+    }
 };
-
-//! Defines the type of a floating point number.
-RS_ENUM(RSE_FloatType, unsigned int, (RSE_FLOAT_32, 0), (RSE_FLOAT_64, 1))
-
-static constexpr RSE_FloatType RS_DEFAULT_FLOAT_TYPE = RSE_FLOAT_32;
 
 template <RSE_FloatType Type>
 struct RS_FloatDataType {};
 
 template <>
-struct RS_FloatDataType<RSE_FLOAT_64> {
-    using DataType = double;
+struct RS_FloatDataType<RSE_FLOAT_16> {
+    using DataType = unsigned short;
 };
 
 template <>
 struct RS_FloatDataType<RSE_FLOAT_32> {
     using DataType = float;
+};
+
+template <>
+struct RS_FloatDataType<RSE_FLOAT_64> {
+    using DataType = double;
 };
 
 template <RSE_FloatType Type>
@@ -370,7 +431,7 @@ struct RS_FloatCapAccuracy {
 };
 
 template <typename Function>
-void selectAccuracy(RSE_FloatType type, Function &&func) {
+void selectComputeAccuracy(RSE_FloatType type, Function &&func) {
     switch (type) {
         case RSE_FLOAT_32:
             func(std::integral_constant<RSE_FloatType, RSE_FLOAT_32>{});

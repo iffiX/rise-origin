@@ -114,6 +114,9 @@ class RSC_SimulationSoftBody : public RSC_Base {
     /// -link_max_compression to keep heavily compressed links valid. Range [0, 1).
     RFloat link_max_compression = 0.8;
 
+    /// Share of a voxel the friction cone may read as pressed together. Range (0, 1].
+    RFloat friction_max_penetration_ratio = 0.1;
+
     bool operator==(const RSC_SimulationSoftBody& other) const;
 
    protected:
@@ -160,6 +163,9 @@ class RSC_SimulationRigidBody : public RSC_Base {
 
     /// Number of position-correction iterations for the contact solver (Box2D NGS style).
     RSize contact_position_correction_iterations = 3;
+
+    /// Contacts one rigid body pair keeps, the deepest plus the farthest from it. Range [1, 8].
+    RSize contact_manifold_size = 4;
 
     /// Fraction of penetration (beyond contact_slop) removed per position-correction iteration.
     RFloat contact_position_correction_ratio = 0.3;

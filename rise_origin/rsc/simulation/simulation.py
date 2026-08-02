@@ -110,6 +110,8 @@ class SoftBody(RSC_SimulationSoftBody):
             frequency when auto-computing the soft-body step, must be > 0.
         link_max_compression: Maximum compressive strain magnitude for a soft
             link, in the range [0, 1).
+        friction_max_penetration_ratio: Share of a voxel the friction cone may read as
+            pressed together, in the range (0, 1].
     """
 
     def __init__(
@@ -120,6 +122,7 @@ class SoftBody(RSC_SimulationSoftBody):
         global_damping_z: Optional[float] = None,
         integration_frequency_multiplier: Optional[float] = None,
         link_max_compression: Optional[float] = None,
+        friction_max_penetration_ratio: Optional[float] = None,
     ) -> None:
         super().__init__()
         _apply(
@@ -129,6 +132,7 @@ class SoftBody(RSC_SimulationSoftBody):
             global_damping_z=global_damping_z,
             integration_frequency_multiplier=integration_frequency_multiplier,
             link_max_compression=link_max_compression,
+            friction_max_penetration_ratio=friction_max_penetration_ratio,
         )
 
 
@@ -150,6 +154,8 @@ class RigidBody(RSC_SimulationRigidBody):
         contact_iterations: Contact solver iteration count.
         contact_position_correction_iterations: Contact position-correction
             iteration count.
+        contact_manifold_size: Contacts one rigid body pair keeps, the deepest
+            plus the farthest from it, in the range [1, 8].
         contact_position_correction_ratio: Contact position-correction fraction.
         contact_warm_start_damping_z: Warm-start damping ratio for contacts.
         contact_slop: Allowed contact penetration before correction, in meters.
@@ -170,6 +176,7 @@ class RigidBody(RSC_SimulationRigidBody):
         constraint_compliance_auto_adjust_step: Optional[float] = None,
         contact_iterations: Optional[int] = None,
         contact_position_correction_iterations: Optional[int] = None,
+        contact_manifold_size: Optional[int] = None,
         contact_position_correction_ratio: Optional[float] = None,
         contact_warm_start_damping_z: Optional[float] = None,
         contact_slop: Optional[float] = None,
@@ -189,6 +196,7 @@ class RigidBody(RSC_SimulationRigidBody):
             constraint_compliance_auto_adjust_step=constraint_compliance_auto_adjust_step,
             contact_iterations=contact_iterations,
             contact_position_correction_iterations=contact_position_correction_iterations,
+            contact_manifold_size=contact_manifold_size,
             contact_position_correction_ratio=contact_position_correction_ratio,
             contact_warm_start_damping_z=contact_warm_start_damping_z,
             contact_slop=contact_slop,

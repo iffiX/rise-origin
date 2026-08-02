@@ -131,8 +131,7 @@ class World:
         occupancy = self.materials != None  # noqa: E711
         ids = np.where(occupancy, self.segments, RS_NULL_INDEX)
         return rsc.entity.StructureVoxelBody.from_grid(
-            occupancy,
-            material_grid=ids,
+            ids,
             segment_grid=ids,
             voxel_size=self.voxel_size,
             relative_origin_position=tuple(float(v) for v in origin_offset),

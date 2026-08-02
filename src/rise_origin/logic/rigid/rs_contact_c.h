@@ -59,6 +59,7 @@ template <RSE_FloatType FloatComputeAccuracy>
 class RS_ContactCompute {
    public:
     using FloatC = typename RS_FloatDataType<FloatComputeAccuracy>::DataType;
+    using Vec2C = RS_Vec2D<FloatC>;
     using Vec3C = RS_Vec3D<FloatC>;
     using Quat3C = RS_Quat3D<FloatC>;
     using Mat3C = RS_Mat3D<FloatC>;
@@ -160,8 +161,8 @@ class RS_ContactCompute {
                     mat_gid_a,
                     RState(0),
                     V_G(voxel, contact_voxel_0),
-                    Vec3C(V_G(voxel, contact_normal_0)),
-                    Vec3C(V_G(voxel, contact_position_0))
+                    V_G(voxel, contact_normal_0).template toVec3D<FloatC>(),
+                    Vec3C(V_G(voxel, position)) + Vec3C(V_G(voxel, contact_position_offset_0))
                 );
             }
             if (flags.template get<RIndex>(base + RIndex(1))) {
@@ -174,8 +175,8 @@ class RS_ContactCompute {
                     mat_gid_a,
                     RState(1),
                     V_G(voxel, contact_voxel_1),
-                    Vec3C(V_G(voxel, contact_normal_1)),
-                    Vec3C(V_G(voxel, contact_position_1))
+                    V_G(voxel, contact_normal_1).template toVec3D<FloatC>(),
+                    Vec3C(V_G(voxel, position)) + Vec3C(V_G(voxel, contact_position_offset_1))
                 );
             }
             if (flags.template get<RIndex>(base + RIndex(2))) {
@@ -212,7 +213,9 @@ class RS_ContactCompute {
             RIndex mat_gid_b = other_voxel == RS_NULL_HANDLE
                                    ? mat_gid_a
                                    : VM_G(V_G(other_voxel, voxel_material), material_gid);
-            FloatC mu =
+            FloatC u_static =
+                FloatC(ctx.material_friction_static_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]);
+            FloatC u_dynamic =
                 FloatC(ctx.material_friction_dynamic_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]);
             FloatC depth = slot == 0 ? FloatC(V_G(voxel, contact_depth_0))
                                      : FloatC(V_G(voxel, contact_depth_1));
@@ -229,7 +232,7 @@ class RS_ContactCompute {
             contact.contact_point = anchor;
             contact.contact_normal = normal;
             contact.depth = depth;
-            contact.mu = mu;
+            contact.friction_coeff = Vec2C(u_static, u_dynamic);
             contacts.set(out, contact);
         }
 
@@ -246,7 +249,9 @@ class RS_ContactCompute {
             auto &ctx = k->ctx;
             using C = typename Contacts::ObjectType;
             RIndex mat_gid_b = ctx.floor.material_gid;
-            FloatC mu =
+            FloatC u_static =
+                FloatC(ctx.material_friction_static_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]);
+            FloatC u_dynamic =
                 FloatC(ctx.material_friction_dynamic_table[{(RSize)mat_gid_a, (RSize)mat_gid_b}]);
             Vec3C voxel_pos = V_G(voxel, position);
             FloatC floor_height;
@@ -287,7 +292,7 @@ class RS_ContactCompute {
             contact.contact_point = contact_point;
             contact.contact_normal = floor_normal;
             contact.depth = depth;
-            contact.mu = mu;
+            contact.friction_coeff = Vec2C(u_static, u_dynamic);
             contacts.set(out, contact);
         }
     };
@@ -514,7 +519,7 @@ class RS_ContactCompute {
     };
 
     /**
-     * @brief Per group: flag the top-three farthest contacts, skipping the deepest if present.
+     * @brief Per group: flag the farthest contacts, skipping the deepest if present.
      *
      * @param k            simulation kernel.
      * @param farthest_out per-group farthest-reduce result.
@@ -534,7 +539,11 @@ class RS_ContactCompute {
             RIndex g = index1D();
             RIndex deepest_index = deepest_out.template get<RS_RigidManifoldDeepest>(g).index;
             RS_RigidManifoldFarthest e = farthest_out.template get<RS_RigidManifoldFarthest>(g);
-            for (int s = 0; s < 3; ++s) {
+            // The deepest already holds one place, so the rest of the manifold comes from here.
+            int keep = int(k->rigidbody_contact_manifold_size) - 1;
+            if (keep > RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE)
+                keep = RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE;
+            for (int s = 0; s < keep; ++s) {
                 if (e.index[s] != RS_NULL_INDEX && e.index[s] != deepest_index)
                     flags.template get<RIndex>(e.index[s]) = 1;
             }
@@ -724,7 +733,7 @@ class RS_ContactCompute {
      *     delta_n_eff    =  lambda_n_new - lambda_n_old
      *
      *     delta_t_raw    =  -v_t / K_t                       (current tangent direction)
-     *     lambda_t_new   =  cone_clip( lambda_t_old + delta_t_raw , mu * lambda_n_new )
+     *     lambda_t_new   =  cone_clip( lambda_t_old + delta_t_raw , u_static, u_dynamic )
      *     delta_t_eff    =  lambda_t_new - lambda_t_old
      *
      * `lambda_t_old` is first projected onto the current tangent plane so a shifted normal does not
@@ -764,7 +773,8 @@ class RS_ContactCompute {
             Vec3C cp = Vec3C(contacts.template get<Pr(C, contact_point)>(i));
             FloatC k_n = contacts.template get<Pr(C, k_n)>(i);
             FloatC normalizer = contacts.template get<Pr(C, normalizer)>(i);
-            FloatC mu = contacts.template get<Pr(C, mu)>(i);
+            Vec2C friction_coeff =
+                contacts.template get<Pr(C, friction_coeff)>(i).template toVec2D<FloatC>();
             if (k_n <= FloatC(0)) return;
 
             bool static_a = RS_RigidBodyStateUnion{RB_G(owner_a, state)}.rigid_body_state.is_static;
@@ -783,9 +793,9 @@ class RS_ContactCompute {
             Mat3C I_inv_b = static_b ? Mat3C::zero() : Mat3C(RB_G(owner_b, moment_inertia_inverse));
             Vec3C r_b = is_floor ? Vec3C::zero() : (cp - com_b);
             Vec3C v_b = static_b ? Vec3C::zero()
-                                : Vec3C(RB_G(owner_b, linear_momentum)) * mass_inv_b;
+                                 : Vec3C(RB_G(owner_b, linear_momentum)) * mass_inv_b;
             Vec3C w_b = static_b ? Vec3C::zero()
-                                : (I_inv_b * Vec3C(RB_G(owner_b, angular_momentum)));
+                                 : (I_inv_b * Vec3C(RB_G(owner_b, angular_momentum)));
 
             FloatC lambda_n = contacts.template get<Pr(C, accumulated_lambda_n)>(i);
             Vec3C lambda_t = Vec3C(contacts.template get<Pr(C, accumulated_lambda_t)>(i));
@@ -813,12 +823,16 @@ class RS_ContactCompute {
                 if (!static_b) K_t += contactEffectiveMassInverse(mass_inv_b, I_inv_b, r_b, tdir);
                 K_t *= normalizer;
                 if (K_t > FloatC(0)) {
+                    // The raw step is the impulse that would stop the slide outright, so a pair
+                    // that fits inside the static cone sticks and one that does not slides at
+                    // the dynamic limit.
                     Vec3C lambda_t_new = lambda_t + (-v_t_len / K_t) * tdir;
-                    FloatC cone = mu * lambda_n;
                     FloatC len = lambda_t_new.length();
-                    if (len > cone)
+                    if (len > friction_coeff.x * lambda_n) {
+                        FloatC cone = friction_coeff.y * lambda_n;
                         lambda_t_new = len > FloatC(0) ? lambda_t_new * (cone / len)
                                                        : Vec3C::zero();
+                    }
                     imp += (lambda_t_new - lambda_t);
                     lambda_t = lambda_t_new;
                 }
@@ -932,10 +946,10 @@ class RS_ContactCompute {
             Vec3C delta_a = com_a - Vec3C(RB_G(owner_a, com_at_position_correction_start));
             FloatC mass_inv_a = static_a ? FloatC(0) : FloatC(RB_G(owner_a, mass_inverse));
             Mat3C I_inv_a = static_a ? Mat3C::zero()
-                                    : worldInertiaInverse(
-                                          Mat3C(RB_G(owner_a, local_moment_inertia_inverse)),
-                                          RB_G(owner_a, orientation)
-                                      );
+                                     : worldInertiaInverse(
+                                           Mat3C(RB_G(owner_a, local_moment_inertia_inverse)),
+                                           RB_G(owner_a, orientation)
+                                       );
 
             bool static_b =
                 is_floor ? true
@@ -946,10 +960,10 @@ class RS_ContactCompute {
                                 : (com_b - Vec3C(RB_G(owner_b, com_at_position_correction_start)));
             FloatC mass_inv_b = static_b ? FloatC(0) : FloatC(RB_G(owner_b, mass_inverse));
             Mat3C I_inv_b = static_b ? Mat3C::zero()
-                                    : worldInertiaInverse(
-                                          Mat3C(RB_G(owner_b, local_moment_inertia_inverse)),
-                                          RB_G(owner_b, orientation)
-                                      );
+                                     : worldInertiaInverse(
+                                           Mat3C(RB_G(owner_b, local_moment_inertia_inverse)),
+                                           RB_G(owner_b, orientation)
+                                       );
 
             FloatC pen = depth_stored - (delta_a - delta_b).dot(n);
             if (pen <= slop) return;

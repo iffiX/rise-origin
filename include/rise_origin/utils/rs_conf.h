@@ -126,6 +126,10 @@
 #ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM
 #define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM (1u << 20)
 #endif
+/// Hard limit on segment ids per body, set by the 16-bit segment_bid contact filter field.
+#ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_SEGMENT_NUM
+#define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_SEGMENT_NUM (1u << 16)
+#endif
 #ifndef RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_VOXEL_NUM
 #define RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_VOXEL_NUM (1u << 31)
 #endif

@@ -634,9 +634,9 @@ template <RSE_FloatType Type>
 struct RS_Mat3DMemDataType;
 
 template <>
-struct RS_Mat3DMemDataType<RSE_FLOAT_64> {
-    using DataType = double[9];
-    using ElementType = double;
+struct RS_Mat3DMemDataType<RSE_FLOAT_16> {
+    using DataType = unsigned short[9];
+    using ElementType = unsigned short;
 };
 
 template <>
@@ -645,19 +645,14 @@ struct RS_Mat3DMemDataType<RSE_FLOAT_32> {
     using ElementType = float;
 };
 
+template <>
+struct RS_Mat3DMemDataType<RSE_FLOAT_64> {
+    using DataType = double[9];
+    using ElementType = double;
+};
+
 /**
  * @brief Template of 3D matrices stored in memory.
- *
- * Float64 format:
- * | m_00 (64 bits) | m_01 (64 bits) | m_02 (64 bits) |
- * | m_10 (64 bits) | m_11 (64 bits) | m_12 (64 bits) |
- * | m_20 (64 bits) | m_21 (64 bits) | m_22 (64 bits) |
- *
- * Float32 format:
- * | m_00 (32 bits) | m_01 (32 bits) | m_02 (32 bits) |
- * | m_10 (32 bits) | m_11 (32 bits) | m_12 (32 bits) |
- * | m_20 (32 bits) | m_21 (32 bits) | m_22 (32 bits) |
- *
  */
 template <RSE_FloatType Type>
 class RS_Mat3DMem {
@@ -723,32 +718,22 @@ class RS_Mat3DMem {
     //! Helper function to set data from x, y, z
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER void set(const RS_Mat3D<T> &m) {
-        if constexpr (Type == RSE_FLOAT_32 || Type == RSE_FLOAT_64) {
-            data[0] = static_cast<T>(m.data[0]);
-            data[1] = static_cast<T>(m.data[1]);
-            data[2] = static_cast<T>(m.data[2]);
-            data[3] = static_cast<T>(m.data[3]);
-            data[4] = static_cast<T>(m.data[4]);
-            data[5] = static_cast<T>(m.data[5]);
-            data[6] = static_cast<T>(m.data[6]);
-            data[7] = static_cast<T>(m.data[7]);
-            data[8] = static_cast<T>(m.data[8]);
+        if constexpr (Type == RSE_FLOAT_16) {
+            for (int i = 0; i < 9; i++)
+                data[i] = RS_FloatConvert::floatToHalf(static_cast<float>(m.data[i]));
+        } else {
+            for (int i = 0; i < 9; i++) data[i] = static_cast<ElementType>(m.data[i]);
         }
     }
 
     //! Helper function to get data into RS_Mat3D<T>
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER void get(RS_Mat3D<T> &m) const {
-        if constexpr (Type == RSE_FLOAT_32 || Type == RSE_FLOAT_64) {
-            m.data[0] = static_cast<T>(data[0]);
-            m.data[1] = static_cast<T>(data[1]);
-            m.data[2] = static_cast<T>(data[2]);
-            m.data[3] = static_cast<T>(data[3]);
-            m.data[4] = static_cast<T>(data[4]);
-            m.data[5] = static_cast<T>(data[5]);
-            m.data[6] = static_cast<T>(data[6]);
-            m.data[7] = static_cast<T>(data[7]);
-            m.data[8] = static_cast<T>(data[8]);
+        if constexpr (Type == RSE_FLOAT_16) {
+            for (int i = 0; i < 9; i++)
+                m.data[i] = static_cast<T>(RS_FloatConvert::halfToFloat(data[i]));
+        } else {
+            for (int i = 0; i < 9; i++) m.data[i] = static_cast<T>(data[i]);
         }
     }
 };
@@ -762,6 +747,7 @@ using RMat3rf = RS_Mat3D<RFloat>;
 REFL_AUTO(type(rise::RMat3f), field(data))
 REFL_AUTO(type(rise::RMat3df), field(data))
 
+REFL_AUTO(type(rise::RS_Mat3DMem<rise::RSE_FLOAT_16>), field(data))
 REFL_AUTO(type(rise::RS_Mat3DMem<rise::RSE_FLOAT_32>), field(data))
 REFL_AUTO(type(rise::RS_Mat3DMem<rise::RSE_FLOAT_64>), field(data))
 

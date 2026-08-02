@@ -914,6 +914,8 @@ void RS_KernelStructureVoxelManager::_addBody(
     // shared atlas property), then emit a rigid body for rigid/rigid-fixed/atlas segments.
     vector<RIndex> added_rigid_body_sid;
     for (auto &[segment_bid, material_flags] : segment_material_flags) {
+        _max_segment_bid = RS_MAX(_max_segment_bid, segment_bid);
+
         RIndex ref_material_sid = RS_NULL_INDEX;
         for (auto &&[material_sid, is_present] : enumerate(material_flags)) {
             if (!is_present) continue;
@@ -1130,6 +1132,10 @@ void RS_KernelStructureVoxelManager::_addBody(
     //----------------------------------------------------------------
     // Step 4: Process properties of all_voxels
     //----------------------------------------------------------------
+    // Array index in body_rsc.link, and face bit within that mask, of a voxel whose link mask
+    // disagrees with its neighbor. Left null when every mask is symmetric.
+    RIndex asymmetric_link_index = RS_NULL_INDEX;
+    int asymmetric_link_slot = 0;
     if (!is_coherent) {
         _kernel_manager->getThreadPool()
             ->submitBlocks(
@@ -1140,7 +1146,8 @@ void RS_KernelStructureVoxelManager::_addBody(
                         auto &voxel = all_voxels[v];
 
                         // Per face, assign the role:
-                        // RSE_VOXEL_FACE_AIR: the neighbor cell is empty space.
+                        // RSE_VOXEL_FACE_AIR: the neighbor cell is empty space, or nothing keeps
+                        // the two voxels together.
                         // RSE_VOXEL_FACE_INTERIOR: the neighbor shares this voxel's material and
                         // segment.
                         // RSE_VOXEL_FACE_TRANSPARENT_BOUNDARY: the neighbor is a different
@@ -1177,14 +1184,35 @@ void RS_KernelStructureVoxelManager::_addBody(
                                 if (neighbor.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT) {
                                     has_soft_neighbor = true;
                                 }
-                                // Two non-soft segments are separate parts that do not stick
-                                // together, so the face between them is a real air gap. A soft
-                                // neighbor instead bonds across the seam through a link.
-                                bool is_non_soft_air_gap =
-                                    is_cross_segment &&
-                                    voxel.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT &&
-                                    neighbor.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT;
-                                if (is_non_soft_air_gap) {
+                                // The author clears a face bit to keep two voxels apart, and
+                                // both sides must agree because only the own bit is read here
+                                // and in link creation.
+                                bool is_link_authored =
+                                    body_rsc.link.empty() ||
+                                    (body_rsc.link[voxel.array_index] & (1 << l));
+                                if (!body_rsc.link.empty() &&
+                                    is_link_authored !=
+                                        bool(
+                                            body_rsc.link[neighbor.array_index] & (1 << (l ^ 1))
+                                        )) {
+                                    asymmetric_link_index = voxel.array_index;
+                                    asymmetric_link_slot = l;
+                                }
+
+                                // A link is created only when one side is soft, and a non-soft
+                                // segment holds its own voxels together without one. Anything
+                                // else leaves a real air gap between the two.
+                                bool is_linked =
+                                    is_link_authored &&
+                                    (voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT ||
+                                     neighbor.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT);
+                                bool is_bonded =
+                                    is_linked ||
+                                    (!is_cross_segment &&
+                                     voxel.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT &&
+                                     neighbor.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT);
+                                if (!is_bonded) {
+                                    is_surface = true;
                                     role = RSE_VOXEL_FACE_AIR;
                                 } else if (neighbor.material_sid == voxel.material_sid &&
                                            neighbor.segment_bid == voxel.segment_bid) {
@@ -1214,6 +1242,16 @@ void RS_KernelStructureVoxelManager::_addBody(
                 }
             )
             .wait();
+
+        if (asymmetric_link_index != RS_NULL_INDEX)
+            RS_THROW(RS_InvalidCharacterizationException(
+                "Body SID {} in structure \"{}\" has an asymmetric link mask at voxel array index "
+                "{} direction {}, both sides of a face must agree",
+                body_sid,
+                _structure().name,
+                asymmetric_link_index,
+                enumToString(static_cast<RSE_LinkDirection>(asymmetric_link_slot))
+            ));
 
         RS_LOG(
             _kernel_manager->getLogger(),
@@ -2000,6 +2038,13 @@ void RS_KernelStructureVoxelManager::_postcheckStructureLimits() const {
             _body_num,
             RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_NUM
         ));
+    if (_max_segment_bid >= RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_SEGMENT_NUM)
+        RS_THROW(RS_InvalidCharacterizationException(
+            "Structure \"{}\" uses segment id {}, exceeding limit {}",
+            _structure().name,
+            _max_segment_bid,
+            RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_BODY_SEGMENT_NUM
+        ));
     if (_voxel_num > RS_WORLD_RSC_STRUCTURE_VOXEL_MAX_VOXEL_NUM)
         RS_THROW(RS_InvalidCharacterizationException(
             "Structure \"{}\" has {} voxels, exceeding limit {}",
@@ -2181,9 +2226,13 @@ RS_KernelStructureVoxelManager::_getAll() const {
                         (_is_constrained && voxel.rigid_body_sid != RS_NULL_INDEX)
                             ? voxel.rigid_body_sid
                             : RS_VOXEL_CONTACT_FILTER_KEY_NULL_CONSTRAINED_RIGID_BODY_SID;
+                    fk.contact_filter_key.segment_bid = voxel.segment_bid;
                     fk.contact_filter_key.index_x_res = voxel.index_x & 0xF;
                     fk.contact_filter_key.index_y_res = voxel.index_y & 0xF;
                     fk.contact_filter_key.index_z_res = voxel.index_z & 0xF;
+                    for (int j = 0; j < 6; j++)
+                        if (voxel.link_sid[j] != RS_NULL_INDEX)
+                            fk.contact_filter_key.connectivity |= (RBigIndex(1) << j);
                     voxel_out.contact_filter_key = fk.contact_filter_key_packed;
 
                     voxel_out.voxel_material_sid = voxel.voxel_material_sid;
@@ -2215,7 +2264,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                         voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_RIGID_FIXED ||
                         voxel.material_type == RSE_STRUCTURE_VOXEL_MATERIAL_FIXED;
                     RS_VoxelStateUnion state{0};
-                    state.voxel_state.previous_friction_state = RSE_VOXEL_NO_CONTACT_FRICTION;
+                    state.voxel_state.previous_floor_friction_state = RSE_VOXEL_NO_CONTACT_FRICTION;
                     state.voxel_state.is_enabled = true;
                     state.voxel_state.is_surface = voxel.is_surface;
                     state.voxel_state.is_static = is_fixed;

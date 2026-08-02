@@ -1006,6 +1006,9 @@ class RS_KernelStructureVoxelManager {
     RSize _motor_num = 0;
     RSize _constraint_joint_color_num = 0;
 
+    /// Largest authored segment id over all bodies, for contact filter key field check
+    RIndex _max_segment_bid = 0;
+
     /// Metrics
     /// Maps body_sid -> body_size
     std::unordered_map<RIndex, RSize> _body_size;

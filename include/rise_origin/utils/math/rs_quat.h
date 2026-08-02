@@ -605,15 +605,21 @@ template <RSE_FloatType Type>
 struct RS_Quat3DMemDataType;
 
 template <>
-struct RS_Quat3DMemDataType<RSE_FLOAT_64> {
-    using DataType = double[4];
-    using ElementType = double;
+struct RS_Quat3DMemDataType<RSE_FLOAT_16> {
+    using DataType = unsigned short[4];
+    using ElementType = unsigned short;
 };
 
 template <>
 struct RS_Quat3DMemDataType<RSE_FLOAT_32> {
     using DataType = float[4];
     using ElementType = float;
+};
+
+template <>
+struct RS_Quat3DMemDataType<RSE_FLOAT_64> {
+    using DataType = double[4];
+    using ElementType = double;
 };
 
 /**
@@ -643,10 +649,7 @@ class RS_Quat3DMem {
     //! Returns a unit quaternion
     HOST_DEVICE_INLINE_QUALIFIER static RS_Quat3DMem unit() {
         RS_Quat3DMem quat;
-        quat.data[0] = 0;
-        quat.data[1] = 0;
-        quat.data[2] = 0;
-        quat.data[3] = 1;
+        quat.set(0.0f, 0.0f, 0.0f, 1.0f);
         return quat;
     }
 
@@ -691,26 +694,44 @@ class RS_Quat3DMem {
     HOST_DEVICE_INLINE_QUALIFIER void set(const T &x, const T &y, const T &z, const T &w) {
         T length = RS_FloatIntrinsics<T>::rs_sqrt(w * w + x * x + y * y + z * z);
 
-        if (length == 0) {
-            data[0] = static_cast<T>(0);
-            data[1] = static_cast<T>(0);
-            data[2] = static_cast<T>(0);
-            data[3] = static_cast<T>(1);
+        T nx = static_cast<T>(0);
+        T ny = static_cast<T>(0);
+        T nz = static_cast<T>(0);
+        T nw = static_cast<T>(1);
+        if (length != 0) {
+            nx = x / length;
+            ny = y / length;
+            nz = z / length;
+            nw = w / length;
+        }
+
+        if constexpr (Type == RSE_FLOAT_16) {
+            data[0] = RS_FloatConvert::floatToHalf(static_cast<float>(nx));
+            data[1] = RS_FloatConvert::floatToHalf(static_cast<float>(ny));
+            data[2] = RS_FloatConvert::floatToHalf(static_cast<float>(nz));
+            data[3] = RS_FloatConvert::floatToHalf(static_cast<float>(nw));
         } else {
-            data[0] = static_cast<T>(x / length);
-            data[1] = static_cast<T>(y / length);
-            data[2] = static_cast<T>(z / length);
-            data[3] = static_cast<T>(w / length);
+            data[0] = static_cast<ElementType>(nx);
+            data[1] = static_cast<ElementType>(ny);
+            data[2] = static_cast<ElementType>(nz);
+            data[3] = static_cast<ElementType>(nw);
         }
     }
 
     //! Helper function to get data into RS_Quat3D<T>
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER void get(T &x, T &y, T &z, T &w) const {
-        x = static_cast<T>(data[0]);
-        y = static_cast<T>(data[1]);
-        z = static_cast<T>(data[2]);
-        w = static_cast<T>(data[3]);
+        if constexpr (Type == RSE_FLOAT_16) {
+            x = static_cast<T>(RS_FloatConvert::halfToFloat(data[0]));
+            y = static_cast<T>(RS_FloatConvert::halfToFloat(data[1]));
+            z = static_cast<T>(RS_FloatConvert::halfToFloat(data[2]));
+            w = static_cast<T>(RS_FloatConvert::halfToFloat(data[3]));
+        } else {
+            x = static_cast<T>(data[0]);
+            y = static_cast<T>(data[1]);
+            z = static_cast<T>(data[2]);
+            w = static_cast<T>(data[3]);
+        }
     }
 };
 
@@ -723,6 +744,7 @@ using RQuat3rf = RS_Quat3D<RFloat>;
 REFL_AUTO(type(rise::RQuat3f), field(x), field(y), field(z), field(w))
 REFL_AUTO(type(rise::RQuat3df), field(x), field(y), field(z), field(w))
 
+REFL_AUTO(type(rise::RS_Quat3DMem<rise::RSE_FLOAT_16>), field(data))
 REFL_AUTO(type(rise::RS_Quat3DMem<rise::RSE_FLOAT_32>), field(data))
 REFL_AUTO(type(rise::RS_Quat3DMem<rise::RSE_FLOAT_64>), field(data))
 

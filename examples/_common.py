@@ -149,7 +149,11 @@ def make_world(
         A populated :class:`rsc.World`.
     """
     resources = list(resources)
-    essences = list(essences)
+    # Caller-supplied properties may reference MaterialSpec handles generated
+    # below (for example, per-voxel optical atlas entries). Keep their relative
+    # order, but append them only after all generated material handles exist.
+    trailing_essences = list(essences)
+    essences = []
     entities = [sky if sky is not None else _default_sky()]
 
     specs = list(materials)
@@ -203,6 +207,7 @@ def make_world(
         )
 
     essences.extend(_pair_properties(specs))
+    essences.extend(trailing_essences)
     entities.extend(structures)
     simulation = rsc.simulation.Simulation(
         environment=rsc.simulation.Environment(gravity_acceleration=gravity),

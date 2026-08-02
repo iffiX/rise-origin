@@ -919,7 +919,7 @@ void RS_SimulationExecutor::_runRigidbodyContactAndConstraintUpdate() {
                     ctx.structure_rigid_contact_flags.data
                 );
 
-                // Top-three contacts farthest from the anchor per group.
+                // Contacts farthest from the anchor per group.
                 p_ptr->template run<
                     RSCF_LaunchDirect<typename CC::RSCF_GetRigidManifoldDistance, KernelType>>(
                     {total_valid, RS_AUTO_BLOCK_SIZE, false},
@@ -1505,7 +1505,7 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
 void RS_SimulationExecutor::_updateIntersectRegionRecord() {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+            selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
                 using IRC = RS_IntersectRegionCompute<ComputeAccuracy>;
@@ -2025,7 +2025,7 @@ void RS_SimulationExecutor::_buildVoxelBVH(
 ) {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+            selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
@@ -2052,7 +2052,7 @@ void RS_SimulationExecutor::_buildVoxelBVH(
 void RS_SimulationExecutor::_refitVoxelBVH(logic::RS_VoxelBVH &bvh) {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+            selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
@@ -2075,7 +2075,7 @@ template <typename Body>
 void RS_SimulationExecutor::_runWithCriticalDataAccessGuard(Body &&body) {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+            selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 // Take critical data access so no commit can mutate the context while we launch.
                 RS_KernelManagerCriticalDataAccessGuard guard(_kernel_manager);
                 bool was_modified = _kernel_manager->isKernelModified();
@@ -2090,7 +2090,7 @@ template <typename Body>
 void RS_SimulationExecutor::_runWithCommandExecutionGuard(Body &&body) {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+            selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 // Pause command execution so no command runs while we touch manager state.
                 RS_KernelManagerCommandExecutionGuard guard(_kernel_manager);
                 bool was_modified = _kernel_manager->isKernelModified();
@@ -2213,7 +2213,7 @@ bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
     bool recomputed = false;
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+            selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
                 auto &ctx = k_ptr->ctx;
@@ -2296,7 +2296,7 @@ bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
 void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
-            selectAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
+            selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
                 auto &ctx = k_ptr->ctx;

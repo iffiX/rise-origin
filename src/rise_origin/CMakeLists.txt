@@ -68,7 +68,7 @@ target_compile_options(rise_origin_core PUBLIC ${RISE_DEVICE_OPTIONS}
 if (RISE_ORIGIN_BUILD_CORE_WITH_VR)
     target_compile_definitions(rise_origin_core PUBLIC RISE_ORIGIN_BUILD_CORE_WITH_VR)
     target_compile_definitions(rise_origin_core PRIVATE
-        RS_VR_HUD_FONT_PATH="${CMAKE_SOURCE_DIR}/lib/imgui/font/rajdhani/Rajdhani-Medium.ttf")
+            RS_VR_HUD_FONT_PATH="${CMAKE_SOURCE_DIR}/lib/font/rajdhani/Rajdhani-Medium.ttf")
     target_link_libraries(rise_origin_core PUBLIC openxr_loader Vulkan::Vulkan imgui)
 endif ()
 

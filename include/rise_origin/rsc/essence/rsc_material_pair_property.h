@@ -47,7 +47,8 @@ class RSC_MaterialPairPropertyBase : public RSC_EssenceBase {
  */
 class RSC_MaterialPairPropertyCoulombFriction : public RSC_MaterialPairPropertyBase {
    public:
-    /// Static friction coefficient.
+    /// Static friction coefficient. Only works when it is voxel against floor,
+    /// or when it is rigid against rigid material.
     RFloat u_static = 0;
 
     /// Dynamic friction coefficient.
@@ -70,6 +71,7 @@ class RSC_MaterialPairPropertyCoulombFriction : public RSC_MaterialPairPropertyB
 class RSC_MaterialPairPropertyRestitution : public RSC_MaterialPairPropertyBase {
    public:
     /// Coefficient of restitution (0 = perfectly inelastic, 1 = perfectly elastic).
+    /// Only works when it is rigid against rigid material.
     RFloat restitution = 0;
 
     bool operator==(const RSC_MaterialPairPropertyRestitution& other) const;

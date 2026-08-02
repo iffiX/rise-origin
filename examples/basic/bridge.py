@@ -36,16 +36,19 @@ VOXEL = 0.02
 PIER_X = 5  # length of each fixed pier in voxels
 SPAN_X = 72  # length of the soft deck in voxels (divisible by 4)
 WIDTH = 12  # bridge width in voxels
-THICK = 4  # deck thickness in voxels
+THICK = 3  # deck thickness in voxels
 
 DECK_Z = 0.70  # height the deck floats at (m)
 
 BLOCK = 16  # rigid block edge in voxels
-DROP = 0.25  # gap between the block and the deck at release (m)
+DROP = 1  # gap between the block and the deck at release (m)
+
+# Contact damping ratio, above the 0.2 default so the block settles instead of bouncing.
+CONTACT_DAMPING = 0.5
 
 # A finite failure stress lets the deck hold itself but tear under the block.
 DECK_MODULUS = 2.0e5
-DECK_FAIL_STRESS = 1.0e5
+DECK_FAIL_STRESS = 2.0e5
 
 QUAD_COLORS = [
     _common.PALETTE["sky_blue"],
@@ -78,7 +81,7 @@ def build():
             )
             for i, color in enumerate(QUAD_COLORS)
         ),
-        _common.MaterialSpec("block", color=BLOCK_COLOR, kind="rigid"),
+        _common.MaterialSpec("block", color=BLOCK_COLOR, kind="rigid", density=1000),
     ]
 
     total_x = PIER_X + SPAN_X + PIER_X
@@ -99,8 +102,7 @@ def build():
     seg = mat.copy()
 
     deck_body = rsc.entity.StructureVoxelBody.from_grid(
-        mat != RS_NULL_INDEX,
-        material_grid=mat,
+        mat,
         segment_grid=seg,
         voxel_size=VOXEL,
         relative_origin_position=(
@@ -136,7 +138,12 @@ def build():
         ],
     )
 
-    return _common.make_world("bridge", materials=materials, structures=[bridge, block])
+    return _common.make_world(
+        "bridge",
+        materials=materials,
+        structures=[bridge, block],
+        soft_body=rsc.simulation.SoftBody(contact_damping_z=CONTACT_DAMPING),
+    )
 
 
 def main():

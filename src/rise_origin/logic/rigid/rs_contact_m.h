@@ -6,9 +6,9 @@
 
 #include <cstdint>
 
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_float.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
@@ -38,6 +38,7 @@ template <RSE_FloatType FloatMemAccuracy>
 class RS_RigidContactMem {
    public:
     using FloatM = typename RS_FloatDataType<FloatMemAccuracy>::DataType;
+    using Vec2M = RS_Vec2DMem<FloatMemAccuracy>;
     using Vec3M = RS_Vec3DMem<FloatMemAccuracy>;
 
     /// Source voxel for warm start seed and write back
@@ -70,8 +71,8 @@ class RS_RigidContactMem {
     /// Count normalizer, the larger per body contact count
     FloatM normalizer = 1;
 
-    /// Pair friction coefficient
-    FloatM mu = 0;
+    /// Pair static and dynamic friction coefficients, static in x and dynamic in y
+    Vec2M friction_coeff = Vec2M::zero();
 
     /// Accumulated normal lambda for this step
     FloatM accumulated_lambda_n = 0;
@@ -94,13 +95,21 @@ struct RS_RigidManifoldDeepest {
     }
 };
 
-/// @brief Reduce element holding the three contacts farthest from the group's deepest, descending.
+/// @brief Room for contacts past the anchor, the ceiling on contact_manifold_size.
+constexpr int RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE = 7;
+
+/// @brief Reduce element holding the contacts farthest from the group's deepest, descending.
 struct RS_RigidManifoldFarthest {
-    float dist[3];
-    RIndex index[3];
+    float dist[RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE];
+    RIndex index[RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE];
 
     HOST_DEVICE_INLINE_QUALIFIER static RS_RigidManifoldFarthest empty() {
-        return {{-1.f, -1.f, -1.f}, {RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX}};
+        RS_RigidManifoldFarthest e;
+        for (int s = 0; s < RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE; ++s) {
+            e.dist[s] = -1.f;
+            e.index[s] = RS_NULL_INDEX;
+        }
+        return e;
     }
 };
 
@@ -112,15 +121,15 @@ struct RS_ReduceRigidManifoldDeepestOp {
     }
 };
 
-/// @brief Reduce operator: merge two descending top-three lists into the top three by distance.
+/// @brief Reduce operator: merge two descending lists into the farthest by distance.
 struct RS_ReduceRigidManifoldFarthestOp {
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER T operator()(const T &a, const T &b) const {
         T r = T::empty();
         int ia = 0, ib = 0;
-        for (int s = 0; s < 3; ++s) {
-            float da = ia < 3 ? a.dist[ia] : -1.f;
-            float db = ib < 3 ? b.dist[ib] : -1.f;
+        for (int s = 0; s < RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE; ++s) {
+            float da = ia < RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE ? a.dist[ia] : -1.f;
+            float db = ib < RS_RIGID_MANIFOLD_FARTHEST_MAX_SIZE ? b.dist[ib] : -1.f;
             if (da < 0.f && db < 0.f) break;
             if (da >= db) {
                 r.dist[s] = da;
@@ -153,7 +162,7 @@ struct RS_ReduceRigidManifoldFarthestOp {
         field(depth),                           \
         field(k_n),                             \
         field(normalizer),                      \
-        field(mu),                              \
+        field(friction_coeff),                  \
         field(accumulated_lambda_n),            \
         protected_field(accumulated_lambda_t)   \
     )
