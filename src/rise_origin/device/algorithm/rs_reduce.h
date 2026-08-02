@@ -503,6 +503,7 @@ class RS_ReduceByGroup {
      *****************************************************************/
     RSize group_num = 0;
     RSize level_num = 0;
+    RSize group_block_size = 0;
     RS_MemoryPtr host_buffer{};
     RS_MemoryPtr host_sizes_buffer{};
     RS_MemoryPtr sizes_buffer{};
@@ -860,9 +861,10 @@ class RS_ReduceByGroup {
     }
 
     void _updateReduceSizes(RSize block_size, const std::vector<RSize> &group_sizes) {
-        // Check whether sizes are the same as last time
+        // Check whether sizes are the same as last time. The stored offsets are aligned to the
+        // block size, so a different block size must recompute them even on the same groups.
         bool is_same = false;
-        if (group_sizes.size() == group_num) {
+        if (group_sizes.size() == group_num && block_size == group_block_size) {
             is_same = true;
             for (RSize i = 0; i < group_sizes.size(); i++) {
                 if (group_sizes[i] != host_sizes_buffer.get<RSize>(i)) {
@@ -877,6 +879,7 @@ class RS_ReduceByGroup {
         RSize max_elems_per_block = block_size * 2;
         level_num = 1;
         group_num = group_sizes.size();
+        group_block_size = block_size;
         bool is_all_reduced = true;
 
         // Store order: current group sizes, input group offsets, output group offsets
@@ -928,6 +931,7 @@ class RS_ReduceByGroup {
         if (!is_all_reduced) {
             level_num = 0;
             group_num = 0;
+            group_block_size = 0;
             RS_THROW(RS_HostExecutionException("Not all elements are reduced"));
         } else
             sizes_buffer.copyFrom(host_sizes_buffer, host_sizes_buffer.size(), true);
