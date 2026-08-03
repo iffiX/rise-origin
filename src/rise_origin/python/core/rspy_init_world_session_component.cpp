@@ -175,6 +175,8 @@ void initRSPYWorldSessionComponent(py::module &m) {
         std::shared_ptr<RS_WorldSessionComponentVR>>(m, "RS_WorldSessionComponentVR")
         .def(
             py::init([](std::string name,
+                        RVec3rf position,
+                        RVec3rf focus,
                         RSize samples_per_pixel,
                         RSize max_depth,
                         RFloat near_depth,
@@ -187,6 +189,8 @@ void initRSPYWorldSessionComponent(py::module &m) {
                         RFloat hud_follow_tau) {
                 return std::make_shared<RS_WorldSessionComponentVR>(
                     std::move(name),
+                    position,
+                    focus,
                     samples_per_pixel,
                     max_depth,
                     near_depth,
@@ -200,6 +204,8 @@ void initRSPYWorldSessionComponent(py::module &m) {
                 );
             }),
             py::arg("name"),
+            py::arg("position") = RVec3rf(0.0, 0.0, 0.0),
+            py::arg("focus") = RVec3rf(1.0, 0.0, 0.0),
             py::arg("samples_per_pixel") = 1,
             py::arg("max_depth") = 3,
             py::arg("near_depth") = 0.05,
@@ -212,6 +218,7 @@ void initRSPYWorldSessionComponent(py::module &m) {
             py::arg("hud_follow_tau") = 0.25,
             R"doc(
             Stereo VR component: injects one stereo camera and presents it to an OpenXR headset.
+            The wearer starts standing at position with their room's forward turned toward focus.
         )doc"
         )
         .def(

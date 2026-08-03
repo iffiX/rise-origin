@@ -161,11 +161,16 @@ class RS_VRImpl;
  * per-eye head pose and frustum back through the camera signal. When the headset drops it removes
  * the camera and waits for the next connection. The render rate is the world's control rate, and
  * the runtime reprojects from the submitted depth.
+ * @details The wearer starts standing at the given position with their room's forward turned
+ * toward the given focus, and the sticks walk, fly, and turn from there. The position is the
+ * origin of their play space, which under an OpenXR stage space is the floor under their feet.
  */
 class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
    public:
     RS_WorldSessionComponentVR(
         std::string name,
+        RVec3rf position = RVec3rf(0.0, 0.0, 0.0),
+        RVec3rf focus = RVec3rf(1.0, 0.0, 0.0),
         RSize samples_per_pixel = 1,
         RSize max_depth = 3,
         RFloat near_depth = 0.05,
@@ -214,6 +219,8 @@ class RS_WorldSessionComponentVR : public RS_WorldSessionComponent {
     std::string _vr_controller_name;
     std::string _ray_controller_name[2];
     std::string _ray_sensor_name[2];
+    RVec3rf _position;
+    RVec3rf _focus;
     RSize _samples_per_pixel;
     RSize _max_depth;
     RFloat _near_depth;
