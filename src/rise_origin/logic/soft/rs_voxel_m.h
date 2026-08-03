@@ -83,9 +83,37 @@ union RS_VoxelStateUnion {
     } voxel_state;
 };
 
-union RS_VoxelBVHLeafMetadataUnion {
+union RS_VoxelNeighborStateUnion {
+    RState neighbor_state_packed;
+    struct RS_VoxelNeighborState {
+        /// Whether each neighbor is still linked.
+        RState is_neighbor_linked : 6;
+        /// Whether each neighbor is rigid or static.
+        RState is_neighbor_rigid_or_static : 6;
+    } neighbor_state;
+};
+
+union RS_VoxelContactBVHLeafMetadataUnion {
     RState meta_packed;
-    struct RS_VoxelBVHLeafMetadata {
+    struct RS_VoxelContactBVHLeafMetadata {
+        /// Whether the voxel participates in the world.
+        RState is_enabled : 1;
+        /// Whether the voxel lies on its body surface.
+        RState is_surface : 1;
+        /// Whether the voxel is currently immobile, from fixed material or freezing.
+        RState is_static : 1;
+        /// Whether the voxel belongs to a rigid body.
+        RState is_rigid : 1;
+        /// Whether the voxel is included in contact traversal.
+        RState is_contact_active : 1;
+        /// Whether the owning structure has at least one constraint.
+        RState is_structure_constrained : 1;
+    } meta;
+};
+
+union RS_VoxelRayBVHLeafMetadataUnion {
+    RState meta_packed;
+    struct RS_VoxelRayBVHLeafMetadata {
         /// Whether the voxel participates in the world.
         RState is_enabled : 1;
         /// Whether the voxel lies on its body surface.
@@ -98,12 +126,14 @@ union RS_VoxelBVHLeafMetadataUnion {
         RState is_emissive : 1;
         /// Whether the voxel is rendered as transparent.
         RState is_transparent : 1;
-        /// Whether the voxel is included in render traversal.
-        RState is_render_active : 1;
-        /// Whether the voxel is included in contact traversal.
-        RState is_contact_active : 1;
-        /// Whether the owning structure has at least one constraint.
-        RState is_structure_constrained : 1;
+        /// Whether the voxel is included in ray traversal.
+        RState is_ray_active : 1;
+        /// Whether the voxel takes a gradient normal instead of its face normal.
+        RState is_smooth_surface : 1;
+        /// Whether the voxel is non-deformable, so its shape is a box.
+        RState is_box : 1;
+        /// Packed per-face role bits, gating which faces the leaf test crosses.
+        RState face_role : 12;
     } meta;
 };
 
@@ -140,9 +170,9 @@ static_assert(
     "contact filter key fields must fit in 64 bits"
 );
 
-/// Voxel-BVH leaf: caches the contact broad-phase payload inline.
-struct RS_VoxelBVHObjectIdentifier {
-    /// Packed RS_VoxelBVHLeafMetadata (is_enabled / is_surface / ...).
+/// Voxel contact-BVH leaf: caches the overlap broad-phase payload inline.
+struct RS_VoxelContactBVHObjectIdentifier {
+    /// Packed RS_VoxelContactBVHLeafMetadata.
     RState object_metadata = 0;
     /// Handle of the voxel this leaf wraps.
     RHandle object_handle = RS_NULL_HANDLE;
@@ -155,21 +185,73 @@ struct RS_VoxelBVHObjectIdentifier {
     /// Owning structure gid; gates the same-body / connected-body filters.
     RIndex structure_gid = RS_NULL_INDEX;
 
-    bool operator==(const RS_VoxelBVHObjectIdentifier& other) const {
+    bool operator==(const RS_VoxelContactBVHObjectIdentifier& other) const {
         return object_handle == other.object_handle;
     }
 };
 
-struct RS_VoxelBVHObjectIdentifierHostHasher {
-    std::size_t operator()(const RS_VoxelBVHObjectIdentifier& identifier) const {
+struct RS_VoxelContactBVHObjectIdentifierHostHasher {
+    std::size_t operator()(const RS_VoxelContactBVHObjectIdentifier& identifier) const {
         return std::hash<RHandle>()(identifier.object_handle);
     }
 };
 
-using RS_VoxelBVH = device::RS_BVHBase<
+/** @brief Box shape of a ray leaf, used for non-deformable voxels. */
+struct RS_VoxelRayBVHBoxShape {
+    /// Rotation from the voxel frame to the world frame.
+    RQuat3f orientation;
+    /// Edge length of the box.
+    float size;
+};
+
+/** @brief Hexahedron shape of a ray leaf, used for deformable voxels. */
+struct RS_VoxelRayBVHHexahedronShape {
+    /// Corners as offsets from the leaf center, in corner order where bit 0 is the positive x
+    /// side, bit 1 positive y and bit 2 positive z.
+    RS_Vec3DMem<RSE_FLOAT_16> corner_offset[8];
+};
+
+/** @brief Shape of a ray leaf, a box when is_box is set and a hexahedron otherwise. */
+union RS_VoxelRayBVHShape {
+    RS_VoxelRayBVHBoxShape box;
+    RS_VoxelRayBVHHexahedronShape hexahedron;
+};
+
+/** @brief Voxel ray-BVH leaf: carries the shape and the ids a traced ray needs. */
+struct RS_VoxelRayBVHObjectIdentifier {
+    /// Packed RS_VoxelRayBVHLeafMetadata.
+    RState object_metadata = 0;
+    /// Handle of the voxel this leaf wraps.
+    RHandle object_handle = RS_NULL_HANDLE;
+    /// Vision material of this voxel, used to shade the closest hit.
+    RHandle vision_material = RS_NULL_HANDLE;
+    /// Owning structure gid.
+    RIndex structure_gid = RS_NULL_INDEX;
+    /// World-space center of the shape.
+    RVec3f position = RVec3f::zero();
+    /// Box or hexahedron, chosen by the is_box metadata bit.
+    RS_VoxelRayBVHShape shape;
+
+    bool operator==(const RS_VoxelRayBVHObjectIdentifier& other) const {
+        return object_handle == other.object_handle;
+    }
+};
+
+struct RS_VoxelRayBVHObjectIdentifierHostHasher {
+    std::size_t operator()(const RS_VoxelRayBVHObjectIdentifier& identifier) const {
+        return std::hash<RHandle>()(identifier.object_handle);
+    }
+};
+
+using RS_VoxelContactBVH = device::RS_BVHBase<
     RBigIndex,
-    logic::RS_VoxelBVHObjectIdentifier,
-    logic::RS_VoxelBVHObjectIdentifierHostHasher>;
+    logic::RS_VoxelContactBVHObjectIdentifier,
+    logic::RS_VoxelContactBVHObjectIdentifierHostHasher>;
+
+using RS_VoxelRayBVH = device::RS_BVHBase<
+    RBigIndex,
+    logic::RS_VoxelRayBVHObjectIdentifier,
+    logic::RS_VoxelRayBVHObjectIdentifierHostHasher>;
 
 template <RSE_FloatType FloatMemAccuracy>
 class RS_VoxelMem {
@@ -214,10 +296,12 @@ class RS_VoxelMem {
     RHandle structure_signal = RS_NULL_HANDLE;
 
     /// Link ids in the 6 cardinal directions according to RSE_LinkDirection enumeration.
+    /// Stale once the link breaks, read only where is_neighbor_linked holds.
     RIndex link_sid[6] =
         {RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX};
 
     /// Neighbor voxel ids in the 6 cardinal directions according to RSE_LinkDirection enumeration.
+    /// Plain adjacency, read only where is_neighbor_linked holds.
     RIndex neighbor_voxel_sid[6] =
         {RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX, RS_NULL_INDEX};
 
@@ -226,6 +310,9 @@ class RS_VoxelMem {
      */
     /// Voxel state
     RState state = 0;
+
+    /// Neighbor state
+    RState neighbor_state = 0;
 
     /// Rigid body where this voxel belongs to
     RHandle rigid_body = RS_NULL_HANDLE;
@@ -236,7 +323,8 @@ class RS_VoxelMem {
     /// Material of this voxel for vision (Note, it is preset, an exception for the rule)
     RHandle vision_material = RS_NULL_HANDLE;
 
-    /// Links in the 6 cardinal directions according to RSE_LinkDirection enumeration
+    /// Links in the 6 cardinal directions according to RSE_LinkDirection enumeration.
+    /// Stale once the link breaks, read only where is_neighbor_linked holds.
     RHandle links[6] = {
         RS_NULL_HANDLE,
         RS_NULL_HANDLE,
@@ -246,7 +334,8 @@ class RS_VoxelMem {
         RS_NULL_HANDLE
     };
 
-    /// Neighbor voxels in the 6 cardinal directions according to RSE_LinkDirection enumeration
+    /// Neighbor voxels in the 6 cardinal directions according to RSE_LinkDirection enumeration.
+    /// Plain adjacency, read only where is_neighbor_linked holds.
     RHandle neighbor_voxels[6] = {
         RS_NULL_HANDLE,
         RS_NULL_HANDLE,
@@ -366,6 +455,7 @@ class RS_VoxelMem {
         field(link_sid),                  \
         field(neighbor_voxel_sid),        \
         field(state),                     \
+        field(neighbor_state),            \
         field(rigid_body),                \
         field(voxel_material),            \
         field(vision_material),           \

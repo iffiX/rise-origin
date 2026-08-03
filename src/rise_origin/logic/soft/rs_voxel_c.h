@@ -7,6 +7,7 @@
 #include "rise_origin/core/rs_kernel.h"
 #include "rise_origin/device/rs_static_construct.h"
 #include "rise_origin/logic/soft/rs_link_c.h"
+#include "rise_origin/utils/rs_conf.h"
 
 namespace rise {
 
@@ -16,6 +17,12 @@ namespace logic {
 HOST_DEVICE_INLINE_QUALIFIER RSE_VoxelFaceRole getFaceRole(RState state, int face) {
     RS_VoxelStateUnion u{state};
     return static_cast<RSE_VoxelFaceRole>((u.voxel_state.face_role >> (2 * face)) & RState(0x3));
+}
+
+/** @brief Read the role of face `face` (0..5) from packed ray-BVH leaf metadata. */
+HOST_DEVICE_INLINE_QUALIFIER RSE_VoxelFaceRole getRayLeafFaceRole(RState metadata, int face) {
+    RS_VoxelRayBVHLeafMetadataUnion u{metadata};
+    return static_cast<RSE_VoxelFaceRole>((u.meta.face_role >> (2 * face)) & RState(0x3));
 }
 
 /** @brief Write the role of face `face` (0..5) into a packed voxel state. */
@@ -28,8 +35,16 @@ HOST_DEVICE_INLINE_QUALIFIER void setFaceRole(RState &state, int face, RSE_Voxel
     state = u.voxel_state_packed;
 }
 
+/** @brief Whether any face is exposed to air; the voxel can contact another body. */
+HOST_DEVICE_INLINE_QUALIFIER bool isContactActive(RState state) {
+    for (int f = 0; f < 6; f++) {
+        if (getFaceRole(state, f) == RSE_VOXEL_FACE_AIR) return true;
+    }
+    return false;
+}
+
 /** @brief Whether any face is air or a transparent boundary. */
-HOST_DEVICE_INLINE_QUALIFIER bool isRenderActive(RState state) {
+HOST_DEVICE_INLINE_QUALIFIER bool isRayActive(RState state) {
     for (int f = 0; f < 6; f++) {
         RSE_VoxelFaceRole role = getFaceRole(state, f);
         if (role == RSE_VOXEL_FACE_AIR || role == RSE_VOXEL_FACE_TRANSPARENT_BOUNDARY) return true;
@@ -37,12 +52,40 @@ HOST_DEVICE_INLINE_QUALIFIER bool isRenderActive(RState state) {
     return false;
 }
 
-/** @brief Whether any face is exposed to air; the voxel can contact another body. */
-HOST_DEVICE_INLINE_QUALIFIER bool isContactActive(RState state) {
-    for (int f = 0; f < 6; f++) {
-        if (getFaceRole(state, f) == RSE_VOXEL_FACE_AIR) return true;
+/**
+ * @brief Corner indices of one voxel face, wound so the quad normal points out of the voxel.
+ *
+ * @details A corner index carries one bit per axis, set on the positive side. The face fixes its
+ * own axis bit and the other two run over the four combinations. Swapping the two running axes on
+ * the negative face flips the winding, which turns that quad's normal outward again.
+ *
+ * @param axis         0 for x, 1 for y and 2 for z.
+ * @param is_positive  whether this is the face on the positive side of that axis.
+ * @param corner_0_out first corner index in winding order.
+ * @param corner_1_out second corner index.
+ * @param corner_2_out third corner index, opposite the first.
+ * @param corner_3_out fourth corner index.
+ */
+HOST_DEVICE_INLINE_QUALIFIER void getVoxelFaceCornerIndices(
+    int axis,
+    bool is_positive,
+    int &corner_0_out,
+    int &corner_1_out,
+    int &corner_2_out,
+    int &corner_3_out
+) {
+    int u_axis = (axis + 1) % 3;
+    int v_axis = (axis + 2) % 3;
+    if (!is_positive) {
+        int swap = u_axis;
+        u_axis = v_axis;
+        v_axis = swap;
     }
-    return false;
+    int base = is_positive ? (1 << axis) : 0;
+    corner_0_out = base;
+    corner_1_out = base | (1 << u_axis);
+    corner_2_out = base | (1 << u_axis) | (1 << v_axis);
+    corner_3_out = base | (1 << v_axis);
 }
 
 template <RSE_FloatType FloatComputeAccuracy>
@@ -199,32 +242,51 @@ class RSCF_GetVoxelMobilityFlags : public device::RS_ComputeFunction<RSCF_GetVox
 };
 
 /**
- * @brief Classify a mobile voxel into the dynamic BVH subset.
- * @details Launched over the dynamic subset, so the voxel is already known mobile; only the
- * exposed gate remains, since only an air or transparent face can be hit. Run on every dynamic
- * BVH rebuild so a freshly exposed voxel, such as a soft bond tearing open, joins the BVH.
+ * @brief Classify a voxel into the contact BVH subset.
+ * @details Launched over a mobility subset, so the voxel is already known static or dynamic and
+ * only the exposed gate remains, since only an air face can touch another body. Run on every
+ * contact BVH rebuild so a freshly exposed voxel, such as a soft bond tearing open, joins it.
  *
- * @param k                 simulation kernel.
- * @param voxel             handle of the voxel to classify.
- * @param flag_index        index of this voxel within the flag array.
- * @param bvh_dynamic_flags per-voxel output, 1 when exposed.
+ * @param k            simulation kernel.
+ * @param voxel        handle of the voxel to classify.
+ * @param flag_index   index of this voxel within the flag array.
+ * @param active_flags per-voxel output, 1 when the voxel can carry a contact.
  */
-class RSCF_GetVoxelBVHDynamicFlags
-    : public device::RS_ComputeFunction<RSCF_GetVoxelBVHDynamicFlags> {
+class RSCF_GetVoxelContactActiveFlags
+    : public device::RS_ComputeFunction<RSCF_GetVoxelContactActiveFlags> {
    public:
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(
-        const Kernel *k,
-        RHandle voxel,
-        RIndex flag_index,
-        device::RS_Vector<RIndex> bvh_dynamic_flags
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    run(const Kernel *k, RHandle voxel, RIndex flag_index, device::RS_Vector<RIndex> active_flags) {
         if (k == nullptr || voxel == RS_NULL_HANDLE) return;
         auto &ctx = k->ctx;
         RS_VoxelStateUnion s_union{V_G(state)};
-        bool is_exposed = isContactActive(s_union.voxel_state_packed) ||
-                          isRenderActive(s_union.voxel_state_packed);
-        bvh_dynamic_flags[flag_index] = (s_union.voxel_state.is_enabled && is_exposed) ? 1 : 0;
+        bool is_exposed = isContactActive(s_union.voxel_state_packed);
+        active_flags[flag_index] = (s_union.voxel_state.is_enabled && is_exposed) ? 1 : 0;
+    }
+};
+
+/**
+ * @brief Classify a voxel into the ray BVH subset.
+ * @details Launched over a mobility subset, so the voxel is already known static or dynamic and
+ * only the exposed gate remains, since only an air or transparent face can be hit. Run on every
+ * ray BVH rebuild so a freshly exposed voxel, such as a soft bond tearing open, joins it.
+ *
+ * @param k            simulation kernel.
+ * @param voxel        handle of the voxel to classify.
+ * @param flag_index   index of this voxel within the flag array.
+ * @param active_flags per-voxel output, 1 when the voxel can be hit.
+ */
+class RSCF_GetVoxelRayActiveFlags : public device::RS_ComputeFunction<RSCF_GetVoxelRayActiveFlags> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    run(const Kernel *k, RHandle voxel, RIndex flag_index, device::RS_Vector<RIndex> active_flags) {
+        if (k == nullptr || voxel == RS_NULL_HANDLE) return;
+        auto &ctx = k->ctx;
+        RS_VoxelStateUnion s_union{V_G(state)};
+        bool is_exposed = isRayActive(s_union.voxel_state_packed);
+        active_flags[flag_index] = (s_union.voxel_state.is_enabled && is_exposed) ? 1 : 0;
     }
 };
 
@@ -323,6 +385,7 @@ class RS_VoxelCompute {
                     k->getDeviceTimeSinceLastOperation(RSE_KERNEL_UPDATE_OPERATION_SOFT_BODY);
 
                 RS_VoxelStateUnion state_union{V_G(state)};
+                RS_VoxelNeighborStateUnion neighbor_state_union{V_G(neighbor_state)};
 
                 if (state_union.voxel_state.is_static || !state_union.voxel_state.is_enabled)
                     return;
@@ -343,13 +406,25 @@ class RS_VoxelCompute {
                     // no need to update nnn/ppp offset or radius
                     // since they are the same as initial values
                     _updateExternalForceAndMoment(
-                        k, voxel, voxel_material, state_union, ext_force, ext_moment
+                        k,
+                        voxel,
+                        voxel_material,
+                        state_union,
+                        neighbor_state_union,
+                        ext_force,
+                        ext_moment
                     );
                 } else {
                     _updateExpansionAndSize(k, voxel, voxel_material, dt, state_union, voxel_size);
 
                     _updateExternalForceAndMoment(
-                        k, voxel, voxel_material, state_union, ext_force, ext_moment
+                        k,
+                        voxel,
+                        voxel_material,
+                        state_union,
+                        neighbor_state_union,
+                        ext_force,
+                        ext_moment
                     );
 
                     Vec3C position = V_G(position);
@@ -416,14 +491,19 @@ class RS_VoxelCompute {
 
                     V_S(angular_momentum, angular_momentum);
                     V_S(linear_momentum, linear_momentum);
-                    V_S(state, state_union.voxel_state_packed);
 
 #ifdef RS_DEBUG_ENABLE_LOGIC_VOXEL
                     CUDA_PRINTF_ASSERT(Vec3C(V_G(position)).isValid());
                     CUDA_PRINTF_ASSERT(Quat3C(V_G(orientation)).isValid());
 #endif
-                    _updatePoissonsStrainAndCornerOffset(k, voxel, voxel_material, voxel_size);
+                    _updatePoissonsStrainAndCornerOffset(
+                        k, voxel, voxel_material, neighbor_state_union, voxel_size
+                    );
                 }
+
+                // Update states, note both branches can tear a bond, so both need to write.
+                V_S(state, state_union.voxel_state_packed);
+                V_S(neighbor_state, neighbor_state_union.neighbor_state_packed);
             }
         }
 
@@ -465,6 +545,7 @@ class RS_VoxelCompute {
             RHandle voxel,
             RHandle voxel_material,
             RS_VoxelStateUnion &state_union_in_out,
+            RS_VoxelNeighborStateUnion &neighbor_state_union_in_out,
             Vec3C &ext_force_out,
             Vec3C &ext_moment_out
         ) {
@@ -474,9 +555,6 @@ class RS_VoxelCompute {
             ext_force_out = Vec3C::zero();
             ext_moment_out = Vec3C::zero();
 
-            auto link_sid = V_G(link_sid);
-            auto links = V_G(links);
-            auto neighbor_voxels = V_G(neighbor_voxels);
             bool has_link = false;
             bool has_null_link = false;
             RBigIndex torn_link_mask = 0;
@@ -485,38 +563,33 @@ class RS_VoxelCompute {
                 device::loop<0, 2>([&](auto dir_const) {
                     device::loop<0, 6, 2>([&](auto axis_const) {
                         static constexpr RIndex i = dir_const.value + axis_const.value;
-                        RHandle &link = sharedMemAt1D(SharedMemLayout::template get<i>());
-                        if (link != RS_NULL_HANDLE) {
-                            RS_LinkStateUnion link_state_union{L_G(link, state)};
-                            if (link_state_union.link_state.is_failed) {
-                                link_sid[i] = RS_NULL_INDEX;
-                                links[i] = RS_NULL_HANDLE;
-                                neighbor_voxels[i] = RS_NULL_HANDLE;
-                                link = RS_NULL_HANDLE;
-                                has_null_link = true;
-                                torn_link_mask |= RBigIndex(1) << i;
-                                // A torn bond exposes this face to air on both sides.
-                                setFaceRole(
-                                    state_union_in_out.voxel_state_packed, i, RSE_VOXEL_FACE_AIR
-                                );
-                            } else {
-                                if (link) {
-                                    has_link = true;
-                                    // For link, it always points from voxel_neg to voxel_pos
-                                    // and its direction is always in the positive direction
-                                    if (isLinkDirectionNegative(
-                                            static_cast<RSE_LinkDirection>(i)
-                                        )) {
-                                        ext_force_out += Vec3C(L_G(link, force_pos));
-                                        ext_moment_out += Vec3C(L_G(link, moment_pos));
-                                    } else {
-                                        ext_force_out += Vec3C(L_G(link, force_neg));
-                                        ext_moment_out += Vec3C(L_G(link, moment_neg));
-                                    }
-                                }
-                            }
-                        } else {
+                        if (!(neighbor_state_union_in_out.neighbor_state.is_neighbor_linked &
+                              (RState(1) << i))) {
                             has_null_link = true;
+                            return;
+                        }
+                        RHandle link = sharedMemAt1D(SharedMemLayout::template get<i>());
+                        RS_LinkStateUnion link_state_union{L_G(link, state)};
+                        if (link_state_union.link_state.is_failed) {
+                            neighbor_state_union_in_out.neighbor_state.is_neighbor_linked &=
+                                ~(RState(1) << i);
+                            has_null_link = true;
+                            torn_link_mask |= RBigIndex(1) << i;
+                            // A torn bond exposes this face to air on both sides.
+                            setFaceRole(
+                                state_union_in_out.voxel_state_packed, i, RSE_VOXEL_FACE_AIR
+                            );
+                            return;
+                        }
+                        has_link = true;
+                        // For link, it always points from voxel_neg to voxel_pos
+                        // and its direction is always in the positive direction
+                        if (isLinkDirectionNegative(static_cast<RSE_LinkDirection>(i))) {
+                            ext_force_out += Vec3C(L_G(link, force_pos));
+                            ext_moment_out += Vec3C(L_G(link, moment_pos));
+                        } else {
+                            ext_force_out += Vec3C(L_G(link, force_neg));
+                            ext_moment_out += Vec3C(L_G(link, moment_neg));
                         }
                     });
                 });
@@ -698,6 +771,7 @@ class RS_VoxelCompute {
             Kernel *k,
             RHandle voxel,
             RHandle voxel_material,
+            const RS_VoxelNeighborStateUnion &neighbor_state_union,
             FloatC voxel_size
         ) {
             // if no connections in the positive and negative directions of a particular
@@ -709,19 +783,21 @@ class RS_VoxelCompute {
 
             auto &ctx = k->ctx;
 
-            int num_bond_axis[3] = {0, 0, 0};
+            int bond_axis_num[3] = {0, 0, 0};
             FloatC strains[6];
 
             device::loop<0, 2>([&](auto dir_const) {
                 device::loop<0, 6, 2>([&](auto axis_const) {
                     static constexpr RIndex i = dir_const.value + axis_const.value;
+                    if (!(neighbor_state_union.neighbor_state.is_neighbor_linked &
+                          (RState(1) << i))) {
+                        strains[i] = FloatC(0);
+                        return;
+                    }
                     RHandle link = sharedMemAt1D(SharedMemLayout::template get<i>());
-                    num_bond_axis[i >> 1] += link != RS_NULL_HANDLE;
-                    strains[i] = link == RS_NULL_HANDLE
-                                     ? FloatC(0)
-                                     : LinkCompute::axialStrain(
-                                           L_G(link, strain), L_G(link, strain_ratio), false
-                                       );
+                    bond_axis_num[i >> 1] += 1;
+                    strains[i] =
+                        LinkCompute::axialStrain(L_G(link, strain), L_G(link, strain_ratio), false);
                 });
             });
 
@@ -749,11 +825,11 @@ class RS_VoxelCompute {
 
             // average if both sides pulling,
             // or just one side and a fixed or forced voxel... (not implemented)
-            tension[0] = num_bond_axis[0] == 2;
+            tension[0] = bond_axis_num[0] == 2;
             axis_strain_sum.x *= tension[0] ? FloatC(0.5) : FloatC(1);
-            tension[1] = num_bond_axis[1] == 2;
+            tension[1] = bond_axis_num[1] == 2;
             axis_strain_sum.y *= tension[1] ? FloatC(0.5) : FloatC(1);
-            tension[2] = num_bond_axis[2] == 2;
+            tension[2] = bond_axis_num[2] == 2;
             axis_strain_sum.z *= tension[2] ? FloatC(0.5) : FloatC(1);
             if (!(tension[0] && tension[1] && tension[2])) {
                 // if at least one isn't in tension
@@ -781,60 +857,120 @@ class RS_VoxelCompute {
     };
 
     /**
-     * @brief Fill one voxel-BVH leaf on the build path.
+     * @brief Fill one voxel contact-BVH leaf on the build path.
      * @details For each active voxel, composes the leaf identifier of object metadata and handle
      * into obj_ids and writes the loose world-AABB into leaf_bounds.
      *
      * @param k              simulation kernel.
-     * @param active_handles packed list of the active voxel handles, one per leaf.
-     * @param obj_ids        per-leaf output of composed voxel-BVH leaf identifiers.
+     * @param active_handles packed list of the contact active voxel handles, one per leaf.
+     * @param obj_ids        per-leaf output of composed contact-BVH leaf identifiers.
      * @param leaf_bounds    per-leaf output of loose world-space AABBs.
      */
-    class RSCF_FillVoxelBVHLeafData : public device::RS_ComputeFunction<RSCF_FillVoxelBVHLeafData> {
+    class RSCF_FillVoxelContactBVHLeafData
+        : public device::RS_ComputeFunction<RSCF_FillVoxelContactBVHLeafData> {
        public:
-        using BaseType = device::RS_ComputeFunction<RSCF_FillVoxelBVHLeafData>;
+        using BaseType = device::RS_ComputeFunction<RSCF_FillVoxelContactBVHLeafData>;
         using BaseType::index1D;
 
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void run(
             Kernel *k,
             device::RS_Vector<RHandle> active_handles,
-            device::RS_Vector<RS_VoxelBVHObjectIdentifier> obj_ids,
+            device::RS_Vector<RS_VoxelContactBVHObjectIdentifier> obj_ids,
             device::RS_Vector<RBound3f> leaf_bounds
         ) {
             RIndex leaf_index = index1D();
             if (leaf_index >= active_handles.size()) return;
             RHandle voxel = active_handles[leaf_index];
-            obj_ids[leaf_index] = _composeVoxelBVHLeafIdentifier(k, voxel);
-            leaf_bounds[leaf_index] = _computeVoxelLooseAABB(k, voxel);
+            _composeVoxelContactBVHLeafIdentifier(k, voxel, obj_ids[leaf_index]);
+            leaf_bounds[leaf_index] = _computeVoxelContactLooseAABB(k, voxel);
         }
     };
 
     /**
-     * @brief Refit one voxel-BVH leaf in place on the refit path.
-     * @details Reads the voxel handle out of obj_ids and refreshes both the leaf identifier and
-     * the loose world-AABB without reordering, so the existing Morton order is preserved.
+     * @brief Fill one voxel ray-BVH leaf on the build path.
+     * @details For each active voxel, composes the leaf identifier of metadata, corners and face
+     * normals into obj_ids and writes the loose world-AABB of those corners into leaf_bounds.
      *
-     * @param k           simulation kernel.
-     * @param obj_ids     per-leaf voxel-BVH leaf identifiers, read for the handle and rewritten.
-     * @param leaf_bounds per-leaf output of refreshed loose world-space AABBs.
+     * @param k              simulation kernel.
+     * @param active_handles packed list of the ray active voxel handles, one per leaf.
+     * @param obj_ids        per-leaf output of composed ray-BVH leaf identifiers.
+     * @param leaf_bounds    per-leaf output of loose world-space AABBs.
      */
-    class RSCF_RefitVoxelBVHLeafData
-        : public device::RS_ComputeFunction<RSCF_RefitVoxelBVHLeafData> {
+    class RSCF_FillVoxelRayBVHLeafData
+        : public device::RS_ComputeFunction<RSCF_FillVoxelRayBVHLeafData> {
        public:
-        using BaseType = device::RS_ComputeFunction<RSCF_RefitVoxelBVHLeafData>;
+        using BaseType = device::RS_ComputeFunction<RSCF_FillVoxelRayBVHLeafData>;
         using BaseType::index1D;
 
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void run(
             Kernel *k,
-            device::RS_Vector<RS_VoxelBVHObjectIdentifier> obj_ids,
+            device::RS_Vector<RHandle> active_handles,
+            device::RS_Vector<RS_VoxelRayBVHObjectIdentifier> obj_ids,
+            device::RS_Vector<RBound3f> leaf_bounds
+        ) {
+            RIndex leaf_index = index1D();
+            if (leaf_index >= active_handles.size()) return;
+            RHandle voxel = active_handles[leaf_index];
+            _composeVoxelRayBVHLeafIdentifier(k, voxel, obj_ids[leaf_index]);
+            leaf_bounds[leaf_index] = _computeVoxelRayLooseAABB(obj_ids[leaf_index]);
+        }
+    };
+
+    /**
+     * @brief Refit one voxel contact-BVH leaf in place on the refit path.
+     * @details Reads the voxel handle out of obj_ids and refreshes both the leaf identifier and
+     * the loose world-AABB without reordering, so the existing Morton order is preserved.
+     *
+     * @param k           simulation kernel.
+     * @param obj_ids     per-leaf contact-BVH leaf identifiers, read for the handle and rewritten.
+     * @param leaf_bounds per-leaf output of refreshed loose world-space AABBs.
+     */
+    class RSCF_RefitVoxelContactBVHLeafData
+        : public device::RS_ComputeFunction<RSCF_RefitVoxelContactBVHLeafData> {
+       public:
+        using BaseType = device::RS_ComputeFunction<RSCF_RefitVoxelContactBVHLeafData>;
+        using BaseType::index1D;
+
+        template <typename Kernel>
+        HOST_DEVICE_INLINE_QUALIFIER static void run(
+            Kernel *k,
+            device::RS_Vector<RS_VoxelContactBVHObjectIdentifier> obj_ids,
             device::RS_Vector<RBound3f> leaf_bounds
         ) {
             RIndex leaf_index = index1D();
             RHandle voxel = obj_ids[leaf_index].object_handle;
-            obj_ids[leaf_index] = _composeVoxelBVHLeafIdentifier(k, voxel);
-            leaf_bounds[leaf_index] = _computeVoxelLooseAABB(k, voxel);
+            _composeVoxelContactBVHLeafIdentifier(k, voxel, obj_ids[leaf_index]);
+            leaf_bounds[leaf_index] = _computeVoxelContactLooseAABB(k, voxel);
+        }
+    };
+
+    /**
+     * @brief Refit one voxel ray-BVH leaf in place on the refit path.
+     * @details Reads the voxel handle out of obj_ids and refreshes both the leaf identifier and
+     * the loose world-AABB without reordering, so the existing Morton order is preserved.
+     *
+     * @param k           simulation kernel.
+     * @param obj_ids     per-leaf ray-BVH leaf identifiers, read for the handle and rewritten.
+     * @param leaf_bounds per-leaf output of refreshed loose world-space AABBs.
+     */
+    class RSCF_RefitVoxelRayBVHLeafData
+        : public device::RS_ComputeFunction<RSCF_RefitVoxelRayBVHLeafData> {
+       public:
+        using BaseType = device::RS_ComputeFunction<RSCF_RefitVoxelRayBVHLeafData>;
+        using BaseType::index1D;
+
+        template <typename Kernel>
+        HOST_DEVICE_INLINE_QUALIFIER static void run(
+            Kernel *k,
+            device::RS_Vector<RS_VoxelRayBVHObjectIdentifier> obj_ids,
+            device::RS_Vector<RBound3f> leaf_bounds
+        ) {
+            RIndex leaf_index = index1D();
+            RHandle voxel = obj_ids[leaf_index].object_handle;
+            _composeVoxelRayBVHLeafIdentifier(k, voxel, obj_ids[leaf_index]);
+            leaf_bounds[leaf_index] = _computeVoxelRayLooseAABB(obj_ids[leaf_index]);
         }
     };
 
@@ -843,7 +979,7 @@ class RS_VoxelCompute {
      * @details Queries both the dynamic and static voxel BVHs for nearby candidates, applies the
      * same-body and connected-body filtering, and stores the two largest sphere-overlap contacts
      * into contact_voxel_0 and contact_voxel_1. Launched over the Morton-sorted
-     * ctx.dynamic_voxel_bvh.object_identifiers so adjacent warp threads process spatially
+     * ctx.dynamic_voxel_contact_bvh.object_identifiers so adjacent warp threads process spatially
      * adjacent voxels and share BVH node cache lines.
      *
      * @param k                         simulation kernel.
@@ -855,8 +991,10 @@ class RS_VoxelCompute {
         using BaseType::index1D;
 
         template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void
-        run(Kernel *k, device::RS_Vector<RS_VoxelBVHObjectIdentifier> sorted_object_identifiers) {
+        HOST_DEVICE_INLINE_QUALIFIER static void run(
+            Kernel *k,
+            device::RS_Vector<RS_VoxelContactBVHObjectIdentifier> sorted_object_identifiers
+        ) {
             if (k == nullptr) return;
             RIndex idx = index1D();
             if (idx >= sorted_object_identifiers.size()) return;
@@ -864,7 +1002,9 @@ class RS_VoxelCompute {
             // Metadata-only early-out: skip non-collision / disabled leaves without
             // touching the voxel SoA. is_static never enters here because the dynamic
             // BVH build excluded fixed and parent-fixed-rigid-body voxels.
-            RS_VoxelBVHLeafMetadataUnion meta{sorted_object_identifiers[idx].object_metadata};
+            RS_VoxelContactBVHLeafMetadataUnion meta{
+                sorted_object_identifiers[idx].object_metadata
+            };
             if (!meta.meta.is_enabled || !meta.meta.is_contact_active) return;
 
             RHandle voxel = sorted_object_identifiers[idx].object_handle;
@@ -912,8 +1052,8 @@ class RS_VoxelCompute {
 
             // Walk dynamic BVH first, then static. Both passes share the two
             // contact slots through contact_voxel_0/1 + overlap_0/1.
-            if (ctx.dynamic_voxel_bvh.object_identifiers.size() > 0) {
-                auto bvh_accessor = ctx.dynamic_voxel_bvh.root();
+            if (ctx.dynamic_voxel_contact_bvh.object_identifiers.size() > 0) {
+                auto bvh_accessor = ctx.dynamic_voxel_contact_bvh.root();
                 _traverseBVHForContactCandidates(
                     k,
                     voxel,
@@ -933,8 +1073,8 @@ class RS_VoxelCompute {
                     overlap_1
                 );
             }
-            if (ctx.static_voxel_bvh.object_identifiers.size() > 0) {
-                auto bvh_accessor = ctx.static_voxel_bvh.root();
+            if (ctx.static_voxel_contact_bvh.object_identifiers.size() > 0) {
+                auto bvh_accessor = ctx.static_voxel_contact_bvh.root();
                 _traverseBVHForContactCandidates(
                     k,
                     voxel,
@@ -1032,8 +1172,7 @@ class RS_VoxelCompute {
         ) {
             auto &ctx = k->ctx;
 
-            static constexpr RSize STACK_SIZE = 32;
-            RIndex stack[STACK_SIZE];
+            RIndex stack[RS_RUNTIME_BVH_STACK_SIZE];
             RSize stack_top = 0;
             RIndex root_node = bvh_accessor_in_out.current();
             if (root_node != RS_NULL_INDEX) stack[stack_top++] = root_node;
@@ -1087,7 +1226,9 @@ class RS_VoxelCompute {
                                     // A1 and A2 are handled here. Links are symmetric so
                                     // reading our own bit is enough, and a non-soft pair is
                                     // held by its segment instead of by a link.
-                                    RS_VoxelBVHLeafMetadataUnion other_meta{obj->object_metadata};
+                                    RS_VoxelContactBVHLeafMetadataUnion other_meta{
+                                        obj->object_metadata
+                                    };
                                     bool is_other_non_soft = other_meta.meta.is_rigid ||
                                                              other_meta.meta.is_static;
                                     if ((self_filter_key.contact_filter_key.connectivity >>
@@ -1133,11 +1274,13 @@ class RS_VoxelCompute {
                 } else {
                     auto internal_node = bvh_accessor_in_out.internalNode();
 
-                    if (internal_node.left != RS_NULL_INDEX && stack_top < STACK_SIZE &&
+                    if (internal_node.left != RS_NULL_INDEX &&
+                        stack_top < RS_RUNTIME_BVH_STACK_SIZE &&
                         internal_node.left_bound.isIntersecting(query_bound)) {
                         stack[stack_top++] = internal_node.left;
                     }
-                    if (internal_node.right != RS_NULL_INDEX && stack_top < STACK_SIZE &&
+                    if (internal_node.right != RS_NULL_INDEX &&
+                        stack_top < RS_RUNTIME_BVH_STACK_SIZE &&
                         internal_node.right_bound.isIntersecting(query_bound)) {
                         stack[stack_top++] = internal_node.right;
                     }
@@ -1815,10 +1958,174 @@ class RS_VoxelCompute {
     }
 
    private:
-    /** @brief Compose voxel-BVH leaf metadata from voxel state and vision render type. */
+    /** @brief Corner `c` of a strained box in voxel space, bit n picking the positive side. */
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _getVoxelBoxCorner(int c, const Vec3C &nnn, const Vec3C &ppp) {
+        return Vec3C((c & 1) ? ppp.x : nnn.x, (c & 2) ? ppp.y : nnn.y, (c & 4) ? ppp.z : nnn.z);
+    }
+
+    /** @brief Neighbor slot facing corner `c` along `axis`, even slots being the positive side. */
+    HOST_DEVICE_INLINE_QUALIFIER static int _getVoxelCornerNeighborDirection(int c, int axis) {
+        return 2 * axis + (((c >> axis) & 1) ? 0 : 1);
+    }
+
+    /** @brief Neighbor across `direction`, or null when that bond is gone. */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static RState
-    _composeVoxelBVHLeafMetadata(Kernel *k, RHandle voxel) {
+    HOST_DEVICE_INLINE_QUALIFIER static RHandle
+    _getVoxelBondedNeighbor(Kernel *k, RHandle voxel, int direction, bool &is_rigid_or_static_out) {
+        auto &ctx = k->ctx;
+        RS_VoxelNeighborStateUnion neighbor_state_union{V_G(neighbor_state)};
+        RState bit = RState(1) << direction;
+        if (!(neighbor_state_union.neighbor_state.is_neighbor_linked & bit)) return RS_NULL_HANDLE;
+        is_rigid_or_static_out =
+            (neighbor_state_union.neighbor_state.is_neighbor_rigid_or_static & bit) != 0;
+        auto neighbor_voxels = V_G(neighbor_voxels);
+        return neighbor_voxels[direction];
+    }
+
+    /** @brief World point `voxel` reads for corner `c` of its own strained box. */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _getVoxelWorldCorner(Kernel *k, RHandle voxel, int c) {
+        auto &ctx = k->ctx;
+        Vec3C corner = _getVoxelBoxCorner(c, Vec3C(V_G(nnn_offset)), Vec3C(V_G(ppp_offset)));
+        Quat3C orientation = V_G(orientation);
+        Vec3C position = V_G(position);
+        return position + orientation.rotateVec3D(corner);
+    }
+
+    /**
+     * @brief Offset from a soft voxel's center to corner `c`, averaged with the bonded neighbors
+     *        that touch it.
+     *
+     * @details A corner is shared by up to eight voxels and each reads the same physical point off
+     * its own strained box, so it only closes when every sharer averages the same set. Three face
+     * neighbors are one hop away and three diagonals are two, reached through either face. A soft
+     * diagonal counts only when both routes survive and agree, which lets a real tear open, while
+     * one route is enough to reach a rigid or static one because every voxel of an undeformed body
+     * reports the same point. The mean is unweighted so a group moving rigidly reproduces its own
+     * corners, and a rigid or static sharer is authoritative, so the soft side grounds onto those
+     * readings alone.
+     *
+     * @note A torn soft bond still welds to a rigid neighbor whenever the other route survives, so
+     * a tear running flush against an anchor stays shut. That is benign because the anchor's
+     * geometry is authoritative there anyway, but it does mean tears do not open against an anchor.
+     *
+     * @param k           simulation kernel.
+     * @param voxel       the soft voxel owning the corner.
+     * @param c           corner index, bit n set when the corner is on the positive side of axis n.
+     * @param is_surface  whether the voxel is on the surface, gating the two-hop diagonals.
+     * @param position    voxel center in world coordinates.
+     * @param orientation rotation from voxel space to world.
+     * @param nnn         negative-side strained offsets of this voxel.
+     * @param ppp         positive-side strained offsets of this voxel.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _computeVoxelSeamCornerOffset(
+        Kernel *k,
+        RHandle voxel,
+        int c,
+        bool is_surface,
+        const Vec3C &position,
+        const Quat3C &orientation,
+        const Vec3C &nnn,
+        const Vec3C &ppp
+    ) {
+        Vec3C soft_sum = position + orientation.rotateVec3D(_getVoxelBoxCorner(c, nnn, ppp));
+        FloatC soft_num = FloatC(1);
+        Vec3C rigid_sum = Vec3C::zero();
+        FloatC rigid_num = FloatC(0);
+
+        for (int axis = 0; axis < 3; axis++) {
+            bool is_rigid_or_static = false;
+            RHandle neighbor = _getVoxelBondedNeighbor(
+                k, voxel, _getVoxelCornerNeighborDirection(c, axis), is_rigid_or_static
+            );
+            if (neighbor == RS_NULL_HANDLE) continue;
+
+            // The neighbor faces us across this axis, so it reads the same point as the corner
+            // with the axis bit flipped.
+            Vec3C world = _getVoxelWorldCorner(k, neighbor, c ^ (1 << axis));
+            if (is_rigid_or_static) {
+                rigid_sum = rigid_sum + world;
+                rigid_num = rigid_num + FloatC(1);
+            } else {
+                soft_sum = soft_sum + world;
+                soft_num = soft_num + FloatC(1);
+            }
+        }
+
+        // Interior corners are never traced, so the diagonals are only worth two hops on the
+        // surface, where the readings that fail to meet are the ones a ray can see.
+        if (is_surface) {
+            for (int axis_a = 0; axis_a < 3; axis_a++) {
+                int axis_b = (axis_a + 1) % 3;
+                int direction_a = _getVoxelCornerNeighborDirection(c, axis_a);
+                int direction_b = _getVoxelCornerNeighborDirection(c, axis_b);
+
+                bool is_unused = false;
+                bool is_by_a_rigid = false;
+                bool is_by_b_rigid = false;
+                RHandle diagonal_by_a = RS_NULL_HANDLE;
+                RHandle diagonal_by_b = RS_NULL_HANDLE;
+                if (RHandle by_a = _getVoxelBondedNeighbor(k, voxel, direction_a, is_unused);
+                    by_a != RS_NULL_HANDLE)
+                    diagonal_by_a = _getVoxelBondedNeighbor(k, by_a, direction_b, is_by_a_rigid);
+                if (RHandle by_b = _getVoxelBondedNeighbor(k, voxel, direction_b, is_unused);
+                    by_b != RS_NULL_HANDLE)
+                    diagonal_by_b = _getVoxelBondedNeighbor(k, by_b, direction_a, is_by_b_rigid);
+
+                // One route reaches a rigid or static diagonal, since an undeformed body reports
+                // the same point from any of its voxels. A soft one needs both routes to survive
+                // and agree, so a torn bond leaves the corner free to open.
+                RHandle diagonal = RS_NULL_HANDLE;
+                bool is_rigid_or_static = false;
+                if (diagonal_by_a != RS_NULL_HANDLE && is_by_a_rigid) {
+                    diagonal = diagonal_by_a;
+                    is_rigid_or_static = true;
+                } else if (diagonal_by_b != RS_NULL_HANDLE && is_by_b_rigid) {
+                    diagonal = diagonal_by_b;
+                    is_rigid_or_static = true;
+                } else if (diagonal_by_a != RS_NULL_HANDLE && diagonal_by_a == diagonal_by_b) {
+                    diagonal = diagonal_by_a;
+                }
+                if (diagonal == RS_NULL_HANDLE) continue;
+
+                Vec3C world = _getVoxelWorldCorner(k, diagonal, c ^ (1 << axis_a) ^ (1 << axis_b));
+                if (is_rigid_or_static) {
+                    rigid_sum = rigid_sum + world;
+                    rigid_num = rigid_num + FloatC(1);
+                } else {
+                    soft_sum = soft_sum + world;
+                    soft_num = soft_num + FloatC(1);
+                }
+            }
+        }
+
+        Vec3C corner = rigid_num > FloatC(0) ? rigid_sum / rigid_num : soft_sum / soft_num;
+        return corner - position;
+    }
+
+    /** @brief Compose contact-BVH leaf metadata from voxel state. */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    _composeVoxelContactBVHLeafMetadata(Kernel *k, RHandle voxel, RState &metadata_out) {
+        auto &ctx = k->ctx;
+        RS_VoxelStateUnion s_union{V_G(state)};
+        RS_VoxelContactBVHLeafMetadataUnion m_union{0};
+        m_union.meta.is_enabled = s_union.voxel_state.is_enabled;
+        m_union.meta.is_surface = s_union.voxel_state.is_surface;
+        m_union.meta.is_static = s_union.voxel_state.is_static;
+        m_union.meta.is_rigid = s_union.voxel_state.is_rigid;
+        m_union.meta.is_contact_active = isContactActive(s_union.voxel_state_packed) ? 1 : 0;
+        m_union.meta.is_structure_constrained = s_union.voxel_state.is_structure_constrained;
+        metadata_out = m_union.meta_packed;
+    }
+
+    /** @brief Compose ray-BVH leaf metadata from voxel state and vision material type. */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void
+    _composeVoxelRayBVHLeafMetadata(Kernel *k, RHandle voxel, RState &metadata_out) {
         auto &ctx = k->ctx;
         RS_VoxelStateUnion s_union{V_G(state)};
         RHandle vision_material = V_G(vision_material);
@@ -1827,37 +2134,75 @@ class RS_VoxelCompute {
             RS_VisionMaterialStateUnion vm_union{VSM_G(vision_material, state)};
             render_type = vm_union.vision_material_state.render_type;
         }
-        RS_VoxelBVHLeafMetadataUnion m_union{0};
+        RS_VoxelRayBVHLeafMetadataUnion m_union{0};
         m_union.meta.is_enabled = s_union.voxel_state.is_enabled;
         m_union.meta.is_surface = s_union.voxel_state.is_surface;
         m_union.meta.is_static = s_union.voxel_state.is_static;
         m_union.meta.is_rigid = s_union.voxel_state.is_rigid;
         m_union.meta.is_emissive = (render_type == RSE_VISION_MATERIAL_EMISSIVE) ? 1 : 0;
         m_union.meta.is_transparent = (render_type == RSE_VISION_MATERIAL_TRANSPARENT) ? 1 : 0;
-        m_union.meta.is_render_active = isRenderActive(s_union.voxel_state_packed) ? 1 : 0;
-        m_union.meta.is_contact_active = isContactActive(s_union.voxel_state_packed) ? 1 : 0;
-        m_union.meta.is_structure_constrained = s_union.voxel_state.is_structure_constrained;
-        return m_union.meta_packed;
+        m_union.meta.is_ray_active = isRayActive(s_union.voxel_state_packed) ? 1 : 0;
+        m_union.meta.is_smooth_surface = 0;
+        // Rigid and static voxels never deform, always a box.
+        m_union.meta.is_box = (s_union.voxel_state.is_static || s_union.voxel_state.is_rigid) ? 1
+                                                                                              : 0;
+        m_union.meta.face_role = s_union.voxel_state.face_role;
+        metadata_out = m_union.meta_packed;
     }
 
-    /** @brief Compose the voxel-BVH leaf identifier of metadata and contact payload. */
+    /** @brief Compose the contact-BVH leaf identifier of metadata and overlap payload. */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static RS_VoxelBVHObjectIdentifier
-    _composeVoxelBVHLeafIdentifier(Kernel *k, RHandle voxel) {
+    HOST_DEVICE_INLINE_QUALIFIER static void _composeVoxelContactBVHLeafIdentifier(
+        Kernel *k,
+        RHandle voxel,
+        RS_VoxelContactBVHObjectIdentifier &oid_out
+    ) {
         auto &ctx = k->ctx;
-        RS_VoxelBVHObjectIdentifier oid;
-        oid.object_metadata = _composeVoxelBVHLeafMetadata(k, voxel);
-        oid.object_handle = voxel;
-        oid.contact_filter_key = V_G(contact_filter_key);
-        oid.position = RVec3f(Vec3C(V_G(position)));
-        oid.radius = float(V_G(radius));
-        oid.structure_gid = V_G(structure_gid);
-        return oid;
+        _composeVoxelContactBVHLeafMetadata(k, voxel, oid_out.object_metadata);
+        oid_out.object_handle = voxel;
+        oid_out.contact_filter_key = V_G(contact_filter_key);
+        oid_out.position = RVec3f(Vec3C(V_G(position)));
+        oid_out.radius = float(V_G(radius));
+        oid_out.structure_gid = V_G(structure_gid);
+    }
+
+    /** @brief Compose the ray-BVH leaf identifier of metadata and the geometric shape. */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void _composeVoxelRayBVHLeafIdentifier(
+        Kernel *k,
+        RHandle voxel,
+        RS_VoxelRayBVHObjectIdentifier &oid_out
+    ) {
+        auto &ctx = k->ctx;
+        Vec3C position = V_G(position);
+        Quat3C orientation = V_G(orientation);
+
+        _composeVoxelRayBVHLeafMetadata(k, voxel, oid_out.object_metadata);
+        RState metadata = oid_out.object_metadata;
+        oid_out.object_handle = voxel;
+        oid_out.vision_material = V_G(vision_material);
+        oid_out.structure_gid = V_G(structure_gid);
+        oid_out.position = RVec3f(position);
+
+        RS_VoxelRayBVHLeafMetadataUnion m_union{metadata};
+        if (m_union.meta.is_box) {
+            oid_out.shape.box.orientation = RQuat3f(orientation);
+            oid_out.shape.box.size = float(V_G(size));
+        } else {
+            Vec3C nnn = V_G(nnn_offset);
+            Vec3C ppp = V_G(ppp_offset);
+            for (int c = 0; c < 8; c++) {
+                oid_out.shape.hexahedron.corner_offset[c] = _computeVoxelSeamCornerOffset(
+                    k, voxel, c, m_union.meta.is_surface, position, orientation, nnn, ppp
+                );
+            }
+        }
     }
 
     /** @brief Loose world-AABB enclosing a voxel's rotated OBB. */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static RBound3f _computeVoxelLooseAABB(Kernel *k, RHandle voxel) {
+    HOST_DEVICE_INLINE_QUALIFIER static RBound3f
+    _computeVoxelContactLooseAABB(Kernel *k, RHandle voxel) {
         auto &ctx = k->ctx;
         Vec3C position = V_G(position);
         Quat3C orientation = V_G(orientation);
@@ -1866,7 +2211,7 @@ class RS_VoxelCompute {
         Vec3C min_b, max_b;
         bool first = true;
         for (int i = 0; i < 8; i++) {
-            Vec3C local((i & 1) ? ppp.x : nnn.x, (i & 2) ? ppp.y : nnn.y, (i & 4) ? ppp.z : nnn.z);
+            Vec3C local = _getVoxelBoxCorner(i, nnn, ppp);
             Vec3C world = position + orientation.rotateVec3D(local);
             if (first) {
                 min_b = max_b = world;
@@ -1874,6 +2219,41 @@ class RS_VoxelCompute {
             } else {
                 min_b = min_b.min(world);
                 max_b = max_b.max(world);
+            }
+        }
+        return RBound3f(RVec3f(min_b), RVec3f(max_b));
+    }
+
+    /** @brief Loose world-AABB enclosing a ray leaf's shape. */
+    HOST_DEVICE_INLINE_QUALIFIER static RBound3f _computeVoxelRayLooseAABB(
+        const RS_VoxelRayBVHObjectIdentifier &oid
+    ) {
+        Vec3C position = Vec3C(oid.position);
+        RS_VoxelRayBVHLeafMetadataUnion m_union{oid.object_metadata};
+        Vec3C min_b, max_b;
+        if (m_union.meta.is_box) {
+            Quat3C orientation = Quat3C(oid.shape.box.orientation);
+            FloatC half = FloatC(0.5) * FloatC(oid.shape.box.size);
+            for (int c = 0; c < 8; c++) {
+                Vec3C local((c & 1) ? half : -half, (c & 2) ? half : -half, (c & 4) ? half : -half);
+                Vec3C world = position + orientation.rotateVec3D(local);
+                if (c == 0) {
+                    min_b = max_b = world;
+                } else {
+                    min_b = min_b.min(world);
+                    max_b = max_b.max(world);
+                }
+            }
+        } else {
+            for (int c = 0; c < 8; c++) {
+                Vec3C world =
+                    position + oid.shape.hexahedron.corner_offset[c].template toVec3D<FloatC>();
+                if (c == 0) {
+                    min_b = max_b = world;
+                } else {
+                    min_b = min_b.min(world);
+                    max_b = max_b.max(world);
+                }
             }
         }
         return RBound3f(RVec3f(min_b), RVec3f(max_b));

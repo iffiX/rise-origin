@@ -389,7 +389,7 @@ class RS_Vector {
             // No-op
             return;
         }
-        RSize num_to_erase = end - begin;
+        RSize erase_num = end - begin;
         // Shift elements in [end, used_elem_num) to the left over [begin, end)
         if (end < used_elem_num) {
             auto tmp = data.provider()->allocate(sizeof(T) * (used_elem_num - end), true);
@@ -398,7 +398,7 @@ class RS_Vector {
             (data + sizeof(T) * begin).copyFrom(tmp, sizeof(T) * (used_elem_num - end));
             tmp.free();
         }
-        used_elem_num -= num_to_erase;
+        used_elem_num -= erase_num;
     }
 
     [[nodiscard]] RS_MemoryProvider* provider() const { return data.provider(); }

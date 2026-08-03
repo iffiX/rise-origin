@@ -193,8 +193,7 @@ class RS_IntersectRegionCompute {
 
             RSize count = 0;
             auto accessor = ctx.intersect_region_bvh.root();
-            static constexpr RSize STACK_SIZE = 32;
-            RIndex stack[STACK_SIZE];
+            RIndex stack[RS_RUNTIME_BVH_STACK_SIZE];
             RSize stack_top = 0;
             RIndex root_node = accessor.current();
             if (root_node != RS_NULL_INDEX) stack[stack_top++] = root_node;
@@ -207,11 +206,13 @@ class RS_IntersectRegionCompute {
                     if (obj != nullptr && obj->contains(RVec3f(center))) count++;
                 } else {
                     auto internal_node = accessor.internalNode();
-                    if (internal_node.left != RS_NULL_INDEX && stack_top < STACK_SIZE &&
+                    if (internal_node.left != RS_NULL_INDEX &&
+                        stack_top < RS_RUNTIME_BVH_STACK_SIZE &&
                         internal_node.left_bound.isContaining(center)) {
                         stack[stack_top++] = internal_node.left;
                     }
-                    if (internal_node.right != RS_NULL_INDEX && stack_top < STACK_SIZE &&
+                    if (internal_node.right != RS_NULL_INDEX &&
+                        stack_top < RS_RUNTIME_BVH_STACK_SIZE &&
                         internal_node.right_bound.isContaining(center)) {
                         stack[stack_top++] = internal_node.right;
                     }
@@ -248,8 +249,7 @@ class RS_IntersectRegionCompute {
             RSize out = offsets.template get<RSize>(dense_index);
 
             auto accessor = ctx.intersect_region_bvh.root();
-            static constexpr RSize STACK_SIZE = 32;
-            RIndex stack[STACK_SIZE];
+            RIndex stack[RS_RUNTIME_BVH_STACK_SIZE];
             RSize stack_top = 0;
             RIndex root_node = accessor.current();
             if (root_node != RS_NULL_INDEX) stack[stack_top++] = root_node;
@@ -269,11 +269,13 @@ class RS_IntersectRegionCompute {
                     }
                 } else {
                     auto internal_node = accessor.internalNode();
-                    if (internal_node.left != RS_NULL_INDEX && stack_top < STACK_SIZE &&
+                    if (internal_node.left != RS_NULL_INDEX &&
+                        stack_top < RS_RUNTIME_BVH_STACK_SIZE &&
                         internal_node.left_bound.isContaining(center)) {
                         stack[stack_top++] = internal_node.left;
                     }
-                    if (internal_node.right != RS_NULL_INDEX && stack_top < STACK_SIZE &&
+                    if (internal_node.right != RS_NULL_INDEX &&
+                        stack_top < RS_RUNTIME_BVH_STACK_SIZE &&
                         internal_node.right_bound.isContaining(center)) {
                         stack[stack_top++] = internal_node.right;
                     }

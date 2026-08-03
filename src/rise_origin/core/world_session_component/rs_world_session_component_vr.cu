@@ -178,6 +178,8 @@ class RS_VRImpl {
      * Lifecycle
      ****************************************************************/
     RS_VRImpl(
+        RVec3rf play_position,
+        RVec3rf play_focus,
         RFloat near_depth,
         RFloat far_depth,
         RFloat move_speed,
@@ -193,7 +195,9 @@ class RS_VRImpl {
         RFloat ctrl_ray_reach = 8.0,
         RFloat ctrl_marker_size = 0.09
     )
-        : _near_depth(near_depth),
+        : _play_position(play_position),
+          _play_yaw(_makePlayYaw(play_position, play_focus)),
+          _near_depth(near_depth),
           _far_depth(far_depth),
           _move_speed(move_speed),
           _fly_speed(fly_speed),
@@ -383,6 +387,10 @@ class RS_VRImpl {
      * Data
      ****************************************************************/
     /**** Config ****/
+    // Where the wearer starts standing and which way their room's forward starts turned, walked on
+    // from there by the sticks; guarded with the eyes by _eye_mutex.
+    RVec3rf _play_position;
+    RFloat _play_yaw;
     // Configured depth range, used to fill the depth layer info.
     RFloat _near_depth;
     RFloat _far_depth;
@@ -452,9 +460,6 @@ class RS_VRImpl {
     HandIntent _intents[2];
 
     /**** Locomotion ****/
-    // Play-space offset integrated each present cycle; guarded with the eyes by _eye_mutex.
-    RVec3rf _play_position;
-    RFloat _play_yaw = 0;
     XrTime _last_input_time = 0;
 
     /**** HUD ****/
@@ -1788,6 +1793,13 @@ class RS_VRImpl {
 
     static RQuat3rf _yaw(RFloat angle) { return RQuat3rf(angle, RVec3rf(0, 0, 1)); }
 
+    // The play yaw turning the room's forward, which is world +x, onto a focus point.
+    static RFloat _makePlayYaw(const RVec3rf& position, const RVec3rf& focus) {
+        RVec3rf reach = focus - position;
+        if (std::abs(reach.x) < RFloat(RS_EPS) && std::abs(reach.y) < RFloat(RS_EPS)) return 0;
+        return std::atan2(reach.y, reach.x);
+    }
+
     /****************************************************************
      * HUD
      ****************************************************************/
@@ -2623,6 +2635,8 @@ std::atomic<bool> RS_WorldSessionComponentVR::_is_created{false};
 
 RS_WorldSessionComponentVR::RS_WorldSessionComponentVR(
     std::string name,
+    RVec3rf position,
+    RVec3rf focus,
     RSize samples_per_pixel,
     RSize max_depth,
     RFloat near_depth,
@@ -2636,6 +2650,8 @@ RS_WorldSessionComponentVR::RS_WorldSessionComponentVR(
 )
     : _name(std::move(name)),
       _vr_controller_name(_name + "#controller"),
+      _position(position),
+      _focus(focus),
       _samples_per_pixel(samples_per_pixel),
       _max_depth(max_depth),
       _near_depth(near_depth),
@@ -2667,6 +2683,8 @@ void RS_WorldSessionComponentVR::setPushForce(RFloat push_force) { _push_force =
 void RS_WorldSessionComponentVR::onAttach(RS_WorldSessionAccess access) {
     _access = std::move(access);
     _xr = std::make_unique<RS_VRImpl>(
+        _position,
+        _focus,
         _near_depth,
         _far_depth,
         _move_speed,
@@ -2838,8 +2856,9 @@ void RS_WorldSessionComponentVR::_syncManipulationCharacterization(RIndex hand) 
             break;
         }
         case ManipulationState::ENGAGING: {
-            // Poll the add tasks non-blocking: any failure tears the partial add down; once all
-            // succeed the controller and signals are resident for the next step's snapshot.
+            // Poll the add tasks non-blocking: hold here until every one settles, since the
+            // teardown reads an empty task list as its cue to remove what the engage added, and a
+            // failure left holding the add tasks would skip it and leak the partial add.
             bool is_any_failed = false;
             bool is_all_finished = true;
             for (const RS_WorldTask& task : _pending_tasks[hand]) {
@@ -2847,12 +2866,10 @@ void RS_WorldSessionComponentVR::_syncManipulationCharacterization(RIndex hand) 
                 if (state == RSE_WORLD_TASK_FAIL) is_any_failed = true;
                 if (state == RSE_WORLD_TASK_PENDING) is_all_finished = false;
             }
-            if (is_any_failed) {
-                _manip_state[hand] = ManipulationState::DISENGAGING;
-            } else if (is_all_finished) {
+            if (is_all_finished) {
                 _pending_tasks[hand].clear();
-                _manip_state[hand] = is_trigger ? ManipulationState::ENGAGED
-                                                : ManipulationState::DISENGAGING;
+                _manip_state[hand] = is_trigger && !is_any_failed ? ManipulationState::ENGAGED
+                                                                  : ManipulationState::DISENGAGING;
             }
             break;
         }

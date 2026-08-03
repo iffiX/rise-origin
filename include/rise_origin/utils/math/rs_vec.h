@@ -527,13 +527,6 @@ class RS_Vec2DMem {
         return *this;
     }
 
-    /// Assignment operator from RS_Vec2DMem
-    HOST_DEVICE_INLINE_QUALIFIER RS_Vec2DMem &operator=(const RS_Vec2DMem &v) {
-        data[0] = v.data[0];
-        data[1] = v.data[1];
-        return *this;
-    }
-
     /// Convert to RS_Vec2D<T>
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec2D<T> toVec2D() const {
@@ -1295,14 +1288,6 @@ class RS_Vec3DMem {
         return *this;
     }
 
-    /// Assignment operator from RS_Vec3DMem
-    HOST_DEVICE_INLINE_QUALIFIER RS_Vec3DMem &operator=(const RS_Vec3DMem &v) {
-        data[0] = v.data[0];
-        data[1] = v.data[1];
-        data[2] = v.data[2];
-        return *this;
-    }
-
     /// Convert to RS_Vec3D<T>
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec3D<T> toVec3D() const {
@@ -1974,15 +1959,6 @@ class RS_Vec4DMem {
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec4DMem &operator=(const RS_Vec4D<T> &v) {
         set(v.x, v.y, v.z, v.w);
-        return *this;
-    }
-
-    /// Assignment operator from RS_Vec4DMem
-    HOST_DEVICE_INLINE_QUALIFIER RS_Vec4DMem &operator=(const RS_Vec4DMem &v) {
-        data[0] = v.data[0];
-        data[1] = v.data[1];
-        data[2] = v.data[2];
-        data[3] = v.data[3];
         return *this;
     }
 

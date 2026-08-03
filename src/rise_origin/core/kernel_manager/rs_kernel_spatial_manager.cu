@@ -67,8 +67,10 @@ void RS_KernelSpatialManager::_initKernelData() {
     castKernelPtrAndCall(&_kernel_manager->kernel, [&](auto k_ptr) {
         auto mem_provider = _kernel_manager->getDeviceProvider();
         auto &ctx = k_ptr->ctx;
-        ctx.static_voxel_bvh.init(mem_provider);
-        ctx.dynamic_voxel_bvh.init(mem_provider);
+        ctx.static_voxel_contact_bvh.init(mem_provider);
+        ctx.dynamic_voxel_contact_bvh.init(mem_provider);
+        ctx.static_voxel_ray_bvh.init(mem_provider);
+        ctx.dynamic_voxel_ray_bvh.init(mem_provider);
         ctx.floor_triangle_bvh.init(mem_provider);
         ctx.intersect_region_bvh.init(mem_provider);
     });
@@ -81,8 +83,10 @@ void RS_KernelSpatialManager::_freeKernelData() {
         // Context data is modified, needs to update kernel
         _kernel_manager->markKernelModified();
 
-        ctx.static_voxel_bvh.free();
-        ctx.dynamic_voxel_bvh.free();
+        ctx.static_voxel_contact_bvh.free();
+        ctx.dynamic_voxel_contact_bvh.free();
+        ctx.static_voxel_ray_bvh.free();
+        ctx.dynamic_voxel_ray_bvh.free();
         ctx.floor_triangle_bvh.free();
         ctx.intersect_region_bvh.free();
     });

@@ -73,6 +73,8 @@ class RSCF_UpdateKernelOperationTime : public RS_ComputeFunction<RSCF_UpdateKern
 
 static auto ensure_vector_size = [](auto &vector, RSize size) {
     if (vector.capacity() < size) {
+        // Growing frees the old buffer, so any launch still reading it has to finish first.
+        vector.data.provider()->sync();
         vector.resize(size, false);
     }
     vector.occupy(size);
@@ -96,6 +98,9 @@ RS_SimulationExecutor::RS_SimulationExecutor(
         _reduce = RS_Reduce(p_ptr);
         _reduce_by_group = RS_ReduceByGroup(p_ptr);
         _scan = RS_Scan(p_ptr);
+        _prefix_sum_flags_0 = RS_Vector<RIndex>(p_ptr);
+        _prefix_sum_flags_1 = RS_Vector<RIndex>(p_ptr);
+        _prefix_sum_result_0 = RS_Vector<RIndex>(p_ptr);
         _sort = RS_RadixSortPairs(p_ptr);
         _merge_sort = RS_SortPairs(p_ptr);
     });
@@ -134,6 +139,9 @@ void RS_SimulationExecutor::free() {
     _reduce.free();
     _reduce_by_group.free();
     _scan.free();
+    _prefix_sum_flags_0.free();
+    _prefix_sum_flags_1.free();
+    _prefix_sum_result_0.free();
     _sort.free();
     _merge_sort.free();
 }
@@ -212,10 +220,11 @@ bool RS_SimulationExecutor::step() {
 }
 
 void RS_SimulationExecutor::stepPaused() {
-    // Refit the dynamic voxel BVH after one so a teleport is visible on this frame.
+    // Refit the dynamic voxel BVHs after one so a teleport is visible on this frame.
     if (_runMechanicalSignalTransformUpdate()) {
         _runWithCriticalDataAccessGuard([&](auto *, auto *, auto, bool) {
-            _refitDynamicVoxelBVH();
+            _refitDynamicVoxelContactBVH();
+            _refitDynamicVoxelRayBVH();
         });
     }
 
@@ -583,8 +592,10 @@ RSize RS_SimulationExecutor::_runSentinel(bool &is_hard_abort) {
             }
         }
 
-        _rebuildStaticVoxelBVHIfNeeded();
-        _rebuildDynamicVoxelBVH();
+        _rebuildStaticVoxelContactBVHIfNeeded();
+        _rebuildStaticVoxelRayBVHIfNeeded();
+        _rebuildDynamicVoxelContactBVH();
+        _rebuildDynamicVoxelRayBVH();
     });
     return purged;
 }
@@ -728,11 +739,11 @@ void RS_SimulationExecutor::_runRigidbodyContactAndConstraintUpdate() {
 
             using SharedRBState = typename RS_ConstraintCompute<
                 ComputeAccuracy>::RSCF_PGSUpdateJoint::SharedRigidBodyState;
-            RSize num_blocks = ctx.host_data->structure_constraint_joint_block_range_layout.size();
+            RSize block_num = ctx.host_data->structure_constraint_joint_block_range_layout.size();
             RSize max_cj_per_structure = k_ptr->host_data->max_constraint_joint_per_structure;
             RSize max_rb_per_structure = k_ptr->host_data->max_rigid_body_per_structure;
             RSize block_size = RS_ALIGN(max_cj_per_structure, 32);
-            RSize total_threads = block_size * num_blocks;
+            RSize total_threads = block_size * block_num;
             RBigSize shared_bytes = RBIG_SIZE(max_rb_per_structure) * sizeof(SharedRBState);
 
             p_ptr->template run<RSCF_LaunchDirect<
@@ -1058,24 +1069,25 @@ void RS_SimulationExecutor::_runContactUpdate() {
         static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
         using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
 
-        _rebuildStaticVoxelBVHIfNeeded();
+        _rebuildStaticVoxelContactBVHIfNeeded();
         _rebuildFloorTriangleBVHIfNeeded();
         if (is_rebuild_needed) {
-            _rebuildDynamicVoxelBVH();
+            _rebuildDynamicVoxelContactBVH();
         } else if (is_refit_needed) {
-            _refitDynamicVoxelBVH();
+            _refitDynamicVoxelContactBVH();
         }
 
         if (!is_discovery_needed) return;
 
         auto &ctx = k_ptr->ctx;
-        RSize leaf_count = ctx.dynamic_voxel_bvh.object_identifiers.size();
+        RSize leaf_count = ctx.dynamic_voxel_contact_bvh.object_identifiers.size();
         if (leaf_count == 0) return;
 
         p_ptr->template run<RSCF_LaunchDirect<
             typename RS_VoxelCompute<ComputeAccuracy>::RSCF_FindContactVoxels,
             KernelType>>(
-            {leaf_count, RS_AUTO_BLOCK_SIZE, false}, ctx.dynamic_voxel_bvh.object_identifiers
+            {leaf_count, RS_AUTO_BLOCK_SIZE, false},
+            ctx.dynamic_voxel_contact_bvh.object_identifiers
         );
     });
 }
@@ -1161,8 +1173,9 @@ bool RS_SimulationExecutor::_runMechanicalSignalTransformUpdate() {
             _kernel_manager->finalizeTransformSignals();
         }
 
-        // Rebuild the static voxel BVH now if a transform moved static voxels; a no-op otherwise.
-        _rebuildStaticVoxelBVHIfNeeded();
+        // Rebuild the static voxel BVHs now if a transform moved static voxels; a no-op otherwise.
+        _rebuildStaticVoxelContactBVHIfNeeded();
+        _rebuildStaticVoxelRayBVHIfNeeded();
     });
     return is_transform_applied;
 }
@@ -1243,19 +1256,32 @@ void RS_SimulationExecutor::_syncExecutorInfo() {
         RBigSize dynamic_rigid_body_num = handle_count("dynamic_rigid_body");
         RBigSize rigid_body_num = ctx.host_data->structure_rigid_body_layout.size();
         _kernel->setExecutorInfo(
-            "world_dynamic_voxel_num", std::to_string(handle_count("dynamic_voxel"))
-        );
-        _kernel->setExecutorInfo(
-            "world_bvh_dynamic_voxel_num", std::to_string(handle_count("bvh_dynamic_voxel"))
-        );
-        _kernel->setExecutorInfo(
             "world_static_voxel_num", std::to_string(handle_count("static_voxel"))
         );
         _kernel->setExecutorInfo(
-            "world_dynamic_rigid_body_num", std::to_string(dynamic_rigid_body_num)
+            "world_dynamic_voxel_num", std::to_string(handle_count("dynamic_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_static_contact_active_voxel_num",
+            std::to_string(handle_count("static_and_contact_active_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_dynamic_contact_active_voxel_num",
+            std::to_string(handle_count("dynamic_and_contact_active_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_static_ray_active_voxel_num",
+            std::to_string(handle_count("static_and_ray_active_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_dynamic_ray_active_voxel_num",
+            std::to_string(handle_count("dynamic_and_ray_active_voxel"))
         );
         _kernel->setExecutorInfo(
             "world_static_rigid_body_num", std::to_string(rigid_body_num - dynamic_rigid_body_num)
+        );
+        _kernel->setExecutorInfo(
+            "world_dynamic_rigid_body_num", std::to_string(dynamic_rigid_body_num)
         );
         _kernel->setExecutorInfo(
             "world_link_num", std::to_string(ctx.host_data->structure_link_layout.size())
@@ -1300,9 +1326,9 @@ void RS_SimulationExecutor::_paceToWallclock() {
 }
 
 void RS_SimulationExecutor::_updateVisionAndRay() {
-    _rebuildStaticVoxelBVHIfNeeded();
+    _rebuildStaticVoxelRayBVHIfNeeded();
     _rebuildFloorTriangleBVHIfNeeded();
-    _rebuildDynamicVoxelBVH();
+    _rebuildDynamicVoxelRayBVH();
 
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
@@ -1958,28 +1984,61 @@ void RS_SimulationExecutor::_storeControllerRecords() {
     });
 }
 
-void RS_SimulationExecutor::_rebuildStaticVoxelBVHIfNeeded() {
+void RS_SimulationExecutor::_rebuildStaticVoxelContactBVHIfNeeded() {
     // Static geometry rebuilds when the partition membership changed or a transform moved it.
     _resolveVoxelMobilityPartitionIfNeeded();
-    if (!_is_static_bvh_dirty && !_kernel_manager->isStaticVoxelMoved()) return;
+    if (!_is_static_contact_bvh_dirty && !_kernel_manager->isStaticVoxelMoved()) return;
+    _resolveVoxelContactActivePartition();
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
-        _buildVoxelBVH(k_ptr->ctx.static_voxel_bvh, _handles.at("static_voxel"));
+        _buildVoxelBVH(
+            k_ptr->ctx.static_voxel_contact_bvh, _handles.at("static_and_contact_active_voxel")
+        );
     });
-    _is_static_bvh_dirty = false;
+    _is_static_contact_bvh_dirty = false;
+}
+
+void RS_SimulationExecutor::_rebuildStaticVoxelRayBVHIfNeeded() {
+    // Static geometry rebuilds when the partition membership changed or a transform moved it.
+    _resolveVoxelMobilityPartitionIfNeeded();
+    if (!_is_static_ray_bvh_dirty && !_kernel_manager->isStaticVoxelMoved()) return;
+    _resolveVoxelRayActivePartition();
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        _buildVoxelBVH(k_ptr->ctx.static_voxel_ray_bvh, _handles.at("static_and_ray_active_voxel"));
+    });
+    _is_static_ray_bvh_dirty = false;
+    // Both static trees read the moved flag, so only the later of the two clears it.
     _kernel_manager->clearStaticVoxelMoved();
 }
 
-void RS_SimulationExecutor::_rebuildDynamicVoxelBVH() {
+void RS_SimulationExecutor::_rebuildDynamicVoxelContactBVH() {
     _resolveVoxelMobilityPartitionIfNeeded();
-    _resolveVoxelBVHDynamicPartition();
+    _resolveVoxelContactActivePartition();
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
-        _buildVoxelBVH(k_ptr->ctx.dynamic_voxel_bvh, _handles.at("bvh_dynamic_voxel"));
+        _buildVoxelBVH(
+            k_ptr->ctx.dynamic_voxel_contact_bvh, _handles.at("dynamic_and_contact_active_voxel")
+        );
     });
 }
 
-void RS_SimulationExecutor::_refitDynamicVoxelBVH() {
+void RS_SimulationExecutor::_rebuildDynamicVoxelRayBVH() {
+    _resolveVoxelMobilityPartitionIfNeeded();
+    _resolveVoxelRayActivePartition();
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
-        _refitVoxelBVH(k_ptr->ctx.dynamic_voxel_bvh);
+        _buildVoxelBVH(
+            k_ptr->ctx.dynamic_voxel_ray_bvh, _handles.at("dynamic_and_ray_active_voxel")
+        );
+    });
+}
+
+void RS_SimulationExecutor::_refitDynamicVoxelContactBVH() {
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        _refitVoxelBVH(k_ptr->ctx.dynamic_voxel_contact_bvh);
+    });
+}
+
+void RS_SimulationExecutor::_refitDynamicVoxelRayBVH() {
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        _refitVoxelBVH(k_ptr->ctx.dynamic_voxel_ray_bvh);
     });
 }
 
@@ -2019,23 +2078,25 @@ void RS_SimulationExecutor::_rebuildFloorTriangleBVHIfNeeded() {
     });
 }
 
-void RS_SimulationExecutor::_buildVoxelBVH(
-    logic::RS_VoxelBVH &bvh,
-    device::RS_Vector<RHandle> &handles
-) {
+template <typename VoxelBVH>
+void RS_SimulationExecutor::_buildVoxelBVH(VoxelBVH &bvh, device::RS_Vector<RHandle> &handles) {
+    static constexpr bool is_contact = std::is_same_v<VoxelBVH, logic::RS_VoxelContactBVH>;
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
             selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+                using VoxelComputeType = RS_VoxelCompute<ComputeAccuracy>;
+                using FillType = std::conditional_t<
+                    is_contact,
+                    typename VoxelComputeType::RSCF_FillVoxelContactBVHLeafData,
+                    typename VoxelComputeType::RSCF_FillVoxelRayBVHLeafData>;
 
-                RSize num_active = handles.size();
-                bvh.resize(num_active, false);
-                if (num_active > 0) {
-                    p_ptr->template run<RSCF_LaunchDirect<
-                        typename RS_VoxelCompute<ComputeAccuracy>::RSCF_FillVoxelBVHLeafData,
-                        KernelType>>(
-                        {num_active, RS_AUTO_BLOCK_SIZE, false},
+                RSize active_num = handles.size();
+                bvh.resize(active_num, false);
+                if (active_num > 0) {
+                    p_ptr->template run<RSCF_LaunchDirect<FillType, KernelType>>(
+                        {active_num, RS_AUTO_BLOCK_SIZE, false},
                         handles,
                         bvh.object_identifiers,
                         bvh.leaf_bounds
@@ -2049,19 +2110,24 @@ void RS_SimulationExecutor::_buildVoxelBVH(
     });
 }
 
-void RS_SimulationExecutor::_refitVoxelBVH(logic::RS_VoxelBVH &bvh) {
+template <typename VoxelBVH>
+void RS_SimulationExecutor::_refitVoxelBVH(VoxelBVH &bvh) {
+    static constexpr bool is_contact = std::is_same_v<VoxelBVH, logic::RS_VoxelContactBVH>;
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
             selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+                using VoxelComputeType = RS_VoxelCompute<ComputeAccuracy>;
+                using RefitType = std::conditional_t<
+                    is_contact,
+                    typename VoxelComputeType::RSCF_RefitVoxelContactBVHLeafData,
+                    typename VoxelComputeType::RSCF_RefitVoxelRayBVHLeafData>;
 
                 RSize leaf_count = bvh.object_identifiers.size();
                 if (leaf_count == 0) return;
 
-                p_ptr->template run<RSCF_LaunchDirect<
-                    typename RS_VoxelCompute<ComputeAccuracy>::RSCF_RefitVoxelBVHLeafData,
-                    KernelType>>(
+                p_ptr->template run<RSCF_LaunchDirect<RefitType, KernelType>>(
                     {leaf_count, RS_AUTO_BLOCK_SIZE, false}, bvh.object_identifiers, bvh.leaf_bounds
                 );
 
@@ -2130,10 +2196,17 @@ RS_Vector<RHandle> RS_SimulationExecutor::_getLaunchHandles(const std::string &n
                 // The dynamic and static subsets are derived from the full voxel set.
                 _resolveVoxelMobilityPartitionIfNeeded();
                 indices = _handles.at(name);
-            } else if (name == "bvh_dynamic_voxel") {
-                // The dynamic BVH subset is derived from the current dynamic subset.
+            } else if (name == "static_and_contact_active_voxel" ||
+                       name == "dynamic_and_contact_active_voxel") {
+                // The contact active subsets are derived from the mobility subsets.
                 _resolveVoxelMobilityPartitionIfNeeded();
-                _resolveVoxelBVHDynamicPartition();
+                _resolveVoxelContactActivePartition();
+                indices = _handles.at(name);
+            } else if (name == "static_and_ray_active_voxel" ||
+                       name == "dynamic_and_ray_active_voxel") {
+                // The ray active subsets are derived from the mobility subsets.
+                _resolveVoxelMobilityPartitionIfNeeded();
+                _resolveVoxelRayActivePartition();
                 indices = _handles.at(name);
             } else if (name == "link") {
                 if (ctx.host_data->structure_link_layout.versionID() !=
@@ -2233,37 +2306,36 @@ bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
                 if (!dirty) return;
 
                 auto voxel_handles = _getLaunchHandles("voxel");
-                RSize num_voxels = voxel_handles.size();
+                RSize voxel_num = voxel_handles.size();
 
-                if (num_voxels == 0) {
+                if (voxel_num == 0) {
                     _handles["dynamic_voxel"].occupy(0);
                     _handles["static_voxel"].occupy(0);
                 } else {
-                    ensure_vector_size(ctx.structure_voxel_dynamic_flags, num_voxels);
-                    ensure_vector_size(ctx.structure_voxel_dynamic_prefix_sums, num_voxels);
-                    ensure_vector_size(ctx.structure_voxel_static_flags, num_voxels);
-                    ensure_vector_size(ctx.structure_voxel_static_prefix_sums, num_voxels);
+                    ensure_vector_size(_prefix_sum_flags_0, voxel_num);
+                    ensure_vector_size(_prefix_sum_flags_1, voxel_num);
+                    ensure_vector_size(_prefix_sum_result_0, voxel_num);
 
                     // One classify pass writes both flag arrays.
                     p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
                         logic::RSCF_GetVoxelMobilityFlags,
                         KernelType>>(
-                        {num_voxels, RS_AUTO_BLOCK_SIZE, false},
+                        {voxel_num, RS_AUTO_BLOCK_SIZE, false},
                         voxel_handles,
-                        ctx.structure_voxel_dynamic_flags,
-                        ctx.structure_voxel_static_flags
+                        _prefix_sum_flags_0,
+                        _prefix_sum_flags_1
                     );
 
                     auto compact = [&](auto &flags, auto &prefix_sums, const char *key) {
                         _scan.template inclusiveSum<RIndex, RIndex>(flags, prefix_sums);
                         RIndex count = 0;
-                        prefix_sums.readSlice(&count, 1, num_voxels - 1, true);
+                        prefix_sums.readSlice(&count, 1, voxel_num - 1, true);
                         ensure_vector_size(_handles[key], count);
                         if (count > 0) {
                             p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
                                 logic::RSCF_CompactVoxelHandles,
                                 KernelType>>(
-                                {num_voxels, RS_AUTO_BLOCK_SIZE, false},
+                                {voxel_num, RS_AUTO_BLOCK_SIZE, false},
                                 voxel_handles,
                                 flags,
                                 prefix_sums,
@@ -2271,21 +2343,14 @@ bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
                             );
                         }
                     };
-                    compact(
-                        ctx.structure_voxel_dynamic_flags,
-                        ctx.structure_voxel_dynamic_prefix_sums,
-                        "dynamic_voxel"
-                    );
-                    compact(
-                        ctx.structure_voxel_static_flags,
-                        ctx.structure_voxel_static_prefix_sums,
-                        "static_voxel"
-                    );
+                    compact(_prefix_sum_flags_0, _prefix_sum_result_0, "dynamic_voxel");
+                    compact(_prefix_sum_flags_1, _prefix_sum_result_0, "static_voxel");
                 }
 
                 _handle_version_ids["voxel_partition"] = version;
                 _kernel_manager->clearVoxelPartitionModified();
-                _is_static_bvh_dirty = true;
+                _is_static_contact_bvh_dirty = true;
+                _is_static_ray_bvh_dirty = true;
                 recomputed = true;
             });
         });
@@ -2293,61 +2358,75 @@ bool RS_SimulationExecutor::_resolveVoxelMobilityPartitionIfNeeded() {
     return recomputed;
 }
 
-void RS_SimulationExecutor::_resolveVoxelBVHDynamicPartition() {
+template <typename ActiveFlagsComputeFunction>
+void RS_SimulationExecutor::_resolveVoxelActivePartition(
+    const char *static_key,
+    const char *dynamic_key
+) {
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
             selectComputeAccuracy(_simulation_compute_accuracy, [&](auto acc_const) {
                 static constexpr RSE_FloatType ComputeAccuracy = acc_const.value;
                 using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
-                auto &ctx = k_ptr->ctx;
 
-                if (_handles.find("bvh_dynamic_voxel") == _handles.end()) {
-                    _handles.insert({"bvh_dynamic_voxel", RS_Vector<RHandle>(p_ptr)});
-                }
+                auto compact_active = [&](const char *mobility_key, const char *out_key) {
+                    if (_handles.find(out_key) == _handles.end()) {
+                        _handles.insert({out_key, RS_Vector<RHandle>(p_ptr)});
+                    }
+                    auto &mobility_handles = _handles.at(mobility_key);
+                    RSize mobility_num = mobility_handles.size();
+                    if (mobility_num == 0) {
+                        _handles[out_key].occupy(0);
+                        return;
+                    }
 
-                auto &dynamic_handles = _handles.at("dynamic_voxel");
-                RSize count_dynamic = dynamic_handles.size();
-                if (count_dynamic == 0) {
-                    _handles["bvh_dynamic_voxel"].occupy(0);
-                    return;
-                }
+                    ensure_vector_size(_prefix_sum_flags_0, mobility_num);
+                    ensure_vector_size(_prefix_sum_result_0, mobility_num);
 
-                ensure_vector_size(ctx.structure_voxel_bvh_dynamic_flags, count_dynamic);
-                ensure_vector_size(ctx.structure_voxel_bvh_dynamic_prefix_sums, count_dynamic);
-
-                // Re-evaluate exposure over the dynamic subset so a voxel exposed since the last
-                // rebuild joins the dynamic BVH.
-                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                    logic::RSCF_GetVoxelBVHDynamicFlags,
-                    KernelType>>(
-                    {count_dynamic, RS_AUTO_BLOCK_SIZE, false},
-                    dynamic_handles,
-                    ctx.structure_voxel_bvh_dynamic_flags
-                );
-
-                _scan.template inclusiveSum<RIndex, RIndex>(
-                    ctx.structure_voxel_bvh_dynamic_flags,
-                    ctx.structure_voxel_bvh_dynamic_prefix_sums
-                );
-                RIndex count = 0;
-                ctx.structure_voxel_bvh_dynamic_prefix_sums.readSlice(
-                    &count, 1, count_dynamic - 1, true
-                );
-                ensure_vector_size(_handles["bvh_dynamic_voxel"], count);
-                if (count > 0) {
-                    p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
-                        logic::RSCF_CompactVoxelHandles,
-                        KernelType>>(
-                        {count_dynamic, RS_AUTO_BLOCK_SIZE, false},
-                        dynamic_handles,
-                        ctx.structure_voxel_bvh_dynamic_flags,
-                        ctx.structure_voxel_bvh_dynamic_prefix_sums,
-                        _handles["bvh_dynamic_voxel"]
+                    // Re-evaluate exposure so a voxel exposed since the last rebuild joins.
+                    p_ptr->template run<
+                        RSCF_LaunchSetOrGetWithHandles<ActiveFlagsComputeFunction, KernelType>>(
+                        {mobility_num, RS_AUTO_BLOCK_SIZE, false},
+                        mobility_handles,
+                        _prefix_sum_flags_0
                     );
-                }
+
+                    _scan.template inclusiveSum<RIndex, RIndex>(
+                        _prefix_sum_flags_0, _prefix_sum_result_0
+                    );
+                    RIndex count = 0;
+                    _prefix_sum_result_0.readSlice(&count, 1, mobility_num - 1, true);
+                    ensure_vector_size(_handles[out_key], count);
+                    if (count > 0) {
+                        p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                            logic::RSCF_CompactVoxelHandles,
+                            KernelType>>(
+                            {mobility_num, RS_AUTO_BLOCK_SIZE, false},
+                            mobility_handles,
+                            _prefix_sum_flags_0,
+                            _prefix_sum_result_0,
+                            _handles[out_key]
+                        );
+                    }
+                };
+
+                compact_active("static_voxel", static_key);
+                compact_active("dynamic_voxel", dynamic_key);
             });
         });
     });
+}
+
+void RS_SimulationExecutor::_resolveVoxelContactActivePartition() {
+    _resolveVoxelActivePartition<logic::RSCF_GetVoxelContactActiveFlags>(
+        "static_and_contact_active_voxel", "dynamic_and_contact_active_voxel"
+    );
+}
+
+void RS_SimulationExecutor::_resolveVoxelRayActivePartition() {
+    _resolveVoxelActivePartition<logic::RSCF_GetVoxelRayActiveFlags>(
+        "static_and_ray_active_voxel", "dynamic_and_ray_active_voxel"
+    );
 }
 
 bool RS_SimulationExecutor::_resolveRigidBodyMobilityPartitionIfNeeded() {
@@ -2371,39 +2450,36 @@ bool RS_SimulationExecutor::_resolveRigidBodyMobilityPartitionIfNeeded() {
             if (!dirty) return;
 
             auto rigid_body_handles = _getLaunchHandles("rigid_body");
-            RSize num_rigid_bodies = rigid_body_handles.size();
+            RSize rigid_body_num = rigid_body_handles.size();
 
-            if (num_rigid_bodies == 0) {
+            if (rigid_body_num == 0) {
                 _handles["dynamic_rigid_body"].occupy(0);
             } else {
-                ensure_vector_size(ctx.structure_rigid_body_dynamic_flags, num_rigid_bodies);
-                ensure_vector_size(ctx.structure_rigid_body_dynamic_prefix_sums, num_rigid_bodies);
+                ensure_vector_size(_prefix_sum_flags_0, rigid_body_num);
+                ensure_vector_size(_prefix_sum_result_0, rigid_body_num);
 
                 p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
                     logic::RSCF_GetRigidBodyMobilityFlags,
                     KernelType>>(
-                    {num_rigid_bodies, RS_AUTO_BLOCK_SIZE, false},
+                    {rigid_body_num, RS_AUTO_BLOCK_SIZE, false},
                     rigid_body_handles,
-                    ctx.structure_rigid_body_dynamic_flags
+                    _prefix_sum_flags_0
                 );
 
                 _scan.template inclusiveSum<RIndex, RIndex>(
-                    ctx.structure_rigid_body_dynamic_flags,
-                    ctx.structure_rigid_body_dynamic_prefix_sums
+                    _prefix_sum_flags_0, _prefix_sum_result_0
                 );
                 RIndex count = 0;
-                ctx.structure_rigid_body_dynamic_prefix_sums.readSlice(
-                    &count, 1, num_rigid_bodies - 1, true
-                );
+                _prefix_sum_result_0.readSlice(&count, 1, rigid_body_num - 1, true);
                 ensure_vector_size(_handles["dynamic_rigid_body"], count);
                 if (count > 0) {
                     p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
                         logic::RSCF_CompactRigidBodyHandles,
                         KernelType>>(
-                        {num_rigid_bodies, RS_AUTO_BLOCK_SIZE, false},
+                        {rigid_body_num, RS_AUTO_BLOCK_SIZE, false},
                         rigid_body_handles,
-                        ctx.structure_rigid_body_dynamic_flags,
-                        ctx.structure_rigid_body_dynamic_prefix_sums,
+                        _prefix_sum_flags_0,
+                        _prefix_sum_result_0,
                         _handles["dynamic_rigid_body"]
                     );
                 }

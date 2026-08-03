@@ -56,6 +56,7 @@ class RS_RaySensorRayCompute {
         FloatC t = FloatC(0);
         FloatC emission = FloatC(0);
         RHandle voxel = RS_NULL_HANDLE;
+        RHandle vision_material = RS_NULL_HANDLE;
         RIndex structure_gid = RS_NULL_INDEX;
         RIndex material_gid = RS_NULL_INDEX;
         bool is_floor_hit = false;
@@ -222,76 +223,286 @@ class RS_RaySensorRayCompute {
     }
 
     /**
-     * @brief First real boundary face along the ray inside a voxel box.
+     * @brief Nearest crossing of a ray with one deformed quad, tested as two triangles.
+     *
+     * @details The corners arrive in the winding getVoxelFaceCornerIndices produces, so the cross
+     * product of the first and last edge is the outward geometric normal. A deformed quad need
+     * not be planar, so both triangles are tested and the nearer crossing wins.
+     *
+     * @param ray        the ray being traced.
+     * @param corner_0   first quad corner in winding order.
+     * @param corner_1   second quad corner.
+     * @param corner_2   third quad corner, opposite the first.
+     * @param corner_3   fourth quad corner.
+     * @param t_min    nearest accepted distance along the ray.
+     * @param t_max    furthest accepted distance along the ray.
+     * @param t_out    distance to the crossing.
      */
-    template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static bool _voxelFirstBoundary(
-        Kernel* k,
-        RHandle voxel,
+    HOST_DEVICE_INLINE_QUALIFIER static bool _isRayIntersectingQuad(
+        const Ray& ray,
+        const Vec3C& corner_0,
+        const Vec3C& corner_1,
+        const Vec3C& corner_2,
+        const Vec3C& corner_3,
+        FloatC t_min,
+        FloatC t_max,
+        FloatC& t_out
+    ) {
+        FloatC u, v, t_cross;
+        FloatC t_near = t_max;
+        bool has_hit = false;
+        if (RS_Triangle<FloatC>::rayIntersect(
+                ray.ray_origin,
+                ray.ray_direction,
+                corner_0,
+                corner_1,
+                corner_2,
+                t_min,
+                t_near,
+                t_cross,
+                u,
+                v
+            )) {
+            t_near = t_cross;
+            has_hit = true;
+        }
+        if (RS_Triangle<FloatC>::rayIntersect(
+                ray.ray_origin,
+                ray.ray_direction,
+                corner_0,
+                corner_2,
+                corner_3,
+                t_min,
+                t_near,
+                t_cross,
+                u,
+                v
+            )) {
+            t_near = t_cross;
+            has_hit = true;
+        }
+        if (!has_hit) return false;
+        t_out = t_near;
+        return true;
+    }
+
+    /**
+     * @brief Slab test of a ray already in a box's own frame, the box centered on the origin.
+     *
+     * @details Reports both crossings and the axis each one lies on, so the caller can turn
+     * them into faces. The ray starts within the box when the entry distance falls short of
+     * t_min.
+     *
+     * @param local_origin    ray origin in the box frame.
+     * @param local_direction ray direction in the box frame.
+     * @param half_size       half the box edge length.
+     * @param t_min           nearest accepted distance along the ray.
+     * @param t_enter_out     distance to the crossing where the ray goes in.
+     * @param enter_axis_out  axis that crossing lies on, 0 for x, 1 for y and 2 for z.
+     * @param t_exit_out      distance to the crossing where the ray comes out.
+     * @param exit_axis_out   axis that crossing lies on.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER static bool _isRayIntersectingBox(
+        const Vec3C& local_origin,
+        const Vec3C& local_direction,
+        FloatC half_size,
+        FloatC t_min,
+        FloatC& t_enter_out,
+        int& enter_axis_out,
+        FloatC& t_exit_out,
+        int& exit_axis_out
+    ) {
+        Vec3C direction_reciprocal = local_direction.reciprocalFast();
+        Vec3C t0 = (Vec3C::full(-half_size) - local_origin).elemMul(direction_reciprocal);
+        Vec3C t1 = (Vec3C::full(half_size) - local_origin).elemMul(direction_reciprocal);
+        Vec3C t_min_vec = t0.min(t1);
+        Vec3C t_max_vec = t0.max(t1);
+        t_enter_out = t_min_vec.max();
+        t_exit_out = t_max_vec.min();
+        if (t_exit_out < t_enter_out || t_exit_out < t_min) return false;
+        enter_axis_out = t_min_vec.argmax();
+        exit_axis_out = t_max_vec.argmin();
+        return true;
+    }
+
+    /**
+     * @brief First real boundary face along the ray inside a voxel hexahedron.
+     *
+     * @details The leaf carries eight corners that deformation can pull out of any box shape, so
+     * each face is crossed as a quad rather than a slab. Only faces the roles expose are tested:
+     * an interior face can never carry a boundary, an entry is reported for any exposed face, and
+     * an exit only where the face meets air.
+     *
+     * @param leaf         ray-BVH leaf holding the corners and roles.
+     * @param ray          the ray being traced.
+     * @param t_min        nearest accepted distance along the ray.
+     * @param t_max        furthest accepted distance along the ray.
+     * @param t_out        distance to the crossing.
+     * @param face_out     crossed face index in RSE_LinkDirection order.
+     * @param is_front_out whether the ray meets the face from outside the voxel.
+     * @param normal_out   outward normal of the crossed face, unit length.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER static bool _voxelHexahedronFirstBoundary(
+        RState metadata,
+        const RS_VoxelRayBVHObjectIdentifier& leaf,
         const Ray& ray,
         FloatC t_min,
+        FloatC t_max,
         FloatC& t_out,
         int& face_out,
         bool& is_front_out,
         Vec3C& normal_out
     ) {
-        auto& ctx = k->ctx;
-        Vec3C nnn = V_G(voxel, nnn_offset);
-        Vec3C ppp = V_G(voxel, ppp_offset);
-        Vec3C position = V_G(voxel, position);
-        Quat3C orientation = V_G(voxel, orientation);
-        Vec3C local_axes[3] = {
-            orientation.toOrthoAxisX(), orientation.toOrthoAxisY(), orientation.toOrthoAxisZ()
-        };
-        Vec3C local_ray_origin = orientation.rotateVec3DInv(ray.ray_origin - position);
-        Vec3C local_ray_dir = orientation.rotateVec3DInv(ray.ray_direction);
-        Vec3C local_ray_dir_reciprocal = local_ray_dir.reciprocalFast();
-        Vec3C t0 = (nnn - local_ray_origin).elemMul(local_ray_dir_reciprocal);
-        Vec3C t1 = (ppp - local_ray_origin).elemMul(local_ray_dir_reciprocal);
-        Vec3C t_min_vec = t0.min(t1);
-        Vec3C t_max_vec = t0.max(t1);
-        FloatC t_enter = t_min_vec.max();
-        FloatC t_exit = t_max_vec.min();
-        if (t_exit < t_enter || t_exit < t_min) return false;
-        RState voxel_state = V_G(voxel, state);
+        Vec3C center = Vec3C(leaf.position);
 
-        bool is_entry_reached = t_enter >= t_min;
+        FloatC t_near = t_max;
+        bool has_hit = false;
+        Vec3C best_normal;
+        for (int face = 0; face < 6; face++) {
+            RSE_VoxelFaceRole role = getRayLeafFaceRole(metadata, face);
+            if (role == RSE_VOXEL_FACE_INTERIOR) continue;
+
+            int index_0, index_1, index_2, index_3;
+            getVoxelFaceCornerIndices(
+                face >> 1, (face & 1) == 0, index_0, index_1, index_2, index_3
+            );
+            const auto& corner = leaf.shape.hexahedron.corner_offset;
+            Vec3C corner_0 = center + corner[index_0].template toVec3D<FloatC>();
+            Vec3C corner_1 = center + corner[index_1].template toVec3D<FloatC>();
+            Vec3C corner_2 = center + corner[index_2].template toVec3D<FloatC>();
+            Vec3C corner_3 = center + corner[index_3].template toVec3D<FloatC>();
+
+            // The diagonals give the normal of the whole face, so either triangle of a face
+            // bent out of plane reads the same way.
+            Vec3C normal = (corner_2 - corner_0).cross(corner_3 - corner_1);
+            bool is_front = ray.ray_direction.dot(normal) < FloatC(0);
+
+            // One interface belongs to two voxels, and the voxel being entered reports it, so
+            // a face met from within is skipped unless it opens onto air, where there is no
+            // other voxel to report it.
+            if (!is_front && role != RSE_VOXEL_FACE_AIR) continue;
+
+            FloatC t_cross;
+            if (!_isRayIntersectingQuad(
+                    ray, corner_0, corner_1, corner_2, corner_3, t_min, t_near, t_cross
+                ))
+                continue;
+
+            t_near = t_cross;
+            face_out = face;
+            is_front_out = is_front;
+            best_normal = normal;
+            has_hit = true;
+        }
+        if (!has_hit) return false;
+
+        // Only the winning face pays for a root.
+        t_out = t_near;
+        normal_out = best_normal.normalized();
+        return true;
+    }
+
+    /**
+     * @brief First real boundary face along the ray inside a voxel box.
+     *
+     * @details A non-deformable voxel keeps its box, so one slab test covers all six faces and
+     * only the two it crosses need a role. The entry face comes first when the ray starts
+     * outside, then the exit face, and the first that is a real boundary wins.
+     *
+     * @param leaf         ray-BVH leaf holding the box and the roles.
+     * @param ray          the ray being traced.
+     * @param t_min        nearest accepted distance along the ray.
+     * @param t_max        furthest accepted distance along the ray.
+     * @param t_out        distance to the crossing.
+     * @param face_out     crossed face index in RSE_LinkDirection order.
+     * @param is_front_out whether the ray meets the face from outside the voxel.
+     * @param normal_out   outward normal of the crossed face, unit length.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER static bool _voxelBoxFirstBoundary(
+        RState metadata,
+        const RS_VoxelRayBVHObjectIdentifier& leaf,
+        const Ray& ray,
+        FloatC t_min,
+        FloatC t_max,
+        FloatC& t_out,
+        int& face_out,
+        bool& is_front_out,
+        Vec3C& normal_out
+    ) {
+        Quat3C orientation = Quat3C(leaf.shape.box.orientation);
+        FloatC half_size = FloatC(0.5) * FloatC(leaf.shape.box.size);
+
+        Vec3C local_origin = orientation.rotateVec3DInv(ray.ray_origin - Vec3C(leaf.position));
+        Vec3C local_direction = orientation.rotateVec3DInv(ray.ray_direction);
+
+        FloatC t_enter, t_exit;
+        int enter_axis, exit_axis;
+        if (!_isRayIntersectingBox(
+                local_origin,
+                local_direction,
+                half_size,
+                t_min,
+                t_enter,
+                enter_axis,
+                t_exit,
+                exit_axis
+            ))
+            return false;
+
         for (int pass = 0; pass < 2; ++pass) {
             bool is_entry = pass == 0;
-            if (is_entry && !is_entry_reached) continue;
+            if (is_entry && t_enter < t_min) continue;
             FloatC t_cross = is_entry ? t_enter : t_exit;
-            int axis = is_entry ? t_min_vec.argmax() : t_max_vec.argmin();
-            Vec3C local_hit_point = local_ray_origin + local_ray_dir * t_cross;
-            Vec3C center_offset = local_hit_point - (nnn + ppp) * FloatC(0.5);
-            bool is_pos = center_offset[axis] > 0;
-            int face = 2 * axis + (is_pos ? 0 : 1);
-            RSE_VoxelFaceRole role = getFaceRole(voxel_state, face);
+            if (t_cross > t_max) return false;
+
+            int axis = is_entry ? enter_axis : exit_axis;
+            Vec3C local_hit = local_origin + local_direction * t_cross;
+            bool is_positive = local_hit[axis] > FloatC(0);
+            int face = 2 * axis + (is_positive ? 0 : 1);
+            RSE_VoxelFaceRole role = getRayLeafFaceRole(metadata, face);
             if (role == RSE_VOXEL_FACE_INTERIOR) continue;
+
+            // One interface belongs to two voxels, and the voxel being entered reports it, so
+            // a face met from within is skipped unless it opens onto air, where there is no
+            // other voxel to report it.
             if (!is_entry && role != RSE_VOXEL_FACE_AIR) continue;
+
+            FloatC side = is_positive ? FloatC(1) : FloatC(-1);
+            Vec3C local_normal(
+                axis == 0 ? side : FloatC(0),
+                axis == 1 ? side : FloatC(0),
+                axis == 2 ? side : FloatC(0)
+            );
+
             t_out = t_cross;
             face_out = face;
-            normal_out = is_pos ? local_axes[axis] : -local_axes[axis];
-            is_front_out = ray.ray_direction.dot(normal_out) < FloatC(0);
+            normal_out = orientation.rotateVec3D(local_normal);
+            is_front_out = is_entry;
             return true;
         }
         return false;
     }
 
-    template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static bool _isRayIntersectingVoxel(
-        Kernel* k,
+    /** @brief First real boundary face along the ray, taking whichever shape the leaf holds. */
+    HOST_DEVICE_INLINE_QUALIFIER static bool _voxelFirstBoundary(
+        const RS_VoxelRayBVHObjectIdentifier& leaf,
         const Ray& ray,
-        RHandle voxel,
         FloatC t_min,
         FloatC t_max,
-        FloatC& t_cross_out
+        FloatC& t_out,
+        int& face_out,
+        bool& is_front_out,
+        Vec3C& normal_out
     ) {
-        int face;
-        bool is_front;
-        Vec3C normal;
-        if (!_voxelFirstBoundary(k, voxel, ray, t_min, t_cross_out, face, is_front, normal))
-            return false;
-        return t_cross_out <= t_max;
+        RState metadata = leaf.object_metadata;
+        RS_VoxelRayBVHLeafMetadataUnion m_union{metadata};
+        if (m_union.meta.is_box)
+            return _voxelBoxFirstBoundary(
+                metadata, leaf, ray, t_min, t_max, t_out, face_out, is_front_out, normal_out
+            );
+        return _voxelHexahedronFirstBoundary(
+            metadata, leaf, ray, t_min, t_max, t_out, face_out, is_front_out, normal_out
+        );
     }
 
     /**
@@ -304,11 +515,10 @@ class RS_RaySensorRayCompute {
         const Ray& ray,
         FloatC t_min,
         FloatC& t_closest_in_out,
-        RHandle& voxel_out
+        HitRecord& rec_in_out
     ) {
         if (root.current() == RS_NULL_INDEX) return;
-        static constexpr int STACK_SIZE = 32;
-        RIndex stack[STACK_SIZE];
+        RIndex stack[RS_RUNTIME_BVH_STACK_SIZE];
         int stack_top = 0;
         stack[stack_top++] = root.current();
         while (stack_top > 0) {
@@ -331,13 +541,20 @@ class RS_RaySensorRayCompute {
                     continue;
                 auto obj_ptr = node.object();
                 if (obj_ptr == nullptr) continue;
-                RHandle voxel = obj_ptr->object_handle;
                 FloatC t_hit;
-                if (_isRayIntersectingVoxel(k, ray, voxel, t_min, t_closest_in_out, t_hit) &&
-                    t_hit < t_closest_in_out) {
-                    t_closest_in_out = t_hit;
-                    voxel_out = voxel;
-                }
+                int face;
+                bool is_front;
+                Vec3C normal;
+                if (!_voxelFirstBoundary(
+                        *obj_ptr, ray, t_min, t_closest_in_out, t_hit, face, is_front, normal
+                    ))
+                    continue;
+                t_closest_in_out = t_hit;
+                rec_in_out.t = t_hit;
+                rec_in_out.normal = is_front ? normal : -normal;
+                rec_in_out.voxel = obj_ptr->object_handle;
+                rec_in_out.vision_material = obj_ptr->vision_material;
+                rec_in_out.structure_gid = obj_ptr->structure_gid;
                 continue;
             }
 
@@ -363,7 +580,7 @@ class RS_RaySensorRayCompute {
                                     t_right_enter,
                                     t_exit_unused
                                 );
-            if (is_left_hit && is_right_hit && stack_top + 2 <= STACK_SIZE) {
+            if (is_left_hit && is_right_hit && stack_top + 2 <= RS_RUNTIME_BVH_STACK_SIZE) {
                 if (t_left_enter < t_right_enter) {
                     stack[stack_top++] = internal_node.right;
                     stack[stack_top++] = internal_node.left;
@@ -371,30 +588,23 @@ class RS_RaySensorRayCompute {
                     stack[stack_top++] = internal_node.left;
                     stack[stack_top++] = internal_node.right;
                 }
-            } else if (is_left_hit && stack_top + 1 <= STACK_SIZE) {
+            } else if (is_left_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
                 stack[stack_top++] = internal_node.left;
-            } else if (is_right_hit && stack_top + 1 <= STACK_SIZE) {
+            } else if (is_right_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
                 stack[stack_top++] = internal_node.right;
             }
         }
     }
 
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static bool _findHitVoxel(
-        Kernel* k,
-        const Ray& ray,
-        FloatC t_min,
-        FloatC t_max,
-        RHandle& voxel_out,
-        FloatC& t_out
-    ) {
+    HOST_DEVICE_INLINE_QUALIFIER static bool
+    _findHitVoxel(Kernel* k, const Ray& ray, FloatC t_min, FloatC t_max, HitRecord& rec_in_out) {
         auto& ctx = k->ctx;
         FloatC t_closest = t_max;
-        voxel_out = RS_NULL_HANDLE;
-        _findHitVoxelInBVH(k, ctx.static_voxel_bvh.root(), ray, t_min, t_closest, voxel_out);
-        _findHitVoxelInBVH(k, ctx.dynamic_voxel_bvh.root(), ray, t_min, t_closest, voxel_out);
-        t_out = t_closest;
-        return voxel_out != RS_NULL_HANDLE;
+        rec_in_out.voxel = RS_NULL_HANDLE;
+        _findHitVoxelInBVH(k, ctx.static_voxel_ray_bvh.root(), ray, t_min, t_closest, rec_in_out);
+        _findHitVoxelInBVH(k, ctx.dynamic_voxel_ray_bvh.root(), ray, t_min, t_closest, rec_in_out);
+        return rec_in_out.voxel != RS_NULL_HANDLE;
     }
 
     /**
@@ -442,8 +652,7 @@ class RS_RaySensorRayCompute {
 
         FloatC t_closest = t_max;
         bool found = false;
-        static constexpr int STACK_SIZE = 32;
-        RIndex stack[STACK_SIZE];
+        RIndex stack[RS_RUNTIME_BVH_STACK_SIZE];
         int stack_top = 0;
         stack[stack_top++] = root.current();
         while (stack_top > 0) {
@@ -504,7 +713,7 @@ class RS_RaySensorRayCompute {
                                                                      t_right_enter,
                                                                      t_exit_unused
                                                                  );
-            if (is_left_hit && is_right_hit && stack_top + 2 <= STACK_SIZE) {
+            if (is_left_hit && is_right_hit && stack_top + 2 <= RS_RUNTIME_BVH_STACK_SIZE) {
                 if (t_left_enter < t_right_enter) {
                     stack[stack_top++] = r;
                     stack[stack_top++] = l;
@@ -512,9 +721,9 @@ class RS_RaySensorRayCompute {
                     stack[stack_top++] = l;
                     stack[stack_top++] = r;
                 }
-            } else if (is_left_hit && stack_top + 1 <= STACK_SIZE) {
+            } else if (is_left_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
                 stack[stack_top++] = l;
-            } else if (is_right_hit && stack_top + 1 <= STACK_SIZE) {
+            } else if (is_right_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
                 stack[stack_top++] = r;
             }
         }
@@ -529,9 +738,8 @@ class RS_RaySensorRayCompute {
     HOST_DEVICE_INLINE_QUALIFIER static bool
     _findHit(Kernel* k, const Ray& ray, FloatC max_range, HitRecord& rec_out) {
         auto& ctx = k->ctx;
-        FloatC t_voxel;
-        RHandle voxel;
-        bool voxel_hit = _findHitVoxel(k, ray, RAY_T_MIN, max_range, voxel, t_voxel);
+        bool voxel_hit = _findHitVoxel(k, ray, RAY_T_MIN, max_range, rec_out);
+        FloatC t_voxel = voxel_hit ? rec_out.t : max_range;
 
         FloatC t_floor = voxel_hit ? t_voxel : max_range;
         Vec3C floor_normal(0, 0, 1);
@@ -561,7 +769,9 @@ class RS_RaySensorRayCompute {
             bool is_front = ray.ray_direction.dot(floor_normal) < FloatC(0);
             rec_out.normal = is_front ? floor_normal : -floor_normal;
         } else {
-            _readVoxelHit(k, voxel, ray, rec_out);
+            rec_out.is_floor_hit = false;
+            rec_out.p = ray.at(rec_out.t);
+            _readVoxelHit(k, rec_out);
         }
         return true;
     }
@@ -571,29 +781,17 @@ class RS_RaySensorRayCompute {
      *****************************************************************/
 
     /**
-     * @brief Read the crossed voxel boundary into the hit record: normal, structure id,
-     * material id and emission.
+     * @brief Read the hit voxel's material id and emission into the hit record. The BVH walk
+     * already resolved the crossed boundary, so only the material remains.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static void
-    _readVoxelHit(Kernel* k, RHandle voxel, const Ray& ray, HitRecord& rec_out) {
+    HOST_DEVICE_INLINE_QUALIFIER static void _readVoxelHit(Kernel* k, HitRecord& rec_in_out) {
         auto& ctx = k->ctx;
-        FloatC t;
-        int face;
-        bool is_front;
-        Vec3C face_normal;
-        _voxelFirstBoundary(k, voxel, ray, RAY_T_MIN, t, face, is_front, face_normal);
-
-        rec_out.t = t;
-        rec_out.p = ray.at(t);
-        rec_out.normal = is_front ? face_normal : -face_normal;
-        rec_out.voxel = voxel;
-        rec_out.structure_gid = V_G(voxel, structure_gid);
-        RHandle vision_material = V_G(voxel, vision_material);
-        rec_out.material_gid =
+        RHandle vision_material = rec_in_out.vision_material;
+        rec_in_out.material_gid =
             RS_VisionMaterialKeyUnion{VSM_G(vision_material, vision_material_key)}
                 .vision_material_key.material_gid;
-        rec_out.emission = FloatC(VSM_G(vision_material, emission_intensity));
+        rec_in_out.emission = FloatC(VSM_G(vision_material, emission_intensity));
     }
 
     /*****************************************************************

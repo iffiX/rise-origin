@@ -58,7 +58,7 @@ class RS_BitMask {
     explicit RS_BitMask(RS_MemoryProvider* provider) { init(provider); }
 
     /// @brief Constructs a bitmask with the given number of bits and memory provider.
-    RS_BitMask(RSize num_bits, RS_MemoryProvider* provider) { init(num_bits, provider); }
+    RS_BitMask(RSize bit_num, RS_MemoryProvider* provider) { init(bit_num, provider); }
 
     /// @brief Copy constructor.
     RS_BitMask(const RS_BitMask& other) = default;
@@ -74,11 +74,11 @@ class RS_BitMask {
     }
 
     /// @brief Initializes the bitmask with the given number of bits and memory provider.
-    void init(RSize num_bits, RS_MemoryProvider* provider) {
+    void init(RSize bit_num, RS_MemoryProvider* provider) {
         data = {nullptr, 0, 0, provider->device, provider};
         elem_num = 0;
         word_num = 0;
-        resize(num_bits, false);
+        resize(bit_num, false);
         fill(false);
     }
 

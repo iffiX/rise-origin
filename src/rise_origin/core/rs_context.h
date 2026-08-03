@@ -172,8 +172,10 @@ struct RS_Context {
     using RaySensorMemType = logic::RS_RaySensorMem<FloatMemAccuracy_>;
 
     // Spatial data.
-    logic::RS_VoxelBVH static_voxel_bvh;
-    logic::RS_VoxelBVH dynamic_voxel_bvh;
+    logic::RS_VoxelContactBVH static_voxel_contact_bvh;
+    logic::RS_VoxelContactBVH dynamic_voxel_contact_bvh;
+    logic::RS_VoxelRayBVH static_voxel_ray_bvh;
+    logic::RS_VoxelRayBVH dynamic_voxel_ray_bvh;
     device::RS_BVH floor_triangle_bvh;
     logic::RS_IntersectRegionBVH intersect_region_bvh;
 
@@ -222,16 +224,6 @@ struct RS_Context {
     device::RS_Vector<logic::RS_RigidManifoldFarthest> structure_rigid_manifold_farthest_out;
 
     device::RS_Vector<RHandle> structure_emissive_voxel_handles;
-
-    device::RS_Vector<RIndex> structure_voxel_dynamic_flags;
-    device::RS_Vector<RIndex> structure_voxel_dynamic_prefix_sums;
-    device::RS_Vector<RIndex> structure_voxel_bvh_dynamic_flags;
-    device::RS_Vector<RIndex> structure_voxel_bvh_dynamic_prefix_sums;
-    device::RS_Vector<RIndex> structure_voxel_static_flags;
-    device::RS_Vector<RIndex> structure_voxel_static_prefix_sums;
-
-    device::RS_Vector<RIndex> structure_rigid_body_dynamic_flags;
-    device::RS_Vector<RIndex> structure_rigid_body_dynamic_prefix_sums;
 
     device::RS_Array<RS_WorldStructureVoxelSignal, 1> structure_signals;
 

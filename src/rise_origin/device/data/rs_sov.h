@@ -829,7 +829,7 @@ class RS_StructOfVectors {
         if (begin >= end) {
             return;
         }
-        RSize num_to_erase = end - begin;
+        RSize erase_num = end - begin;
         RSize tail = used_elem_num - end;
         if (tail > 0) {
             RBigSize scratch_bytes = _getRequiredBytes(tail);
@@ -838,7 +838,7 @@ class RS_StructOfVectors {
             _copyMember(scratch, tail, 0, data, elem_num, begin, tail);
             scratch.free(false);
         }
-        used_elem_num -= num_to_erase;
+        used_elem_num -= erase_num;
         _updateMember(data, elem_num, used_elem_num);
         data.provider()->sync();
     }

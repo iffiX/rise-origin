@@ -60,7 +60,7 @@ class RS_SoftForceMem {
     /// Handle pointing to the offset in the force signal array (3 RFloat values: x, y, z)
     RHandle force_signal = RS_NULL_HANDLE;
 
-    /// How much portion of the force each voxel should take (1.0 / num_voxels_in_range)
+    /// How much portion of the force each voxel should take (1.0 / voxel_in_range_num)
     RFloat unit_portion = 0.0;
 
     /// Structure global ID that this force belongs to

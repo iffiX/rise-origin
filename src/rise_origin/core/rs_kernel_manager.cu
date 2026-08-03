@@ -158,16 +158,6 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
 
         k.ctx.structure_emissive_voxel_handles.init(0, _device_provider);
 
-        k.ctx.structure_voxel_dynamic_flags.init(0, _device_provider);
-        k.ctx.structure_voxel_dynamic_prefix_sums.init(0, _device_provider);
-        k.ctx.structure_voxel_bvh_dynamic_flags.init(0, _device_provider);
-        k.ctx.structure_voxel_bvh_dynamic_prefix_sums.init(0, _device_provider);
-        k.ctx.structure_voxel_static_flags.init(0, _device_provider);
-        k.ctx.structure_voxel_static_prefix_sums.init(0, _device_provider);
-
-        k.ctx.structure_rigid_body_dynamic_flags.init(0, _device_provider);
-        k.ctx.structure_rigid_body_dynamic_prefix_sums.init(0, _device_provider);
-
         k.ctx.structure_signals.init(0, _device_provider);
 
         k.ctx.structure_link_material_layout.init(_device_provider);
@@ -388,16 +378,6 @@ void RS_KernelManager::freeKernel() {
         k.ctx.structure_rigid_manifold_farthest_out.free();
 
         k.ctx.structure_emissive_voxel_handles.free();
-
-        k.ctx.structure_voxel_dynamic_flags.free();
-        k.ctx.structure_voxel_dynamic_prefix_sums.free();
-        k.ctx.structure_voxel_bvh_dynamic_flags.free();
-        k.ctx.structure_voxel_bvh_dynamic_prefix_sums.free();
-        k.ctx.structure_voxel_static_flags.free();
-        k.ctx.structure_voxel_static_prefix_sums.free();
-
-        k.ctx.structure_rigid_body_dynamic_flags.free();
-        k.ctx.structure_rigid_body_dynamic_prefix_sums.free();
 
         k.ctx.structure_signals.free();
 
@@ -1946,7 +1926,8 @@ void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, TaskP
     kernel.softbody_integration_frequency_multiplier =
         simulation.soft_body.integration_frequency_multiplier;
     kernel.softbody_link_max_compression = simulation.soft_body.link_max_compression;
-    kernel.softbody_friction_max_penetration_ratio = simulation.soft_body.friction_max_penetration_ratio;
+    kernel.softbody_friction_max_penetration_ratio =
+        simulation.soft_body.friction_max_penetration_ratio;
 
     // Rigid body constraint solver
     kernel.rigidbody_constraint_iterations = simulation.rigid_body.constraint_iterations;

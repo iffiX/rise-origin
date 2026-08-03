@@ -59,6 +59,14 @@
 #endif
 
 /*****************************************************************
+ * Runtime
+ *****************************************************************/
+// Depth of the per-thread BVH traversal stack.
+#ifndef RS_RUNTIME_BVH_STACK_SIZE
+#define RS_RUNTIME_BVH_STACK_SIZE 32
+#endif
+
+/*****************************************************************
  * RSC
  *****************************************************************/
 // Current durable RSC file schema version this build writes.

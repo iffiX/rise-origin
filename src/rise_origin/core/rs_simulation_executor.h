@@ -103,7 +103,8 @@ class RS_SimulationExecutor {
     std::unordered_map<std::string, uint64_t> _handle_version_ids;
 
     // Set on every voxel-partition recompute, cleared when the static voxel BVH is rebuilt.
-    bool _is_static_bvh_dirty = true;
+    bool _is_static_contact_bvh_dirty = true;
+    bool _is_static_ray_bvh_dirty = true;
 
     // Reduce setup
     RS_MemoryPtr _reduce_input_buffer;
@@ -113,6 +114,9 @@ class RS_SimulationExecutor {
 
     // Prefix sum setup
     device::RS_Scan _scan;
+    device::RS_Vector<RIndex> _prefix_sum_flags_0;
+    device::RS_Vector<RIndex> _prefix_sum_flags_1;
+    device::RS_Vector<RIndex> _prefix_sum_result_0;
 
     // Sort setup
     device::RS_RadixSortPairs _sort;
@@ -142,12 +146,17 @@ class RS_SimulationExecutor {
     void _updateIntersectRegionRecord();
     void _storeRecorderRecords();
     void _storeControllerRecords();
-    void _rebuildStaticVoxelBVHIfNeeded();
-    void _rebuildDynamicVoxelBVH();
-    void _refitDynamicVoxelBVH();
+    void _rebuildStaticVoxelContactBVHIfNeeded();
+    void _rebuildStaticVoxelRayBVHIfNeeded();
+    void _rebuildDynamicVoxelContactBVH();
+    void _rebuildDynamicVoxelRayBVH();
+    void _refitDynamicVoxelContactBVH();
+    void _refitDynamicVoxelRayBVH();
     void _rebuildFloorTriangleBVHIfNeeded();
-    void _buildVoxelBVH(logic::RS_VoxelBVH &bvh, device::RS_Vector<RHandle> &handles);
-    void _refitVoxelBVH(logic::RS_VoxelBVH &bvh);
+    template <typename VoxelBVH>
+    void _buildVoxelBVH(VoxelBVH &bvh, device::RS_Vector<RHandle> &handles);
+    template <typename VoxelBVH>
+    void _refitVoxelBVH(VoxelBVH &bvh);
 
     // Common utilities.
     template <typename Body>
@@ -156,7 +165,10 @@ class RS_SimulationExecutor {
     void _runWithCommandExecutionGuard(Body &&body);
     device::RS_Vector<RHandle> _getLaunchHandles(const std::string &name);
     bool _resolveVoxelMobilityPartitionIfNeeded();
-    void _resolveVoxelBVHDynamicPartition();
+    template <typename ActiveFlagsComputeFunction>
+    void _resolveVoxelActivePartition(const char *static_key, const char *dynamic_key);
+    void _resolveVoxelContactActivePartition();
+    void _resolveVoxelRayActivePartition();
     bool _resolveRigidBodyMobilityPartitionIfNeeded();
     void _resizeReduceBufferIfNeeded(RBigSize needed_input_size, RBigSize needed_output_size);
 

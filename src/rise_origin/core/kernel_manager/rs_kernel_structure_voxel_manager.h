@@ -496,7 +496,7 @@ class RS_KernelStructureVoxelManager {
         bool is_surface;
 
         // Has at least one face open to air or a transparent boundary, so it can be ray-traced.
-        bool is_render_active;
+        bool is_ray_active;
 
         // Has at least one face open to air, so it can contact another body.
         bool is_contact_active;
@@ -506,6 +506,9 @@ class RS_KernelStructureVoxelManager {
 
         // Packed per-face RSE_VoxelFaceRole, positioned in the face_role bitfield.
         RState role_state;
+
+        // Packed RS_VoxelNeighborState, one bit per direction in each field.
+        RState neighbor_state;
 
         // Connected link structure scope IDs
         RIndex link_sid[6];
@@ -537,10 +540,11 @@ class RS_KernelStructureVoxelManager {
             data.g_orientation = RQuat3rf::unit();
             data.b_position = RVec3rf::zero();
             data.is_surface = false;
-            data.is_render_active = false;
+            data.is_ray_active = false;
             data.is_contact_active = false;
             data.has_soft_neighbor = false;
             data.role_state = 0;
+            data.neighbor_state = 0;
 
             for (int i = 0; i < 6; i++) {
                 data.link_sid[i] = RS_NULL_INDEX;

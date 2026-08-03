@@ -202,11 +202,11 @@ void RSC_StructureVoxelBody::_validateNullSegment(RS_RSCValidator &validator) co
     RSize thread_num = validator.getThreadPool().size();
     RSize block_size =
         RS_MAX(RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE, RS_CEIL_DIV(voxel_num, thread_num));
-    RSize num_blocks = RS_CEIL_DIV(voxel_num, block_size);
+    RSize block_num = RS_CEIL_DIV(voxel_num, block_size);
     auto futures = std::make_shared<RS_MultiFuture<std::pair<bool, std::string>>>(
         validator.getThreadPool().submitTaskSequence(
             0,
-            num_blocks,
+            block_num,
             [this, voxel_num, block_size](RIndex block) -> std::pair<bool, std::string> {
                 if (material_reference_sid.size() != voxel_num || segment_bid.size() != voxel_num) {
                     return {true, {}};
@@ -244,11 +244,11 @@ void RSC_StructureVoxelBody::_validateLinkAdjacency(RS_RSCValidator &validator) 
     RSize thread_num = validator.getThreadPool().size();
     RSize block_size =
         RS_MAX(RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE, RS_CEIL_DIV(voxel_num, thread_num));
-    RSize num_blocks = RS_CEIL_DIV(voxel_num, block_size);
+    RSize block_num = RS_CEIL_DIV(voxel_num, block_size);
     auto futures = std::make_shared<RS_MultiFuture<std::pair<bool, std::string>>>(
         validator.getThreadPool().submitTaskSequence(
             0,
-            num_blocks,
+            block_num,
             [this, voxel_num, block_size](RIndex block) -> std::pair<bool, std::string> {
                 if (link.size() != voxel_num || segment_bid.size() != voxel_num) {
                     return {true, {}};
@@ -327,11 +327,11 @@ void RSC_StructureVoxelBody::_validateExpansionControlModeValidity(
     RSize thread_num = validator.getThreadPool().size();
     RSize block_size =
         RS_MAX(RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE, RS_CEIL_DIV(mode_num, thread_num));
-    RSize num_blocks = RS_CEIL_DIV(mode_num, block_size);
+    RSize block_num = RS_CEIL_DIV(mode_num, block_size);
     auto futures = std::make_shared<RS_MultiFuture<std::pair<bool, std::string>>>(
         validator.getThreadPool().submitTaskSequence(
             0,
-            num_blocks,
+            block_num,
             [this, mode_num, block_size](RIndex block) -> std::pair<bool, std::string> {
                 RSize lo = block * block_size;
                 RSize hi = RS_MIN(lo + block_size, mode_num);
@@ -671,11 +671,11 @@ void RSC_StructureVoxel::_validateMaterialReferences(RS_RSCValidator &validator)
         RSize block_size = RS_MAX(
             RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE, RS_CEIL_DIV(voxel_num, thread_num)
         );
-        RSize num_blocks = RS_CEIL_DIV(voxel_num, block_size);
+        RSize block_num = RS_CEIL_DIV(voxel_num, block_size);
         auto futures = std::make_shared<RS_MultiFuture<std::pair<bool, std::string>>>(
             validator.getThreadPool().submitTaskSequence(
                 0,
-                num_blocks,
+                block_num,
                 [bp, body_sid, material_limit, voxel_num, block_size, optical_counts](RIndex block)
                     -> std::pair<bool, std::string> {
                     RSize lo = block * block_size;
@@ -748,11 +748,11 @@ void RSC_StructureVoxel::_validateExpansionSignals(RS_RSCValidator &validator) c
         RSize block_size = RS_MAX(
             RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE, RS_CEIL_DIV(voxel_num, thread_num)
         );
-        RSize num_blocks = RS_CEIL_DIV(voxel_num, block_size);
+        RSize block_num = RS_CEIL_DIV(voxel_num, block_size);
         auto futures = std::make_shared<RS_MultiFuture<std::pair<bool, std::string>>>(
             validator.getThreadPool().submitTaskSequence(
                 0,
-                num_blocks,
+                block_num,
                 [bp, body_sid, limit, voxel_num, block_size](RIndex block)
                     -> std::pair<bool, std::string> {
                     RSize lo = block * block_size;
@@ -807,9 +807,9 @@ void RSC_StructureVoxel::_validateConstraints(RS_RSCValidator &validator) const 
         RSize block_size = RS_MAX(
             RS_RSC_STRUCTURE_VOXEL_VALIDATION_BLOCK_SIZE, RS_CEIL_DIV(voxel_num, thread_num)
         );
-        RSize num_blocks = RS_CEIL_DIV(voxel_num, block_size);
+        RSize block_num = RS_CEIL_DIV(voxel_num, block_size);
         body_segment_id_blocks->push_back(validator.getThreadPool().submitTaskSequence(
-            0, num_blocks, [bp, voxel_num, block_size](RIndex block) -> std::set<RIndex> {
+            0, block_num, [bp, voxel_num, block_size](RIndex block) -> std::set<RIndex> {
                 std::set<RIndex> ids;
                 RSize lo = block * block_size;
                 RSize hi = RS_MIN(lo + block_size, voxel_num);

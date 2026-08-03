@@ -109,7 +109,11 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     if (world_bound.isValid() && hasDynamicVoxels()) {
         RFloat dynamic_range = RFLOAT(RS_WORLD_MAX_DYNAMIC_RANGE);
         RBound3f dynamic_world_range(
-            -dynamic_range, -dynamic_range, -dynamic_range, dynamic_range, dynamic_range,
+            -dynamic_range,
+            -dynamic_range,
+            -dynamic_range,
+            dynamic_range,
+            dynamic_range,
             dynamic_range
         );
         if (!dynamic_world_range.isContaining(world_bound)) {
@@ -1158,6 +1162,8 @@ void RS_KernelStructureVoxelManager::_addBody(
                         // segment.
                         bool is_surface = false;
                         bool has_soft_neighbor = false;
+                        RState is_neighbor_linked = 0;
+                        RState is_neighbor_rigid_or_static = 0;
                         for (int l = 0; l < 6; l++) {
                             RCoord3 neighbor_coord(
                                 voxel.index_x +
@@ -1211,6 +1217,11 @@ void RS_KernelStructureVoxelManager::_addBody(
                                     (!is_cross_segment &&
                                      voxel.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT &&
                                      neighbor.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT);
+
+                                if (is_linked) is_neighbor_linked |= RState(1) << l;
+                                if (neighbor.material_type != RSE_STRUCTURE_VOXEL_MATERIAL_SOFT)
+                                    is_neighbor_rigid_or_static |= RState(1) << l;
+
                                 if (!is_bonded) {
                                     is_surface = true;
                                     role = RSE_VOXEL_FACE_AIR;
@@ -1226,9 +1237,15 @@ void RS_KernelStructureVoxelManager::_addBody(
                             setFaceRole(voxel.role_state, l, role);
                         }
                         voxel.is_surface = is_surface;
-                        voxel.is_render_active = isRenderActive(voxel.role_state);
+                        voxel.is_ray_active = isRayActive(voxel.role_state);
                         voxel.is_contact_active = isContactActive(voxel.role_state);
                         voxel.has_soft_neighbor = has_soft_neighbor;
+
+                        logic::RS_VoxelNeighborStateUnion neighbor_state_union{0};
+                        neighbor_state_union.neighbor_state.is_neighbor_linked = is_neighbor_linked;
+                        neighbor_state_union.neighbor_state.is_neighbor_rigid_or_static =
+                            is_neighbor_rigid_or_static;
+                        voxel.neighbor_state = neighbor_state_union.neighbor_state_packed;
 
                         // Assign the rigid body now that the segment-type pass has emitted rigid
                         // bodies.
@@ -1269,7 +1286,7 @@ void RS_KernelStructureVoxelManager::_addBody(
     if (_structure().is_fixed) {
         // For a fixed body, only add voxels that are ray-traceable or collidable.
         for (RIndex v = 0; v < all_voxel_num; v++) {
-            if (all_voxels[v].is_render_active || all_voxels[v].is_contact_active) {
+            if (all_voxels[v].is_ray_active || all_voxels[v].is_contact_active) {
                 all_voxels[v].sid = _voxel_num++;
                 _voxels.emplace_back(all_voxels[v]);
             }
@@ -1279,7 +1296,7 @@ void RS_KernelStructureVoxelManager::_addBody(
         // ray-traceable, collidable, or a soft link endpoint.
         for (RIndex v = 0; v < all_voxel_num; v++) {
             if (all_voxels[v].material_type == RSE_STRUCTURE_VOXEL_MATERIAL_SOFT ||
-                all_voxels[v].is_render_active || all_voxels[v].is_contact_active ||
+                all_voxels[v].is_ray_active || all_voxels[v].is_contact_active ||
                 all_voxels[v].has_soft_neighbor) {
                 all_voxels[v].sid = _voxel_num++;
                 _voxels.emplace_back(all_voxels[v]);
@@ -2283,6 +2300,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                     state.voxel_state.face_role =
                         RS_VoxelStateUnion{voxel.role_state}.voxel_state.face_role;
                     voxel_out.state = state.voxel_state_packed;
+                    voxel_out.neighbor_state = voxel.neighbor_state;
 
                     voxels.get<VoxelMem>(i) = voxel_out;
                 }

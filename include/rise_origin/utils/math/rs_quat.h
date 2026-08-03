@@ -672,15 +672,6 @@ class RS_Quat3DMem {
         return *this;
     }
 
-    //! Assignment operator from RS_Quat3DMem
-    HOST_DEVICE_INLINE_QUALIFIER RS_Quat3DMem &operator=(const RS_Quat3DMem &q) {
-        data[0] = q.data[0];
-        data[1] = q.data[1];
-        data[2] = q.data[2];
-        data[3] = q.data[3];
-        return *this;
-    }
-
     //! Convert to RS_Quat3D<T>
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER RS_Quat3D<T> toQuat3D() const {

@@ -20,10 +20,10 @@ namespace rise {
  */
 class RS_NormalOctMem {
    public:
-    /// Internal storage.
+    /// @brief Internal storage.
     uint32_t data;
 
-    /// Default constructor
+    /// @brief Default constructor.
     RS_NormalOctMem() = default;
 
     HOST_DEVICE_INLINE_QUALIFIER static RS_NormalOctMem fromData(uint32_t data_0) {
@@ -38,20 +38,20 @@ class RS_NormalOctMem {
         return normal;
     }
 
-    /// Constructor from RS_Vec3D<T>
+    /// @brief Constructor from RS_Vec3D<T>.
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER explicit RS_NormalOctMem(const RS_Vec3D<T> &v) {
         set(v.x, v.y, v.z);
     }
 
-    /// Assignment operator from RS_Vec3D<T>
+    /// @brief Assignment operator from RS_Vec3D<T>.
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER RS_NormalOctMem &operator=(const RS_Vec3D<T> &v) {
         set(v.x, v.y, v.z);
         return *this;
     }
 
-    /// Convert to RS_Vec3D<T>
+    /// @brief Convert to RS_Vec3D<T>.
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER RS_Vec3D<T> toVec3D() const {
         RS_Vec3D<T> v;
@@ -59,7 +59,15 @@ class RS_NormalOctMem {
         return v;
     }
 
-    /// Helper function to set data from x, y, z
+    /// @brief Convert to RS_Vec3D<T> without normalization.
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER RS_Vec3D<T> toVec3DUnnormalized() const {
+        RS_Vec3D<T> v;
+        getUnnormalized(v.x, v.y, v.z);
+        return v;
+    }
+
+    /// @brief Helper function to set data from x, y, z.
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER void set(const T &x, const T &y, const T &z) {
         float fx = static_cast<float>(x);
@@ -81,9 +89,20 @@ class RS_NormalOctMem {
         data = _quantize(px) | (static_cast<uint32_t>(_quantize(py)) << 16);
     }
 
-    /// Helper function to get data into RS_Vec3D<T>
+    /// @brief Helper function to get data into x, y, z.
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER void get(T &x, T &y, T &z) const {
+        float px, py, pz;
+        getUnnormalized(px, py, pz);
+        float scale = 1.0f / sqrtf(px * px + py * py + pz * pz);
+        x = static_cast<T>(px * scale);
+        y = static_cast<T>(py * scale);
+        z = static_cast<T>(pz * scale);
+    }
+
+    /// @brief Helper function to get raw data into x, y, z without normalization.
+    template <typename T>
+    HOST_DEVICE_INLINE_QUALIFIER void getUnnormalized(T &x, T &y, T &z) const {
         float px = _dequantize(static_cast<unsigned short>(data & 0xFFFFu));
         float py = _dequantize(static_cast<unsigned short>(data >> 16));
         float pz = 1.0f - fabsf(px) - fabsf(py);
@@ -93,14 +112,13 @@ class RS_NormalOctMem {
             px = folded_x;
             py = folded_y;
         }
-        float scale = 1.0f / sqrtf(px * px + py * py + pz * pz);
-        x = static_cast<T>(px * scale);
-        y = static_cast<T>(py * scale);
-        z = static_cast<T>(pz * scale);
+        x = static_cast<T>(px);
+        y = static_cast<T>(py);
+        z = static_cast<T>(pz);
     }
 
    private:
-    /// Maps a square coordinate in [-1, 1] onto a signed 16 bit code
+    /// @brief Maps a square coordinate in [-1, 1] onto a signed 16 bit code.
     HOST_DEVICE_INLINE_QUALIFIER static unsigned short _quantize(float value) {
         float clamped = value < -1.0f ? -1.0f : (value > 1.0f ? 1.0f : value);
         float scaled = clamped * 32767.0f;
@@ -108,7 +126,7 @@ class RS_NormalOctMem {
         return static_cast<unsigned short>(static_cast<short>(rounded));
     }
 
-    /// Maps a signed 16 bit code back onto a square coordinate in [-1, 1]
+    /// @brief Maps a signed 16 bit code back onto a square coordinate in [-1, 1].
     HOST_DEVICE_INLINE_QUALIFIER static float _dequantize(unsigned short code) {
         return static_cast<float>(static_cast<short>(code)) / 32767.0f;
     }

@@ -691,22 +691,6 @@ class RS_Mat3DMem {
         return *this;
     }
 
-    //! Assignment operator from RS_Mat3DMem
-    HOST_DEVICE_INLINE_QUALIFIER RS_Mat3DMem &operator=(const RS_Mat3DMem &m) {
-        data[0] = m.data[0];
-        data[1] = m.data[1];
-        data[2] = m.data[2];
-        data[3] = m.data[3];
-        data[4] = m.data[4];
-        data[5] = m.data[5];
-        if constexpr (Type == RSE_FLOAT_32 || Type == RSE_FLOAT_64) {
-            data[6] = m.data[6];
-            data[7] = m.data[7];
-            data[8] = m.data[8];
-        }
-        return *this;
-    }
-
     //! Convert to RS_Mat3D<T>
     template <typename T>
     HOST_DEVICE_INLINE_QUALIFIER RS_Mat3D<T> toMat3D() const {
