@@ -26,6 +26,7 @@
 #include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_m.h"
 #include "rise_origin/logic/soft/rs_link_m.h"
 #include "rise_origin/logic/soft/rs_link_material_m.h"
+#include "rise_origin/logic/soft/rs_voxel_face_normal_m.h"
 #include "rise_origin/logic/soft/rs_voxel_m.h"
 #include "rise_origin/logic/soft/rs_voxel_material_m.h"
 #include "rise_origin/rsc/entity/rsc_structure.h"
@@ -426,6 +427,7 @@ class RS_KernelStructureVoxelManager {
 
         // Optical
         bool is_transparent = false;
+        bool is_smooth_surface = false;
         bool is_emissive = false;
     };
 
@@ -477,6 +479,9 @@ class RS_KernelStructureVoxelManager {
         // Structure scope ID of the voxel material (index into _voxel_materials)
         RIndex voxel_material_sid;
 
+        // Structure scope ID of the face normal set, null unless this is a surface voxel
+        RIndex voxel_face_normal_sid;
+
         // Structure scope ID of the expansion signal
         RIndex expansion_signal_sid;
 
@@ -510,6 +515,9 @@ class RS_KernelStructureVoxelManager {
         // Packed RS_VoxelNeighborState, one bit per direction in each field.
         RState neighbor_state;
 
+        // Rest-frame smoothed normal per face, taken from the surrounding occupancy.
+        RS_NormalOctMem face_normal[6];
+
         // Connected link structure scope IDs
         RIndex link_sid[6];
 
@@ -534,6 +542,8 @@ class RS_KernelStructureVoxelManager {
             data.material_sid = RS_NULL_INDEX;
             data.material_optical_reference_mid = RS_NULL_INDEX;
             data.material_type = RSE_STRUCTURE_VOXEL_MATERIAL_UNKNOWN;
+            data.voxel_material_sid = RS_NULL_INDEX;
+            data.voxel_face_normal_sid = RS_NULL_INDEX;
             data.expansion_signal_sid = RS_NULL_INDEX;
             data.expansion_control_mode = rsc::RSE_STRUCTURE_EXPANSION_CONTROL_MODE_BASIC_POSITION;
             data.g_position = RVec3rf::zero();
@@ -549,6 +559,7 @@ class RS_KernelStructureVoxelManager {
             for (int i = 0; i < 6; i++) {
                 data.link_sid[i] = RS_NULL_INDEX;
                 data.neighbor_voxel_sid[i] = RS_NULL_INDEX;
+                data.face_normal[i] = RS_NormalOctMem::fromData(0);
             }
 
             return data;
@@ -957,6 +968,7 @@ class RS_KernelStructureVoxelManager {
         device::RS_Array<logic::RS_VoxelMem<FloatMemAccuracy>, 1> voxels;
         device::RS_Array<logic::RS_LinkMem<FloatMemAccuracy>, 1> links;
         device::RS_Array<logic::RS_VoxelMaterialMem<FloatMemAccuracy>, 1> voxel_materials;
+        device::RS_Array<logic::RS_VoxelFaceNormalMem, 1> voxel_face_normals;
         device::RS_Array<logic::RS_LinkMaterialMem<FloatMemAccuracy>, 1> link_materials;
         device::RS_Array<logic::RS_RigidBodyMem<FloatMemAccuracy>, 1> rigid_bodies;
         device::RS_Array<logic::RS_RigidBodySurfaceVoxelMem<FloatMemAccuracy>, 1>
@@ -1001,6 +1013,7 @@ class RS_KernelStructureVoxelManager {
     /// Counters
     RSize _body_num = 0;
     RSize _voxel_num = 0;
+    RSize _voxel_face_normal_num = 0;
     RSize _emissive_voxel_num = 0;
     RSize _link_num = 0;
     RSize _rigid_body_num = 0;
@@ -1091,6 +1104,9 @@ class RS_KernelStructureVoxelManager {
      * @brief Whether resolved materials match a cached build.
      */
     bool _isMaterialCoherent(const std::vector<MaterialResolvedData> &cached_materials) const;
+
+    /** @brief Whether a voxel gets a smoothed face normal set, which its material opts into. */
+    bool _hasVoxelFaceNormal(const VoxelData &voxel) const;
 
     /**
      * @brief Build one body's voxels, links and rigid bodies.

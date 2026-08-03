@@ -135,6 +135,7 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
 
         k.ctx.structure_link_materials.init(0, _device_provider);
         k.ctx.structure_voxel_materials.init(0, _device_provider);
+        k.ctx.structure_voxel_face_normals.init(0, _device_provider);
         k.ctx.structure_links.init(0, _device_provider);
         k.ctx.structure_voxels.init(0, _device_provider);
         k.ctx.structure_rigid_bodies.init(0, _device_provider);
@@ -162,6 +163,7 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
 
         k.ctx.structure_link_material_layout.init(_device_provider);
         k.ctx.structure_voxel_material_layout.init(_device_provider);
+        k.ctx.structure_voxel_face_normal_layout.init(_device_provider);
         k.ctx.structure_link_layout.init(_device_provider);
         k.ctx.structure_voxel_layout.init(_device_provider);
         k.ctx.structure_rigid_body_layout.init(_device_provider);
@@ -356,6 +358,7 @@ void RS_KernelManager::freeKernel() {
 
         k.ctx.structure_link_materials.free();
         k.ctx.structure_voxel_materials.free();
+        k.ctx.structure_voxel_face_normals.free();
         k.ctx.structure_links.free();
         k.ctx.structure_voxels.free();
         k.ctx.structure_rigid_bodies.free();
@@ -383,6 +386,7 @@ void RS_KernelManager::freeKernel() {
 
         k.ctx.structure_link_material_layout.free();
         k.ctx.structure_voxel_material_layout.free();
+        k.ctx.structure_voxel_face_normal_layout.free();
         k.ctx.structure_link_layout.free();
         k.ctx.structure_voxel_layout.free();
         k.ctx.structure_rigid_body_layout.free();

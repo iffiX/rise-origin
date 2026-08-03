@@ -143,11 +143,12 @@ class RSCF_SetVoxelStaticOverSegment
  * and rigid-body ids so the voxel holds live handles after its segment is placed; null ids are
  * left unresolved.
  *
- * @param k                             simulation kernel.
- * @param voxel_segment_offset          handle offset to this segment's voxels.
- * @param link_segment_offset           handle offset to this segment's links.
- * @param voxel_material_segment_offset handle offset to this segment's voxel materials.
- * @param rigid_body_segment_offset     handle offset to this segment's rigid bodies.
+ * @param k                                 simulation kernel.
+ * @param voxel_segment_offset              handle offset to this segment's voxels.
+ * @param link_segment_offset               handle offset to this segment's links.
+ * @param voxel_material_segment_offset     handle offset to this segment's voxel materials.
+ * @param voxel_face_normal_segment_offset  handle offset to this segment's face normal sets.
+ * @param rigid_body_segment_offset         handle offset to this segment's rigid bodies.
  */
 class RSCF_ResolveVoxelDependency : public device::RS_ComputeFunction<RSCF_ResolveVoxelDependency> {
    public:
@@ -157,6 +158,7 @@ class RSCF_ResolveVoxelDependency : public device::RS_ComputeFunction<RSCF_Resol
         RSize voxel_segment_offset,
         RSize link_segment_offset,
         RSize voxel_material_segment_offset,
+        RSize voxel_face_normal_segment_offset,
         RSize rigid_body_segment_offset
     ) {
         RHandle voxel = index1D() + voxel_segment_offset;
@@ -165,6 +167,11 @@ class RSCF_ResolveVoxelDependency : public device::RS_ComputeFunction<RSCF_Resol
             voxel_material_sid != RS_NULL_INDEX) {
             RHandle voxel_material = voxel_material_sid + voxel_material_segment_offset;
             V_S(voxel_material, voxel_material);
+        }
+        if (RIndex voxel_face_normal_sid = V_G(voxel_face_normal_sid);
+            voxel_face_normal_sid != RS_NULL_INDEX) {
+            RHandle voxel_face_normal = voxel_face_normal_sid + voxel_face_normal_segment_offset;
+            V_S(voxel_face_normal, voxel_face_normal);
         }
         auto link_sid = V_G(link_sid);
         auto links = V_G(links);
@@ -2141,7 +2148,7 @@ class RS_VoxelCompute {
         m_union.meta.is_emissive = (render_type == RSE_VISION_MATERIAL_EMISSIVE) ? 1 : 0;
         m_union.meta.is_transparent = (render_type == RSE_VISION_MATERIAL_TRANSPARENT) ? 1 : 0;
         m_union.meta.is_ray_active = isRayActive(s_union.voxel_state_packed) ? 1 : 0;
-        m_union.meta.is_smooth_surface = 0;
+        m_union.meta.is_smooth_surface = s_union.voxel_state.has_face_normal;
         // Rigid and static voxels never deform, always a box.
         m_union.meta.is_box = (s_union.voxel_state.is_static || s_union.voxel_state.is_rigid) ? 1
                                                                                               : 0;

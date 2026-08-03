@@ -174,6 +174,9 @@ class RSC_MaterialOpticalPropertySimpleMicrofacet : public RSC_MaterialOpticalPr
     /// Whether the material is transparent dielectric.
     bool is_transparent = false;
 
+    /// Whether surface faces of this material take a smoothed normal instead of the face normal.
+    bool is_smooth_surface = false;
+
     /// Index of refraction (1.0 = vacuum, 1.5 = glass).
     RFloat ior = 1.5;
 

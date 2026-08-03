@@ -105,6 +105,7 @@ class RS_VisionRayCompute {
             RState is_front_face : 1;
             RState is_refraction : 1;
             RState is_floor_hit : 1;
+            RState has_face_normal : 1;
             RState face : 3;
             RState face_role : 2;
         } hit_state;
@@ -134,6 +135,8 @@ class RS_VisionRayCompute {
     struct HitRecord {
         Vec3C p = Vec3C::zero();
         Vec3C normal = Vec3C(0, 0, 1);
+        /// Smoothed normal for shading and refraction, kept on the geometric side.
+        Vec3C shading_normal = Vec3C(0, 0, 1);
         Vec2C uv = Vec2C::zero();
         /// Where the crossing sits on the hit face, in meters.
         Vec2C face_pos = Vec2C::zero();
@@ -2101,6 +2104,9 @@ class RS_VisionRayCompute {
                 rec_in_out.voxel = obj_ptr->object_handle;
                 rec_in_out.vision_material = obj_ptr->vision_material;
                 rec_in_out.structure_gid = obj_ptr->structure_gid;
+                rec_in_out.state.hit_state.has_face_normal =
+                    RS_VoxelRayBVHLeafMetadataUnion{obj_ptr->object_metadata}
+                        .meta.is_smooth_surface;
                 rec_in_out.state.hit_state.face = face;
                 rec_in_out.state.hit_state.face_role = role;
                 rec_in_out.state.hit_state.is_front_face = is_front;
@@ -2582,6 +2588,22 @@ class RS_VisionRayCompute {
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void _readVoxelHit(Kernel* k, HitRecord& rec_in_out) {
         auto& ctx = k->ctx;
+
+        rec_in_out.shading_normal = rec_in_out.normal;
+        if (rec_in_out.state.hit_state.has_face_normal) {
+            RHandle voxel = rec_in_out.voxel;
+            RHandle voxel_face_normal = V_G(voxel_face_normal);
+            Quat3C orientation = V_G(orientation);
+            Vec3C smooth = orientation.rotateVec3D(Vec3C(
+                VFN_G(face_normal)[rec_in_out.state.hit_state.face].template toVec3D<FloatC>()
+            ));
+            // The baked normal points out of the material, so on an exit it faces away from the
+            // side the geometry picked. Turn it onto that side rather than drop it, or only
+            // entry crossings would bend and a lens could not hold a focus.
+            rec_in_out.shading_normal =
+                smooth.dot(rec_in_out.normal) < FloatC(0) ? -smooth : smooth;
+        }
+
         RHandle vision_material = rec_in_out.vision_material;
         RS_VisionMaterialStateUnion mat_state{VSM_G(vision_material, state)};
         const RSE_VisionMaterialType render_type = mat_state.vision_material_state.render_type;
@@ -2614,6 +2636,7 @@ class RS_VisionRayCompute {
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void _readFloorHit(Kernel* k, HitRecord& rec_in_out) {
         auto& ctx = k->ctx;
+        rec_in_out.shading_normal = rec_in_out.normal;
         const auto& fl = k->ctx.floor_vision_mem;
         RHandle vision_material = fl.vision_material;
         RS_VisionMaterialStateUnion mat_state{VSM_G(vision_material, state)};
@@ -2669,7 +2692,7 @@ class RS_VisionRayCompute {
         FloatC metalness = rec_in_out.metalness;
         FloatC ior = rec_in_out.ior;
         Vec3C albedo = rec_in_out.albedo;
-        Vec3C n = rec_in_out.normal;
+        Vec3C n = rec_in_out.shading_normal;
 
         Vec3C V_world = -incoming_ray.ray_direction.normalized();
         FloatC NoV = RS_MAX(FloatC(RS_EPS), n.dot(V_world));
@@ -2742,11 +2765,12 @@ class RS_VisionRayCompute {
     HOST_DEVICE_INLINE_QUALIFIER static void
     _scatterMirrorDelta(const Ray& incoming_ray, HitRecord& rec_in_out) {
         Vec3C unit_dir = incoming_ray.ray_direction.normalized();
-        Vec3C n = rec_in_out.normal;
+        Vec3C n = rec_in_out.shading_normal;
         FloatC NoV = RS_MAX(FloatC(0), -unit_dir.dot(n));
         Vec3C reflected = unit_dir - n * (FloatC(2) * unit_dir.dot(n));
         rec_in_out.color = _fresnelSchlick(NoV, rec_in_out.albedo);
-        rec_in_out.scattered = Ray(_offsetRayOrigin(rec_in_out.p, n), reflected.normalized());
+        rec_in_out.scattered =
+            Ray(_offsetRayOrigin(rec_in_out.p, rec_in_out.normal), reflected.normalized());
     }
 
     /**
@@ -2771,7 +2795,7 @@ class RS_VisionRayCompute {
         HitRecord& rec_in_out
     ) {
         Vec3C unit_dir = incoming_ray.ray_direction.normalized();
-        Vec3C n = rec_in_out.normal;
+        Vec3C n = rec_in_out.shading_normal;
         FloatC cos_theta = RS_MAX(FloatC(0), RS_MIN(-unit_dir.dot(n), FloatC(1)));
         FloatC eta = ior_from / ior_to;
         FloatC sin2_t = eta * eta * (FloatC(1) - cos_theta * cos_theta);
@@ -2803,7 +2827,7 @@ class RS_VisionRayCompute {
                     .normalized();
         }
 
-        Vec3C offset_normal = is_reflect ? n : -n;
+        Vec3C offset_normal = is_reflect ? rec_in_out.normal : -rec_in_out.normal;
         rec_in_out.scattered = Ray(_offsetRayOrigin(rec_in_out.p, offset_normal), direction);
         rec_in_out.state.hit_state.is_refraction = !is_reflect;
         rec_in_out.color = rec_in_out.albedo;
@@ -2829,7 +2853,7 @@ class RS_VisionRayCompute {
         HitRecord& rec_in_out
     ) {
         Vec3C unit_dir = incoming_ray.ray_direction.normalized();
-        Vec3C n = rec_in_out.normal;
+        Vec3C n = rec_in_out.shading_normal;
         FloatC cos_theta = RS_MAX(FloatC(0), RS_MIN(-unit_dir.dot(n), FloatC(1)));
         FloatC eta = ior_from / ior_to;
         FloatC sin2_t = eta * eta * (FloatC(1) - cos_theta * cos_theta);
@@ -2860,14 +2884,15 @@ class RS_VisionRayCompute {
         }
 
         if (is_tir) {
-            rec_in_out.scattered = Ray(_offsetRayOrigin(rec_in_out.p, n), direction);
+            rec_in_out.scattered =
+                Ray(_offsetRayOrigin(rec_in_out.p, rec_in_out.normal), direction);
             rec_in_out.color = Vec3C::one();
             rec_in_out.state.hit_state.is_refraction = false;
             return;
         }
 
         FloatC F = _fresnelDielectric(cos_theta, ior_to / ior_from);
-        rec_in_out.scattered = Ray(_offsetRayOrigin(rec_in_out.p, -n), direction);
+        rec_in_out.scattered = Ray(_offsetRayOrigin(rec_in_out.p, -rec_in_out.normal), direction);
         rec_in_out.color = rec_in_out.albedo * (FloatC(1) - F);
         rec_in_out.state.hit_state.is_refraction = true;
     }

@@ -190,6 +190,8 @@ class MaterialOpticalPropertySimpleMicrofacet(
         roughness_metalness_texture_reference: Texture resource packing
             roughness in R and metalness in G.
         is_transparent: Whether the surface refracts (uses ``ior``).
+        is_smooth_surface: Whether surface faces of this material take a
+            smoothed normal instead of the flat face normal.
         ior: Index of refraction (used when transparent).
         emission_texture_reference: Texture resource for emitted color.
         emission_intensity: Scalar multiplier on the emission color.
@@ -203,6 +205,7 @@ class MaterialOpticalPropertySimpleMicrofacet(
         albedo_texture_reference: str = "",
         roughness_metalness_texture_reference: str = "",
         is_transparent: bool = False,
+        is_smooth_surface: bool = False,
         ior: float = 1.5,
         emission_texture_reference: str = "",
         emission_intensity: float = 0.0,
@@ -215,6 +218,7 @@ class MaterialOpticalPropertySimpleMicrofacet(
             roughness_metalness_texture_reference
         )
         self.is_transparent = is_transparent
+        self.is_smooth_surface = is_smooth_surface
         self.ior = ior
         self.emission_texture_reference = emission_texture_reference
         self.emission_intensity = emission_intensity

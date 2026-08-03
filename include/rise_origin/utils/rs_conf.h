@@ -40,7 +40,6 @@
 #define RS_DEVICE_ENABLE_INTRINSICS
 #endif
 
-
 #ifndef RS_DEVICE_CPU_FIBER_STACK_SIZE
 #define RS_DEVICE_CPU_FIBER_STACK_SIZE 32768
 #endif
@@ -64,6 +63,11 @@
 // Depth of the per-thread BVH traversal stack.
 #ifndef RS_RUNTIME_BVH_STACK_SIZE
 #define RS_RUNTIME_BVH_STACK_SIZE 32
+#endif
+
+// Voxel range of the stencil that smooths a surface face normal.
+#ifndef RS_RUNTIME_SMOOTH_SURFACE_NORMAL_RANGE
+#define RS_RUNTIME_SMOOTH_SURFACE_NORMAL_RANGE 3
 #endif
 
 /*****************************************************************

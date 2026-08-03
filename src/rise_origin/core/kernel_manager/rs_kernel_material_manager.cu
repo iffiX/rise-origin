@@ -122,6 +122,19 @@ void RS_KernelMaterialManager::_createLutTables() {
           [](const UnaryPropertiesMap& m) {
               return m.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet)) != m.end();
           }}},
+        {"is_smooth_surface",
+         {[](const UnaryPropertiesMap& m) -> RS_Any {
+              if (auto it = m.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet));
+                  it != m.end()) {
+                  return it->second.front()
+                      .as<RSC_MaterialOpticalPropertySimpleMicrofacet>()
+                      .is_smooth_surface;
+              }
+              return false;
+          },
+          [](const UnaryPropertiesMap& m) {
+              return m.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet)) != m.end();
+          }}},
         {"is_emissive",
          {[](const UnaryPropertiesMap& m) -> RS_Any {
               if (auto it = m.find(typeid(RSC_MaterialOpticalPropertySimpleMicrofacet));

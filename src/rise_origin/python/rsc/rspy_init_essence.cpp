@@ -65,6 +65,9 @@ void initRSPYEssence(py::module &m) {
         .def_readwrite(
             "is_transparent", &RSC_MaterialOpticalPropertySimpleMicrofacet::is_transparent
         )
+        .def_readwrite(
+            "is_smooth_surface", &RSC_MaterialOpticalPropertySimpleMicrofacet::is_smooth_surface
+        )
         .def_readwrite("ior", &RSC_MaterialOpticalPropertySimpleMicrofacet::ior)
         .def_readwrite(
             "emission_texture_reference",

@@ -566,6 +566,9 @@ void RS_KernelStructureVoxelManager::_resolveMaterials() {
         if (mat_mgr.has(name, "is_transparent")) {
             resolved.is_transparent = mat_mgr.query(name, "is_transparent").as<bool>();
         }
+        if (mat_mgr.has(name, "is_smooth_surface")) {
+            resolved.is_smooth_surface = mat_mgr.query(name, "is_smooth_surface").as<bool>();
+        }
         if (mat_mgr.has(name, "is_emissive")) {
             resolved.is_emissive = mat_mgr.query(name, "is_emissive").as<bool>();
         }
@@ -593,6 +596,11 @@ void RS_KernelStructureVoxelManager::_resolveMaterials() {
     }
 }
 
+bool RS_KernelStructureVoxelManager::_hasVoxelFaceNormal(const VoxelData &voxel) const {
+    return voxel.is_ray_active && voxel.material_sid != RS_NULL_INDEX &&
+           _mat_resolved_data[voxel.material_sid].is_smooth_surface;
+}
+
 bool RS_KernelStructureVoxelManager::_isMaterialCoherent(
     const std::vector<MaterialResolvedData> &cached_materials
 ) const {
@@ -601,8 +609,9 @@ bool RS_KernelStructureVoxelManager::_isMaterialCoherent(
         const auto &a = cached_materials[i];
         const auto &b = _mat_resolved_data[i];
         if (a.phys_type != b.phys_type || a.is_transparent != b.is_transparent ||
-            a.is_emissive != b.is_emissive || a.density != b.density || a.is_atlas != b.is_atlas ||
-            a.mass != b.mass || !(a.com_position == b.com_position) || !(a.inertia == b.inertia)) {
+            a.is_smooth_surface != b.is_smooth_surface || a.is_emissive != b.is_emissive ||
+            a.density != b.density || a.is_atlas != b.is_atlas || a.mass != b.mass ||
+            !(a.com_position == b.com_position) || !(a.inertia == b.inertia)) {
             return false;
         }
     }
@@ -1260,6 +1269,73 @@ void RS_KernelStructureVoxelManager::_addBody(
             )
             .wait();
 
+        // Smoothed surface normals, taken from the occupancy around each surface voxel.
+        static constexpr RSize RS_SMOOTH_NORMAL_NEIGHBOR_MAX_NUM =
+            (2 * RS_RUNTIME_SMOOTH_SURFACE_NORMAL_RANGE + 1) *
+            (2 * RS_RUNTIME_SMOOTH_SURFACE_NORMAL_RANGE + 1) *
+            (2 * RS_RUNTIME_SMOOTH_SURFACE_NORMAL_RANGE + 1);
+        _kernel_manager->getThreadPool()
+            ->submitBlocks(
+                0,
+                all_voxel_num,
+                [&](RIndex start, RIndex end) {
+                    for (RIndex v = start; v < end; v++) {
+                        auto &voxel = all_voxels[v];
+                        if (!_hasVoxelFaceNormal(voxel)) continue;
+
+                        // Gather the same-material neighborhood once, then let each face read it.
+                        constexpr int range = RS_RUNTIME_SMOOTH_SURFACE_NORMAL_RANGE;
+                        RVec3rf same_material_offset[RS_SMOOTH_NORMAL_NEIGHBOR_MAX_NUM];
+                        RSize same_material_num = 0;
+                        for (int dx = -range; dx <= range; dx++) {
+                            for (int dy = -range; dy <= range; dy++) {
+                                for (int dz = -range; dz <= range; dz++) {
+                                    // Self sits half a cell from its own face, so its term
+                                    // would swamp every neighbor and flatten the normal.
+                                    if (dx == 0 && dy == 0 && dz == 0) continue;
+                                    RCoord3 neighbor_coord(
+                                        voxel.index_x + dx, voxel.index_y + dy, voxel.index_z + dz
+                                    );
+                                    auto neighbor =
+                                        active_hashmap->find(RS_VoxelKey(neighbor_coord));
+                                    if (!neighbor) continue;
+                                    if (all_voxels[*neighbor].material_sid != voxel.material_sid)
+                                        continue;
+                                    same_material_offset[same_material_num++] =
+                                        RVec3rf(RFloat(dx), RFloat(dy), RFloat(dz));
+                                }
+                            }
+                        }
+
+                        for (int l = 0; l < 6; l++) {
+                            int axis = l >> 1;
+                            RFloat sign = (l & 1) ? RFloat(-1) : RFloat(1);
+                            RVec3rf face_normal = RVec3rf::zero();
+                            face_normal[axis] = sign;
+
+                            // Same-material neighbors all lie behind the face, so summing the
+                            // direction from each toward the face center points outward. Cells
+                            // at distance r grow as r^2, so 1/r^3 gives every shell equal say.
+                            RVec3rf face_center = RVec3rf::zero();
+                            face_center[axis] = sign * RFloat(0.5);
+                            RVec3rf smooth = RVec3rf::zero();
+                            for (RSize n = 0; n < same_material_num; n++) {
+                                RVec3rf offset = face_center - same_material_offset[n];
+                                RFloat distance = offset.length();
+                                if (distance < RFloat(RS_EPS)) continue;
+                                smooth = smooth + offset / (distance * distance * distance);
+                            }
+
+                            RFloat smooth_length = smooth.length();
+                            if (smooth_length > RFloat(RS_EPS))
+                                face_normal = smooth / smooth_length;
+                            voxel.face_normal[l] = face_normal;
+                        }
+                    }
+                }
+            )
+            .wait();
+
         if (asymmetric_link_index != RS_NULL_INDEX)
             RS_THROW(RS_InvalidCharacterizationException(
                 "Body SID {} in structure \"{}\" has an asymmetric link mask at voxel array index "
@@ -1288,6 +1364,8 @@ void RS_KernelStructureVoxelManager::_addBody(
         for (RIndex v = 0; v < all_voxel_num; v++) {
             if (all_voxels[v].is_ray_active || all_voxels[v].is_contact_active) {
                 all_voxels[v].sid = _voxel_num++;
+                if (_hasVoxelFaceNormal(all_voxels[v]))
+                    all_voxels[v].voxel_face_normal_sid = _voxel_face_normal_num++;
                 _voxels.emplace_back(all_voxels[v]);
             }
         }
@@ -1299,6 +1377,8 @@ void RS_KernelStructureVoxelManager::_addBody(
                 all_voxels[v].is_ray_active || all_voxels[v].is_contact_active ||
                 all_voxels[v].has_soft_neighbor) {
                 all_voxels[v].sid = _voxel_num++;
+                if (_hasVoxelFaceNormal(all_voxels[v]))
+                    all_voxels[v].voxel_face_normal_sid = _voxel_face_normal_num++;
                 _voxels.emplace_back(all_voxels[v]);
             }
         }
@@ -2117,6 +2197,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
     using RigidBodyArray = RS_Array<RigidBodyMem, 1>;
     using RigidBodySurfaceVoxelArray = RS_Array<RigidBodySurfaceVoxelMem, 1>;
     using ConstraintJointArray = RS_Array<ConstraintJointMem, 1>;
+    using VoxelFaceNormalArray = RS_Array<RS_VoxelFaceNormalMem, 1>;
     using RigidBodyFloatArray = RS_Array<RS_FloatMem<FloatMemAccuracy>, 1>;
     using RigidBodyVec3DArray = RS_Array<RS_Vec3DMem<FloatMemAccuracy>, 1>;
     using RigidBodyMat3DArray = RS_Array<RS_Mat3DMem<FloatMemAccuracy>, 1>;
@@ -2133,6 +2214,8 @@ RS_KernelStructureVoxelManager::_getAll() const {
     RS_MemoryPtr link_materials =
         host_provider->allocate(sizeof(LinkMaterialMem) * _link_materials.size(), true);
     RS_MemoryPtr voxels = host_provider->allocate(sizeof(VoxelMem) * _voxels.size(), true);
+    RS_MemoryPtr voxel_face_normals =
+        host_provider->allocate(sizeof(RS_VoxelFaceNormalMem) * _voxel_face_normal_num, true);
     RS_MemoryPtr links = host_provider->allocate(sizeof(LinkMem) * _links.size(), true);
     RS_MemoryPtr rigid_bodies =
         host_provider->allocate(sizeof(RigidBodyMem) * _rigid_bodies.size(), true);
@@ -2253,6 +2336,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
                     voxel_out.contact_filter_key = fk.contact_filter_key_packed;
 
                     voxel_out.voxel_material_sid = voxel.voxel_material_sid;
+                    voxel_out.voxel_face_normal_sid = voxel.voxel_face_normal_sid;
                     voxel_out.expansion_signal_sid = voxel.expansion_signal_sid;
                     voxel_out.structure_signal = _structure_signal;
                     for (int j = 0; j < 6; j++) {
@@ -2297,12 +2381,24 @@ RS_KernelStructureVoxelManager::_getAll() const {
                             state.voxel_state.has_link = true;
                         }
                     }
+                    state.voxel_state.has_face_normal =
+                        voxel.voxel_face_normal_sid != RS_NULL_INDEX;
                     state.voxel_state.face_role =
                         RS_VoxelStateUnion{voxel.role_state}.voxel_state.face_role;
                     voxel_out.state = state.voxel_state_packed;
                     voxel_out.neighbor_state = voxel.neighbor_state;
 
                     voxels.get<VoxelMem>(i) = voxel_out;
+
+                    if (voxel.voxel_face_normal_sid != RS_NULL_INDEX) {
+                        auto face_normal_out = RS_VoxelFaceNormalMem();
+                        face_normal_out.structure_gid = _structure_gid;
+                        face_normal_out.sid = voxel.voxel_face_normal_sid;
+                        for (int j = 0; j < 6; j++)
+                            face_normal_out.face_normal[j] = voxel.face_normal[j];
+                        voxel_face_normals.get<RS_VoxelFaceNormalMem>(voxel.voxel_face_normal_sid) =
+                            face_normal_out;
+                    }
                 }
             )
             .wait();
@@ -2498,6 +2594,9 @@ RS_KernelStructureVoxelManager::_getAll() const {
     data.voxels = VoxelArray(_voxels.size(), provider);
     data.voxels.write(voxels.as<VoxelMem>(), false);
 
+    data.voxel_face_normals = VoxelFaceNormalArray(_voxel_face_normal_num, provider);
+    data.voxel_face_normals.write(voxel_face_normals.as<RS_VoxelFaceNormalMem>(), false);
+
     data.links = LinkArray(_links.size(), provider);
     data.links.write(links.as<LinkMem>(), false);
 
@@ -2581,6 +2680,7 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         RSize link_material_num = structure.link_materials.size();
         RSize voxel_material_num = structure.voxel_materials.size();
         RSize voxel_num = structure.voxels.size();
+        RSize voxel_face_normal_num = structure.voxel_face_normals.size();
         RSize link_num = structure.links.size();
         RSize rigid_body_num = structure.rigid_bodies.size();
         RSize rigid_body_surface_voxel_num = structure.rigid_body_surface_voxels.size();
@@ -2596,6 +2696,9 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         );
         ctx.host_data->structure_voxel_material_layout.add(
             voxel_material_num, _structure_gid, true
+        );
+        ctx.host_data->structure_voxel_face_normal_layout.add(
+            voxel_face_normal_num, _structure_gid, true
         );
         ctx.host_data->structure_link_layout.add(link_num, _structure_gid, is_active);
         ctx.host_data->structure_voxel_layout.add(voxel_num, _structure_gid, true);
@@ -2629,6 +2732,9 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         ctx.host_data->structure_voxel_material_layout.syncDeviceLayout(
             ctx.structure_voxel_material_layout
         );
+        ctx.host_data->structure_voxel_face_normal_layout.syncDeviceLayout(
+            ctx.structure_voxel_face_normal_layout
+        );
         ctx.host_data->structure_link_layout.syncDeviceLayout(ctx.structure_link_layout);
         ctx.host_data->structure_voxel_layout.syncDeviceLayout(ctx.structure_voxel_layout);
         ctx.host_data->structure_rigid_body_layout.syncDeviceLayout(
@@ -2658,6 +2764,9 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         );
         ctx.structure_voxel_materials.resize(
             ctx.host_data->structure_voxel_material_layout.capacity()
+        );
+        ctx.structure_voxel_face_normals.resize(
+            ctx.host_data->structure_voxel_face_normal_layout.capacity()
         );
         ctx.structure_links.resize(ctx.host_data->structure_link_layout.capacity());
         ctx.structure_voxels.resize(ctx.host_data->structure_voxel_layout.capacity());
@@ -2691,6 +2800,17 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
             structure.voxel_materials,
             voxel_material_num,
             voxel_material_offset
+        );
+
+        RSize voxel_face_normal_offset =
+            ctx.host_data->structure_voxel_face_normal_layout.segmentOffset(
+                ctx.host_data->structure_voxel_face_normal_layout.find(_structure_gid)
+            );
+        copy(
+            ctx.structure_voxel_face_normals,
+            structure.voxel_face_normals,
+            voxel_face_normal_num,
+            voxel_face_normal_offset
         );
 
         RSize link_offset = ctx.host_data->structure_link_layout.segmentOffset(
@@ -2746,7 +2866,12 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
             using KernelType = std::remove_pointer_t<decltype(k_ptr)>;
 
             p_ptr->template run<RSCF_LaunchDirect<RSCF_ResolveVoxelDependency, KernelType>>(
-                {voxel_num}, voxel_offset, link_offset, voxel_material_offset, rigid_body_offset
+                {voxel_num},
+                voxel_offset,
+                link_offset,
+                voxel_material_offset,
+                voxel_face_normal_offset,
+                rigid_body_offset
             );
             p_ptr->template run<RSCF_LaunchDirect<RSCF_ResolveLinkDependency, KernelType>>(
                 {link_num}, link_offset, voxel_offset, link_material_offset
@@ -2855,6 +2980,9 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
         ctx.host_data->structure_voxel_material_layout.remove(
             ctx.host_data->structure_voxel_material_layout.find(_structure_gid)
         );
+        ctx.host_data->structure_voxel_face_normal_layout.remove(
+            ctx.host_data->structure_voxel_face_normal_layout.find(_structure_gid)
+        );
         ctx.host_data->structure_link_layout.remove(
             ctx.host_data->structure_link_layout.find(_structure_gid)
         );
@@ -2881,6 +3009,9 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
         );
         ctx.host_data->structure_voxel_material_layout.syncDeviceLayout(
             ctx.structure_voxel_material_layout
+        );
+        ctx.host_data->structure_voxel_face_normal_layout.syncDeviceLayout(
+            ctx.structure_voxel_face_normal_layout
         );
         ctx.host_data->structure_link_layout.syncDeviceLayout(ctx.structure_link_layout);
         ctx.host_data->structure_voxel_layout.syncDeviceLayout(ctx.structure_voxel_layout);
@@ -2911,6 +3042,9 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
         );
         ctx.structure_voxel_materials.resize(
             ctx.host_data->structure_voxel_material_layout.capacity()
+        );
+        ctx.structure_voxel_face_normals.resize(
+            ctx.host_data->structure_voxel_face_normal_layout.capacity()
         );
         ctx.structure_links.resize(ctx.host_data->structure_link_layout.capacity());
         ctx.structure_voxels.resize(ctx.host_data->structure_voxel_layout.capacity());

@@ -78,6 +78,8 @@ union RS_VoxelStateUnion {
         RState has_contact_floor : 1;
         /// Whether the owning structure has at least one constraint.
         RState is_structure_constrained : 1;
+        /// Whether the voxel carries a smoothed face normal set.
+        RState has_face_normal : 1;
         /// Packed per-face role bits driving render and contact activity.
         RState face_role : 12;
     } voxel_state;
@@ -289,6 +291,9 @@ class RS_VoxelMem {
     /// Material id of this voxel.
     RIndex voxel_material_sid = RS_NULL_INDEX;
 
+    /// Pre-baked face normal set id of this voxel, null unless it is initially a surface voxel.
+    RIndex voxel_face_normal_sid = RS_NULL_INDEX;
+
     /// Expansion signal id.
     RIndex expansion_signal_sid = RS_NULL_INDEX;
 
@@ -319,6 +324,9 @@ class RS_VoxelMem {
 
     /// Material of this voxel
     RHandle voxel_material = RS_NULL_HANDLE;
+
+    /// Pre-baked face normal set of this voxel, null unless it is initially a surface voxel.
+    RHandle voxel_face_normal = RS_NULL_HANDLE;
 
     /// Material of this voxel for vision (Note, it is preset, an exception for the rule)
     RHandle vision_material = RS_NULL_HANDLE;
@@ -450,6 +458,7 @@ class RS_VoxelMem {
         field(index_z),                   \
         field(contact_filter_key),        \
         field(voxel_material_sid),        \
+        field(voxel_face_normal_sid),     \
         field(expansion_signal_sid),      \
         field(structure_signal),          \
         field(link_sid),                  \
@@ -458,6 +467,7 @@ class RS_VoxelMem {
         field(neighbor_state),            \
         field(rigid_body),                \
         field(voxel_material),            \
+        field(voxel_face_normal),         \
         field(vision_material),           \
         field(links),                     \
         field(neighbor_voxels),           \
