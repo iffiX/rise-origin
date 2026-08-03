@@ -43,11 +43,10 @@ HOST_DEVICE_INLINE_QUALIFIER bool isContactActive(RState state) {
     return false;
 }
 
-/** @brief Whether any face is air or a transparent boundary. */
+/** @brief Whether any face is not interior, so a bonded neighbor falling away exposes it. */
 HOST_DEVICE_INLINE_QUALIFIER bool isRayActive(RState state) {
     for (int f = 0; f < 6; f++) {
-        RSE_VoxelFaceRole role = getFaceRole(state, f);
-        if (role == RSE_VOXEL_FACE_AIR || role == RSE_VOXEL_FACE_TRANSPARENT_BOUNDARY) return true;
+        if (getFaceRole(state, f) != RSE_VOXEL_FACE_INTERIOR) return true;
     }
     return false;
 }
