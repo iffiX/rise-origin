@@ -28,6 +28,7 @@ from .nature.rock import (  # noqa: F401 registers on import
     limestone_boulder,
     marble_block,
     marble_boulder,
+    pebble_bed,
     sandstone_block,
     sandstone_boulder,
     slate_block,

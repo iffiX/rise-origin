@@ -3,10 +3,12 @@
 """The erosion phase: material leaves the volume.
 
 :class:`BallErosion` is one law with three weights covering three
-sources exactly; :class:`DetailErosion` is our small-scale surface
-carving. Structure marks steer every erosion class: seam voxels erode
-with a rate scale because seams weather first, and contact voxels are
-protected.
+sources exactly, measured against the air around a stone;
+:class:`PileErosion` reads the same law against the stone itself, which
+is what wears a packed pile into separate stones; :class:`DetailErosion`
+is our small-scale surface carving. Structure marks steer every erosion
+class: seam voxels erode with a rate scale because seams weather first,
+and contact voxels are protected.
 """
 
 import math
@@ -19,7 +21,7 @@ from .volume import Volume
 if TYPE_CHECKING:
     import torch
 
-__all__ = ["BallErosion", "DetailErosion"]
+__all__ = ["BallErosion", "PileErosion", "DetailErosion"]
 
 
 class BallErosion:
@@ -350,6 +352,237 @@ class BallErosion:
             mode="trilinear",
             align_corners=False,
         )[0, 0]
+
+
+class PileErosion:
+    """Wear that carves a packed pile into stones resting on stones.
+
+    Peytavie 2009 section 5. A pile is born packed: every cell belongs
+    to some stone and no air stands between them, so the wall each
+    stone should wear back is not a wall of air. The paper says which
+    cells wear anyway, and it is the whole difference from
+    :class:`BallErosion`: a cell wears when it shares a face with an
+    empty cell **or with a cell of a different stone**. Every stone
+    boundary is therefore a surface from the first step, and the gaps
+    between stones open without anything having to reach them.
+
+    The measurement follows: the share of the ball around a cell that
+    does not belong to that cell's own stone. A neighboring stone counts
+    as outside exactly the way air does, which is what rounds each stone
+    on its own inside a solid mass. The law over that share is the one
+    :class:`BallErosion` reads, so the two classes weight the same
+    spheroidal wear and differ only in what they measure it against.
+
+    The reference share is 0.5, as it is there, but a measured flat
+    surface reads about 0.6 either way it faces, since the cell at the
+    center of the ball counts as its own stone; an exposed corner reads
+    about 0.2. So keep ``flat_weight`` above about a tenth of
+    ``round_weight``, or flat surfaces clamp to no wear at all and only
+    corners retreat.
+
+    The paper's damping field holds wear off near the contact points:
+    zero inside the contact radius, rising to full past a blending
+    radius. Named deviations:
+
+    - The damping is carried by the marks the volume already owns, so
+      it steps rather than ramps: no wear at all on contact-marked
+      cells, plain wear on unmarked cells, and ``seam_rate_scale`` on
+      seam-marked stone boundaries. The blending radius is dropped.
+    - The wear amount per step is the spheroidal rate over a ball
+      stencil, as :class:`BallErosion` builds it, since the paper leaves
+      the per-iteration amount to the user.
+
+    Args:
+        rng: The random stream the durability sway draws from.
+        step_num: How many synchronized steps the erosion runs.
+        ball_radius: The ball radius (unit: m); the feature size the
+            measurement reads.
+        wear_pace: The wear a fully exposed corner collects per step.
+        flat_weight: The uniform term of the law.
+        round_weight: The exposed-corner term of the law.
+        hardness_rows: Per material id, how strongly it resists wear;
+            air row at index 0 included.
+        durability_sway_ratio: How strongly the value noise sways
+            durability, 0 to 1.
+        durability_feature_size: The feature size of the sway (unit: m).
+        seam_rate_scale: The rate scale of seam-marked cells; the
+            boundaries between stones open first.
+    """
+
+    # A ball wider than this would cost a stencil pass per offset over
+    # the whole volume for little gain, and a ball approaching the stone
+    # size stops reading the stone's own shape. Measured against a
+    # radius of 4, this reads the same contrast between a flat boundary
+    # and a convex edge, 0.24, over half as many offsets.
+    MAX_STENCIL_RADIUS_CELL_NUM = 3
+
+    def __init__(
+        self,
+        rng: Rng,
+        step_num: int,
+        ball_radius: float,
+        wear_pace: float,
+        flat_weight: float,
+        round_weight: float,
+        hardness_rows: Sequence[float],
+        durability_sway_ratio: float = 0.3,
+        durability_feature_size: float = 0.15,
+        seam_rate_scale: float = 1.0,
+    ) -> None:
+        self.rng = rng
+        self.step_num = int(step_num)
+        self.ball_radius = float(ball_radius)
+        self.wear_pace = float(wear_pace)
+        self.flat_weight = float(flat_weight)
+        self.round_weight = float(round_weight)
+        self.hardness_rows = tuple(hardness_rows)
+        self.durability_sway_ratio = float(durability_sway_ratio)
+        self.durability_feature_size = float(durability_feature_size)
+        self.seam_rate_scale = float(seam_rate_scale)
+
+    def erode(self, volume: Volume) -> None:
+        """Wear the pile for the configured steps.
+
+        Args:
+            volume: The pile volume material erodes from; its segment
+                ids name the stones wear measures against.
+        """
+        import torch
+
+        if volume.segment_id is None:
+            raise ValueError("pile erosion needs a volume carrying segment ids")
+        durability = self._make_durability(volume)
+        offsets = self._make_ball_offsets(volume)
+        if volume.wear_progress is None:
+            volume.wear_progress = torch.zeros(
+                volume.grid.cell_num, dtype=torch.float32, device=volume.device
+            )
+        is_seam = None
+        is_contact = None
+        if volume.structure_mark is not None:
+            is_seam = (volume.structure_mark & Volume.SEAM_MARK) != 0
+            is_contact = (volume.structure_mark & Volume.CONTACT_MARK) != 0
+        for _step in range(self.step_num):
+            solid = volume.get_solid_cells()
+            own_share = PileErosion._make_own_share(volume.segment_id, solid, offsets)
+            rate = torch.clamp(
+                self.flat_weight + self.round_weight * (0.5 - own_share),
+                min=0.0,
+            )
+            rate = rate * self.wear_pace / durability
+            if is_seam is not None:
+                rate = torch.where(is_seam, rate * self.seam_rate_scale, rate)
+            if is_contact is not None:
+                rate = torch.where(is_contact, torch.zeros_like(rate), rate)
+            erodible = PileErosion._make_surface_cells(volume.segment_id, solid)
+            volume.wear_progress = volume.wear_progress + torch.where(
+                erodible, rate, torch.zeros_like(rate)
+            )
+            volume.material_id = torch.where(
+                erodible & (volume.wear_progress >= 1.0),
+                torch.zeros_like(volume.material_id),
+                volume.material_id,
+            )
+
+    def _make_durability(self, volume: Volume) -> "torch.Tensor":
+        """Return per-cell durability: hardness rows swayed by noise.
+
+        The sway is layered noise, so weak and strong patches exist at
+        several sizes at once and one stone wears unevenly instead of
+        shrinking as a shell.
+        """
+        import torch
+
+        hardness = volume.gather(self.hardness_rows)
+        if self.durability_sway_ratio <= 0.0:
+            return torch.clamp(hardness, min=1.0e-3)
+        sway = FBMNoiseField(
+            self.rng.split("durability"), self.durability_feature_size, layer_num=3
+        )(volume.grid, device=str(volume.device))
+        return torch.clamp(
+            hardness * (1.0 + sway * self.durability_sway_ratio), min=1.0e-3
+        )
+
+    def _make_ball_offsets(self, volume: Volume) -> Tuple[Tuple[int, int, int], ...]:
+        """Return the cell offsets inside the measurement ball.
+
+        Args:
+            volume: The volume the ball is measured on, for its cell
+                size.
+        """
+        radius = min(
+            self.MAX_STENCIL_RADIUS_CELL_NUM,
+            max(1, int(round(self.ball_radius / volume.grid.cell_size))),
+        )
+        offsets = []
+        for step_x in range(-radius, radius + 1):
+            for step_y in range(-radius, radius + 1):
+                for step_z in range(-radius, radius + 1):
+                    if step_x**2 + step_y**2 + step_z**2 <= radius**2:
+                        offsets.append((step_x, step_y, step_z))
+        return tuple(offsets)
+
+    @staticmethod
+    def _make_surface_cells(
+        segment_id: "torch.Tensor", solid: "torch.Tensor"
+    ) -> "torch.Tensor":
+        """Return the cells the paper calls the rock volume's surface.
+
+        A solid cell is at the surface when a face neighbor is empty or
+        belongs to a different stone, which is what makes every stone
+        boundary of a packed pile wear from the first step. Everything
+        past the grid is empty, so the grid's own faces count too.
+        """
+        import torch
+
+        surface = torch.zeros_like(solid)
+        for side in range(3):
+            low = [slice(None)] * 3
+            high = [slice(None)] * 3
+            low[side] = slice(None, -1)
+            high[side] = slice(1, None)
+            differs = segment_id[tuple(low)] != segment_id[tuple(high)]
+            surface[tuple(low)] |= differs | ~solid[tuple(high)]
+            surface[tuple(high)] |= differs | ~solid[tuple(low)]
+        for side in range(3):
+            edge = [slice(None)] * 3
+            edge[side] = slice(None, 1)
+            surface[tuple(edge)] = True
+            edge[side] = slice(-1, None)
+            surface[tuple(edge)] = True
+        return surface & solid
+
+    @staticmethod
+    def _make_own_share(
+        segment_id: "torch.Tensor",
+        solid: "torch.Tensor",
+        offsets: Tuple[Tuple[int, int, int], ...],
+    ) -> "torch.Tensor":
+        """Return the share of each ball belonging to the cell's stone.
+
+        Everything the ball covers that is not this cell's own stone
+        counts as outside, whether it is air, the grid's outside, or a
+        neighboring stone.
+        """
+        import torch
+
+        own = torch.zeros(segment_id.shape, dtype=torch.float32, device=solid.device)
+        for offset in offsets:
+            here = [slice(None)] * 3
+            there = [slice(None)] * 3
+            for side in range(3):
+                step = offset[side]
+                if step > 0:
+                    here[side] = slice(None, -step)
+                    there[side] = slice(step, None)
+                elif step < 0:
+                    here[side] = slice(-step, None)
+                    there[side] = slice(None, step)
+            own[tuple(here)] += (
+                (segment_id[tuple(there)] == segment_id[tuple(here)])
+                & solid[tuple(there)]
+            ).to(torch.float32)
+        return own / float(len(offsets))
 
 
 class DetailErosion:

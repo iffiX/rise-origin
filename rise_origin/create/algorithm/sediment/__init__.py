@@ -26,7 +26,8 @@ from .fracture import (
     PlateFracture,
     SeamFracture,
 )
-from .erosion import BallErosion, DetailErosion
+from .pile import PileGenerator, SegmentTone
+from .erosion import BallErosion, DetailErosion, PileErosion
 
 __all__ = [
     "Volume",
@@ -36,11 +37,14 @@ __all__ = [
     "GrainGenerator",
     "ColumnGenerator",
     "VeinGenerator",
+    "PileGenerator",
+    "SegmentTone",
     "FractureFragment",
     "PlaneFracture",
     "SeamFracture",
     "ChunkFracture",
     "PlateFracture",
     "BallErosion",
+    "PileErosion",
     "DetailErosion",
 ]

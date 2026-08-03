@@ -25,6 +25,7 @@ LIMESTONE = f"{MODULE}:limestone"
 MARBLE = f"{MODULE}:marble"
 SLATE = f"{MODULE}:slate"
 BASALT = f"{MODULE}:basalt"
+RIVER_STONE = f"{MODULE}:river_stone"
 
 # Real anchor tones, linear RGB 0-1, converted from measured sRGB
 # references through the exact sRGB transfer (NPS Zion geology notes,
@@ -329,6 +330,32 @@ BASALT_COLUMN_MIDS = tuple(
     range(_BASALT_BODY_LENGTH + 3, _BASALT_BODY_LENGTH + 3 + _BASALT_COLUMN_LENGTH)
 )
 
+# River stone tones, linear RGB. A bed is not one rock but whatever a
+# river carried and rounded, so the run spans the value range a mixed
+# gravel bar shows rather than any one mineral: bleached pale pebbles
+# at the light end, a balanced gray at the middle, dark slate at the
+# dark end. The channels sit at 0.93, 1.00 and 0.95 of each other, the
+# faint green cast a bar of rounded greenstone carries; the dark end
+# stops well above black, since a bed deep in shadow already reads much
+# darker than its albedo and a black run turns it to coal.
+_RIVER_STONE_TONE_ANCHORS = (
+    (0.680, 0.731, 0.695),  # bleached pale pebble
+    (0.251, 0.270, 0.257),  # balanced river gray
+    (0.091, 0.098, 0.093),  # dark slate pebble
+)
+_RIVER_STONE_TONE_LENGTH = 8
+
+RIVER_STONE_ALBEDOS = {
+    f"tone_{_index}": _tone
+    for _index, _tone in enumerate(
+        _Palette.make_run(_RIVER_STONE_TONE_ANCHORS, _RIVER_STONE_TONE_LENGTH)
+    )
+}
+RIVER_STONE_OPTICAL_REFERENCES = tuple(
+    f"{RIVER_STONE}#optic_{name}" for name in RIVER_STONE_ALBEDOS
+)
+RIVER_STONE_TONE_MIDS = tuple(range(_RIVER_STONE_TONE_LENGTH))
+
 # Engine physics per material name (unit: kg/m3).
 DENSITIES = {
     "sandstone_soft": 2200.0,
@@ -338,6 +365,7 @@ DENSITIES = {
     "marble": 2700.0,
     "slate": 2720.0,
     "basalt": 2950.0,
+    "river_stone": 2650.0,
 }
 
 # Wear rows the erosion classes gather, keyed by material name.
@@ -349,6 +377,7 @@ WEAR_HARDNESS = {
     "marble": 0.6,
     "slate": 0.8,
     "basalt": 1.0,
+    "river_stone": 0.9,
 }
 WEAR_CAVERNOUS = {
     "sandstone_soft": 1.0,
@@ -358,6 +387,7 @@ WEAR_CAVERNOUS = {
     "marble": 0.25,
     "slate": 0.2,
     "basalt": 0.1,
+    "river_stone": 0.15,
 }
 
 # Surface roughness per material name; most rock is matte, marble
@@ -371,6 +401,7 @@ ROUGHNESS = {
     "marble": 0.6,
     "slate": 0.7,
     "basalt": 0.85,
+    "river_stone": 0.85,
 }
 
 
@@ -387,6 +418,7 @@ ROUGHNESS = {
         "marble",
         "slate",
         "basalt",
+        "river_stone",
     ),
 )
 def mineral(editor_access, settings):
@@ -395,8 +427,9 @@ def mineral(editor_access, settings):
     Releases ``sandstone_soft`` and ``sandstone_hard`` (layered
     Navajo/Entrada tones), ``granite`` (salt-and-pepper mineral
     grains), ``limestone`` (layered pale body), ``marble`` (bright
-    veined body), ``slate`` (dark foliated body), and ``basalt`` (dark
-    fine-grained body) as rigid materials. Optical order is the
+    veined body), ``slate`` (dark foliated body), ``basalt`` (dark
+    fine-grained body), and ``river_stone`` (the mixed gray a rounded
+    gravel bar carries) as rigid materials. Optical order is the
     module's contract; the shade runs, grain mids, vein mids, and
     substance mids ride the exported constants.
     """
@@ -409,6 +442,7 @@ def mineral(editor_access, settings):
         (MARBLE, MARBLE_ALBEDOS),
         (SLATE, SLATE_ALBEDOS),
         (BASALT, BASALT_ALBEDOS),
+        (RIVER_STONE, RIVER_STONE_ALBEDOS),
     ):
         name = material.split(":")[1]
         rscs.append(
