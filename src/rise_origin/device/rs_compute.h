@@ -87,6 +87,10 @@ class RS_ComputeFunctionBase {
         // No-op on device side
     }
 
+    static void setBlock(RS_CPUGridBlock* /*b*/) {
+        // No-op on device side
+    }
+
     static void setSharedMem(void* /*ptr*/) {
         // No-op on device side
     }
@@ -108,6 +112,7 @@ class RS_ComputeFunctionBase {
     inline static thread_local RSize block_dim_z = 1;
 
     inline static thread_local RS_CPUBlock* block = nullptr;
+    inline static thread_local RS_CPUGridBlock* grid_block = nullptr;
     inline static thread_local void* shared_mem_ptr = nullptr;
 
     static RSize blockDimX() { return block_dim_x; }
@@ -151,7 +156,15 @@ class RS_ComputeFunctionBase {
         thread_idx_z = threadIdxZ;
     }
 
-    static void setBlock(RS_CPUBlock* b) { block = b; }
+    static void setBlock(RS_CPUBlock* b) {
+        block = b;
+        grid_block = nullptr;
+    }
+
+    static void setBlock(RS_CPUGridBlock* b) {
+        grid_block = b;
+        block = nullptr;
+    }
 
     static void setSharedMem(void* ptr) { shared_mem_ptr = ptr; }
 #endif
@@ -219,9 +232,14 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
     DEVICE_INLINE_QUALIFIER static void threadfence() { __threadfence(); }
 #else
     static void syncThreadsInBlock() {
-        // Defer to the RS_CPUBlock's sync
-        assert(block != nullptr && "RS_CPUBlock pointer must be set before syncing.");
-        block->syncThreadsInBlockImpl<RS_ComputeFunction>(thread_idx_x);
+        if (grid_block != nullptr) {
+            RIndex fiber_index = thread_idx_x * (block_dim_y * block_dim_z) +
+                                 thread_idx_y * block_dim_z + thread_idx_z;
+            grid_block->syncThreadsInBlockImpl<RS_ComputeFunction>(fiber_index);
+        } else {
+            assert(block != nullptr && "RS_CPUBlock pointer must be set before syncing.");
+            block->syncThreadsInBlockImpl<RS_ComputeFunction>(thread_idx_x);
+        }
     }
 
     static void threadfence() {

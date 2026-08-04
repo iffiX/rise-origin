@@ -127,9 +127,10 @@ inline std::shared_ptr<RS_MemoryProvider> getMemoryProvider(const RS_DeviceLocat
 
 template <typename Function>
 void castProviderPtrAndCall(RS_MemoryProvider* provider, Function function) {
-    switch (provider->type) {
+    RS_MemoryProvider* base = provider->base();
+    switch (base->type) {
         case RSE_MEMORY_PROVIDER_TYPE_CPU:
-            function(dynamic_cast<RS_MemoryCPUProvider*>(provider));
+            function(dynamic_cast<RS_MemoryCPUProvider*>(base));
             break;
         default:
             RS_THROW(RS_InvalidArgumentException("Invalid memory provider"));
