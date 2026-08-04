@@ -232,13 +232,16 @@ class RS_ComputeFunction : public RS_ComputeFunctionBase {
     DEVICE_INLINE_QUALIFIER static void threadfence() { __threadfence(); }
 #else
     static void syncThreadsInBlock() {
-        if (grid_block != nullptr) {
+        assert(
+            (block != nullptr || grid_block != nullptr) &&
+            "A CPU block pointer must be set before syncing."
+        );
+        if (block != nullptr) {
+            block->syncThreadsInBlockImpl<RS_ComputeFunction>(thread_idx_x);
+        } else {
             RIndex fiber_index = thread_idx_x * (block_dim_y * block_dim_z) +
                                  thread_idx_y * block_dim_z + thread_idx_z;
             grid_block->syncThreadsInBlockImpl<RS_ComputeFunction>(fiber_index);
-        } else {
-            assert(block != nullptr && "RS_CPUBlock pointer must be set before syncing.");
-            block->syncThreadsInBlockImpl<RS_ComputeFunction>(thread_idx_x);
         }
     }
 
