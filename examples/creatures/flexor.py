@@ -127,8 +127,7 @@ def build():
         knees.append((x0 + 2.0, y0 + LEG_LR / 2.0))
 
     body = rsc.entity.StructureVoxelBody.from_grid(
-        material != RS_NULL_INDEX,
-        material_grid=material,
+        material,
         segment_grid=segment,
         expansion_signal_grid=expansion,
         voxel_size=VOXEL,

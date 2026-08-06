@@ -157,8 +157,7 @@ def _body(grid, corner):
     """A single rigid voxel body (segment 0) from a string/None grid."""
     ids = _ids(grid)
     return rsc.entity.StructureVoxelBody.from_grid(
-        ids != RS_NULL_INDEX,
-        material_grid=ids,
+        ids,
         voxel_size=VOXEL,
         relative_origin_position=corner,
     )
@@ -203,8 +202,7 @@ def _ball_body():
     segment[core] = 0
 
     return rsc.entity.StructureVoxelBody.from_grid(
-        occupancy,
-        material_grid=material,
+        material,
         segment_grid=segment,
         voxel_size=BALL_VOXEL,
         relative_origin_position=(

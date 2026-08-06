@@ -131,8 +131,7 @@ def _shelled_box(core_size, shell, core_id, skin_id, core_corner, orientation):
     material[shell : shell + cx, shell : shell + cy, shell : shell + cz] = core_id
     segment[shell : shell + cx, shell : shell + cy, shell : shell + cz] = 0
     return rsc.entity.StructureVoxelBody.from_grid(
-        np.ones((fx, fy, fz), dtype=bool),
-        material_grid=material,
+        material,
         segment_grid=segment,
         voxel_size=VOXEL,
         relative_origin_position=_full_corner(core_corner, orientation, shell),

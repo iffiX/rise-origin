@@ -215,8 +215,7 @@ def _make_maze(seed):
     )
 
     body = rsc.entity.StructureVoxelBody.from_grid(
-        grid != RS_NULL_INDEX,
-        material_grid=grid,
+        grid,
         voxel_size=VOXEL,
         relative_origin_position=(-HALF_T * VOXEL, -HALF_T * VOXEL, 0.0),
     )

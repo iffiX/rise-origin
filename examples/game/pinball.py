@@ -251,8 +251,7 @@ def _make_table():
     # Perimeter wall as one voxel grid (sides, domed top, lane, tunnels).
     wall_mask = _wall_mask()
     wall = body.from_grid(
-        wall_mask,
-        material_grid=np.where(wall_mask, _T["rail"], RS_NULL_INDEX),
+        np.where(wall_mask, _T["rail"], RS_NULL_INDEX),
         voxel_size=V,
         relative_origin_position=(0, 0, z0),
     )
