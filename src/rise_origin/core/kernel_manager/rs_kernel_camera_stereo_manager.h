@@ -255,10 +255,10 @@ class RS_KernelCameraStereoManager {
     logic::RS_CameraPrevAuxNormal _camera_prev_aux_normal[2];
     logic::RS_CameraPrevAuxDepthZ _camera_prev_aux_depth_z[2];
     logic::RS_CameraPrevAuxObjectKey _camera_prev_aux_object_key[2];
-    logic::RS_CameraDenoiserColorHistory _camera_denoiser_color_history[2];
+    logic::RS_CameraDenoiserRGBHistory _camera_denoiser_rgb_history[2];
     logic::RS_CameraDenoiserMomentHistory _camera_denoiser_moment_history[2];
     logic::RS_CameraDenoiserHistoryLength _camera_denoiser_history_length[2];
-    logic::RS_CameraDenoiserColorHistory _camera_prev_denoiser_color_history[2];
+    logic::RS_CameraDenoiserRGBHistory _camera_prev_denoiser_rgb_history[2];
     logic::RS_CameraDenoiserMomentHistory _camera_prev_denoiser_moment_history[2];
     logic::RS_CameraDenoiserHistoryLength _camera_prev_denoiser_history_length[2];
     logic::RS_CameraDenoiserVariance _camera_denoiser_variance[2];
@@ -314,10 +314,8 @@ class RS_KernelCameraStereoManager {
     }
 
     /** @brief Assemble one host stereo record by pointing its left_/right_ fields at both eyes. */
-    RS_WorldCameraStereoRecord _assembleStereoRecord(
-        logic::RS_CameraRecordMem &left,
-        logic::RS_CameraRecordMem &right
-    ) const;
+    RS_WorldCameraStereoRecord
+    _assembleStereoRecord(logic::RS_CameraRecordMem &left, logic::RS_CameraRecordMem &right) const;
 
     /** @brief Allocate and register this camera's shared per-eye-pose signal buffers. */
     void _addSignals();

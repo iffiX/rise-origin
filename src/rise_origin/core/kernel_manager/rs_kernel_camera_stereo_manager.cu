@@ -114,10 +114,10 @@ RS_KernelCameraStereoManager::RS_KernelCameraStereoManager(
         _camera_prev_aux_normal[eye].init({_height, _width}, memory_provider);
         _camera_prev_aux_depth_z[eye].init({_height, _width}, memory_provider);
         _camera_prev_aux_object_key[eye].init({_height, _width}, memory_provider);
-        _camera_denoiser_color_history[eye].init({_height, _width}, memory_provider);
+        _camera_denoiser_rgb_history[eye].init({_height, _width}, memory_provider);
         _camera_denoiser_moment_history[eye].init({_height, _width}, memory_provider);
         _camera_denoiser_history_length[eye].init({_height, _width}, memory_provider);
-        _camera_prev_denoiser_color_history[eye].init({_height, _width}, memory_provider);
+        _camera_prev_denoiser_rgb_history[eye].init({_height, _width}, memory_provider);
         _camera_prev_denoiser_moment_history[eye].init({_height, _width}, memory_provider);
         _camera_prev_denoiser_history_length[eye].init({_height, _width}, memory_provider);
         _camera_denoiser_variance[eye].init({_height, _width}, memory_provider);
@@ -134,7 +134,7 @@ RS_KernelCameraStereoManager::RS_KernelCameraStereoManager(
         _camera_aux_endpoint_object_key[eye].fill(
             logic::RS_CAMERA_PIXEL_OBJECT_KEY_MISS_SENTINEL, false
         );
-        _camera_aux_endpoint_albedo[eye].fill(RVec3f::zero(), false);
+        _camera_aux_endpoint_albedo[eye].fill(RS_Vec3DMem<RSE_FLOAT_16>::zero(), false);
         _camera_aux_endpoint_roughness[eye].fill(RFloat(1), false);
         _camera_aux_endpoint_metalness[eye].fill(RFloat(0), false);
         _camera_aux_endpoint_intensity[eye].fill(RFloat(0), false);
@@ -153,10 +153,10 @@ RS_KernelCameraStereoManager::RS_KernelCameraStereoManager(
         _camera_prev_aux_object_key[eye].fill(
             logic::RS_CAMERA_PIXEL_OBJECT_KEY_MISS_SENTINEL, false
         );
-        _camera_denoiser_color_history[eye].fill(RVec3f::zero(), false);
+        _camera_denoiser_rgb_history[eye].fill(RS_Vec3DMem<RSE_FLOAT_16>::zero(), false);
         _camera_denoiser_moment_history[eye].fill(RVec2f::zero(), false);
         _camera_denoiser_history_length[eye].fill(RFloat(0), false);
-        _camera_prev_denoiser_color_history[eye].fill(RVec3f::zero(), false);
+        _camera_prev_denoiser_rgb_history[eye].fill(RS_Vec3DMem<RSE_FLOAT_16>::zero(), false);
         _camera_prev_denoiser_moment_history[eye].fill(RVec2f::zero(), false);
         _camera_prev_denoiser_history_length[eye].fill(RFloat(0), false);
         _camera_denoiser_variance[eye].fill(RFloat(0), false);
@@ -524,10 +524,10 @@ void RS_KernelCameraStereoManager::_initKernelData() {
             ctx.camera_prev_aux_normal.append(_camera_prev_aux_normal[eye]);
             ctx.camera_prev_aux_depth_z.append(_camera_prev_aux_depth_z[eye]);
             ctx.camera_prev_aux_object_key.append(_camera_prev_aux_object_key[eye]);
-            ctx.camera_denoiser_color_history.append(_camera_denoiser_color_history[eye]);
+            ctx.camera_denoiser_rgb_history.append(_camera_denoiser_rgb_history[eye]);
             ctx.camera_denoiser_moment_history.append(_camera_denoiser_moment_history[eye]);
             ctx.camera_denoiser_history_length.append(_camera_denoiser_history_length[eye]);
-            ctx.camera_prev_denoiser_color_history.append(_camera_prev_denoiser_color_history[eye]);
+            ctx.camera_prev_denoiser_rgb_history.append(_camera_prev_denoiser_rgb_history[eye]);
             ctx.camera_prev_denoiser_moment_history.append(
                 _camera_prev_denoiser_moment_history[eye]
             );
@@ -649,10 +649,10 @@ void RS_KernelCameraStereoManager::_freeKernelData() {
             ctx.camera_prev_aux_normal.erase(camera_index);
             ctx.camera_prev_aux_depth_z.erase(camera_index);
             ctx.camera_prev_aux_object_key.erase(camera_index);
-            ctx.camera_denoiser_color_history.erase(camera_index);
+            ctx.camera_denoiser_rgb_history.erase(camera_index);
             ctx.camera_denoiser_moment_history.erase(camera_index);
             ctx.camera_denoiser_history_length.erase(camera_index);
-            ctx.camera_prev_denoiser_color_history.erase(camera_index);
+            ctx.camera_prev_denoiser_rgb_history.erase(camera_index);
             ctx.camera_prev_denoiser_moment_history.erase(camera_index);
             ctx.camera_prev_denoiser_history_length.erase(camera_index);
             ctx.camera_denoiser_variance.erase(camera_index);

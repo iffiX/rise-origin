@@ -331,7 +331,7 @@ class RS_VisionRayCompute {
      *          chain_throughput, and chain_terminal_type. OPAQUE primaries
      *          short-circuit with endpoint = primary and throughput = (1,1,1);
      *          specular primaries follow the chain to the diffuse surface,
-     *          sky, or emissive it eventually reaches.
+     *          cosmic background, or emissive it eventually reaches.
      *
      * @param k       simulation kernel.
      * @param camera  target camera handle.
@@ -424,7 +424,7 @@ class RS_VisionRayCompute {
                 );
             }
 
-            if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY) {
+            if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_COSMIC_BACKGROUND) {
                 // endpoint_rec.p holds the terminal ray direction.
                 ctx.camera_aux_endpoint_hit_position[camera][{i, j}] = RVec3f(
                     float(endpoint_rec.p.x), float(endpoint_rec.p.y), float(endpoint_rec.p.z)
@@ -563,7 +563,7 @@ class RS_VisionRayCompute {
             // ReSTIR keys on the chain endpoint (== primary for OPAQUE primaries).
             // Miss-out: no surface at the endpoint either, clear the reservoir.
             auto object_key = ctx.camera_aux_endpoint_object_key[camera][{ii, jj}];
-            if (object_key.isMissed()) {
+            if (object_key.isCosmicBackground()) {
                 ctx.camera_current_reservoir_di[camera][{ii, jj}] = RS_ReservoirDI{};
                 return;
             }
@@ -819,7 +819,7 @@ class RS_VisionRayCompute {
             // similarity gate uses the camera-facing primary surface so two
             // pixels seeing the same glass surface still pair up.
             auto object_key = ctx.camera_aux_endpoint_object_key[camera][{ii, jj}];
-            if (object_key.isMissed()) {
+            if (object_key.isCosmicBackground()) {
                 ctx.camera_spatial_reservoir_di[camera][{ii, jj}] = RS_ReservoirDI{};
                 return;
             }
@@ -868,7 +868,7 @@ class RS_VisionRayCompute {
                 if (ii_n == ii && jj_n == jj) continue;
 
                 auto neighbor_key = ctx.camera_aux_endpoint_object_key[camera][{ii_n, jj_n}];
-                if (neighbor_key.isMissed()) continue;
+                if (neighbor_key.isCosmicBackground()) continue;
                 if (neighbor_key != object_key) continue;
 
                 FloatC depth_neighbor = FloatC(ctx.camera_aux_depth_z[camera][{ii_n, jj_n}]);
@@ -982,7 +982,7 @@ class RS_VisionRayCompute {
 
             // Miss-out: no endpoint surface, clear the GI reservoir.
             auto object_key = ctx.camera_aux_endpoint_object_key[camera][{ii, jj}];
-            if (object_key.isMissed()) {
+            if (object_key.isCosmicBackground()) {
                 ctx.camera_current_reservoir_gi[camera][{ii, jj}] = RS_ReservoirGI{};
                 return;
             }
@@ -1283,7 +1283,7 @@ class RS_VisionRayCompute {
             RIndex jj = RSize(pixel) - ii * image_width;
 
             auto object_key = ctx.camera_aux_endpoint_object_key[camera][{ii, jj}];
-            if (object_key.isMissed()) {
+            if (object_key.isCosmicBackground()) {
                 ctx.camera_spatial_reservoir_gi[camera][{ii, jj}] = RS_ReservoirGI{};
                 return;
             }
@@ -1347,7 +1347,7 @@ class RS_VisionRayCompute {
                 if (ii_n == ii && jj_n == jj) continue;
 
                 auto neighbor_key = ctx.camera_aux_endpoint_object_key[camera][{ii_n, jj_n}];
-                if (neighbor_key.isMissed()) continue;
+                if (neighbor_key.isCosmicBackground()) continue;
                 if (neighbor_key != object_key) continue;
 
                 FloatC depth_neighbor = FloatC(ctx.camera_aux_depth_z[camera][{ii_n, jj_n}]);
@@ -3855,7 +3855,7 @@ class RS_VisionRayCompute {
     /**
      * @brief Walk a deterministic specular sub-chain starting from a glass
      *        surface's reflect direction (mini-PTUD on the reflect side while
-     *        the main chain follows refract). Terminates at sky / emissive /
+     *        the main chain follows refract). Terminates at cosmic background / emissive /
      *        diffuse / chain budget exhaustion. Returns
      *        `F * sub_throughput * L_endpoint` — the radiance arriving back at
      *        the glass surface, already Fresnel-weighted, ready for the caller
@@ -4234,7 +4234,7 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Walk the deterministic specular chain (PTUD) from a primary hit
-     *        until it lands on diffuse, sky, or emissive (or runs out of the
+     *        until it lands on diffuse, cosmic background, or emissive (or runs out of the
      *        budget), accumulating Beer-Lambert / Fresnel throughput along the
      *        way. Caller hands in the primary HitRecord; gets back the
      *        endpoint shading record + accumulated throughput + terminal type
@@ -4242,7 +4242,7 @@ class RS_VisionRayCompute {
      *
      * @details For non-specular primaries (or a miss) the function returns
      *          immediately with endpoint = primary, throughput = (1,1,1).
-     *          When the chain ends in SKY, `endpoint_rec_out.p` holds the
+     *          When the chain ends in COSMIC_BACKGROUND, `endpoint_rec_out.p` holds the
      *          terminal ray direction (not a world point); callers writing
      *          it into the endpoint_hit_position AOV treat it as a direction
      *          based on the terminal_type tag.
@@ -4272,7 +4272,7 @@ class RS_VisionRayCompute {
         if (!primary_any_hit) {
             endpoint_rec_out = HitRecord{};
             endpoint_rec_out.p = primary_ray.ray_direction;
-            terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY;
+            terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_COSMIC_BACKGROUND;
             return;
         }
 
@@ -4326,7 +4326,7 @@ class RS_VisionRayCompute {
             if (!_findHit(k, cur_ray, cur_rec)) {
                 endpoint_rec_out = HitRecord{};
                 endpoint_rec_out.p = cur_ray.ray_direction;
-                terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY;
+                terminal_type_out = RSE_VISION_RESTIR_CHAIN_TERMINAL_COSMIC_BACKGROUND;
                 return;
             }
         }
@@ -4352,7 +4352,7 @@ class RS_VisionRayCompute {
             ctx.camera_aux_chain_terminal_type[camera][{ii, jj}];
         Vec3C throughput = Vec3C(ctx.camera_aux_chain_throughput[camera][{ii, jj}]);
 
-        if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY) {
+        if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_COSMIC_BACKGROUND) {
             Vec3C sky_dir = Vec3C(ctx.camera_aux_endpoint_hit_position[camera][{ii, jj}]);
             contribution_out = throughput.elemMul(_findHitBackground(k, sky_dir));
             return;
@@ -4735,9 +4735,9 @@ class RS_VisionRayCompute {
      *****************************************************************/
 
     /**
-     * @brief Pack the per-pixel object-identity key for the denoiser edge stop.
-     *        Voxel: the structure entity gid with its vision material key. Floor: the reserved
-     *        floor gid.
+     * @brief Pack the per-pixel object-identity key used for temporal reprojection and ReSTIR
+     *        reservoir matching. Voxel: the structure entity gid with its vision material key.
+     *        Floor: the reserved floor gid.
      */
     HOST_DEVICE_INLINE_QUALIFIER static RS_CameraPixelObjectKey _packObjectKey(
         const HitRecord& rec

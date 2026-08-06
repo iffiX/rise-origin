@@ -1478,7 +1478,7 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
                         ctx.camera_info_ray_layout
                     );
                     exchange(
-                        ctx.camera_denoiser_color_history, ctx.camera_prev_denoiser_color_history
+                        ctx.camera_denoiser_rgb_history, ctx.camera_prev_denoiser_rgb_history
                     );
                     exchange(
                         ctx.camera_denoiser_moment_history, ctx.camera_prev_denoiser_moment_history
@@ -1521,6 +1521,8 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
             if (k_ptr->vision_is_restir_enabled) {
                 exchange(ctx.camera_prev_reservoir_di, ctx.camera_current_reservoir_di);
                 exchange(ctx.camera_prev_reservoir_gi, ctx.camera_current_reservoir_gi);
+            }
+            if (denoise_active || k_ptr->vision_is_restir_enabled) {
                 _kernel_manager->markKernelModified();
                 _kernel_manager->syncKernelIfNeeded();
             }

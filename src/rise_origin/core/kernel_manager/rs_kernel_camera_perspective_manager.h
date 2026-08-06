@@ -254,10 +254,10 @@ class RS_KernelCameraPerspectiveManager {
     logic::RS_CameraPrevAuxNormal _camera_prev_aux_normal;
     logic::RS_CameraPrevAuxDepthZ _camera_prev_aux_depth_z;
     logic::RS_CameraPrevAuxObjectKey _camera_prev_aux_object_key;
-    logic::RS_CameraDenoiserColorHistory _camera_denoiser_color_history;
+    logic::RS_CameraDenoiserRGBHistory _camera_denoiser_rgb_history;
     logic::RS_CameraDenoiserMomentHistory _camera_denoiser_moment_history;
     logic::RS_CameraDenoiserHistoryLength _camera_denoiser_history_length;
-    logic::RS_CameraDenoiserColorHistory _camera_prev_denoiser_color_history;
+    logic::RS_CameraDenoiserRGBHistory _camera_prev_denoiser_rgb_history;
     logic::RS_CameraDenoiserMomentHistory _camera_prev_denoiser_moment_history;
     logic::RS_CameraDenoiserHistoryLength _camera_prev_denoiser_history_length;
     logic::RS_CameraDenoiserVariance _camera_denoiser_variance;

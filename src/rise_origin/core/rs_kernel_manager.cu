@@ -227,10 +227,10 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.camera_prev_aux_normal.init(0, _device_provider);
         k.ctx.camera_prev_aux_depth_z.init(0, _device_provider);
         k.ctx.camera_prev_aux_object_key.init(0, _device_provider);
-        k.ctx.camera_denoiser_color_history.init(0, _device_provider);
+        k.ctx.camera_denoiser_rgb_history.init(0, _device_provider);
         k.ctx.camera_denoiser_moment_history.init(0, _device_provider);
         k.ctx.camera_denoiser_history_length.init(0, _device_provider);
-        k.ctx.camera_prev_denoiser_color_history.init(0, _device_provider);
+        k.ctx.camera_prev_denoiser_rgb_history.init(0, _device_provider);
         k.ctx.camera_prev_denoiser_moment_history.init(0, _device_provider);
         k.ctx.camera_prev_denoiser_history_length.init(0, _device_provider);
         k.ctx.camera_denoiser_variance.init(0, _device_provider);
@@ -446,10 +446,10 @@ void RS_KernelManager::freeKernel() {
         k.ctx.camera_prev_aux_normal.free();
         k.ctx.camera_prev_aux_depth_z.free();
         k.ctx.camera_prev_aux_object_key.free();
-        k.ctx.camera_denoiser_color_history.free();
+        k.ctx.camera_denoiser_rgb_history.free();
         k.ctx.camera_denoiser_moment_history.free();
         k.ctx.camera_denoiser_history_length.free();
-        k.ctx.camera_prev_denoiser_color_history.free();
+        k.ctx.camera_prev_denoiser_rgb_history.free();
         k.ctx.camera_prev_denoiser_moment_history.free();
         k.ctx.camera_prev_denoiser_history_length.free();
         k.ctx.camera_denoiser_variance.free();

@@ -32,8 +32,8 @@
 #include "rise_origin/logic/signal/rs_transform_m.h"
 #include "rise_origin/logic/soft/rs_link_m.h"
 #include "rise_origin/logic/soft/rs_link_material_m.h"
-#include "rise_origin/logic/soft/rs_voxel_m.h"
 #include "rise_origin/logic/soft/rs_voxel_face_normal_m.h"
+#include "rise_origin/logic/soft/rs_voxel_m.h"
 #include "rise_origin/logic/soft/rs_voxel_material_m.h"
 #include "rise_origin/logic/vision/rs_camera_m.h"
 #include "rise_origin/logic/vision/rs_vision_cosmic_background_m.h"
@@ -298,10 +298,10 @@ struct RS_Context {
     device::RS_Vector<logic::RS_CameraPrevAuxDepthZ> camera_prev_aux_depth_z;
     device::RS_Vector<logic::RS_CameraPrevAuxObjectKey> camera_prev_aux_object_key;
     /// SVGF temporal history (current and ping-pong prev).
-    device::RS_Vector<logic::RS_CameraDenoiserColorHistory> camera_denoiser_color_history;
+    device::RS_Vector<logic::RS_CameraDenoiserRGBHistory> camera_denoiser_rgb_history;
     device::RS_Vector<logic::RS_CameraDenoiserMomentHistory> camera_denoiser_moment_history;
     device::RS_Vector<logic::RS_CameraDenoiserHistoryLength> camera_denoiser_history_length;
-    device::RS_Vector<logic::RS_CameraDenoiserColorHistory> camera_prev_denoiser_color_history;
+    device::RS_Vector<logic::RS_CameraDenoiserRGBHistory> camera_prev_denoiser_rgb_history;
     device::RS_Vector<logic::RS_CameraDenoiserMomentHistory> camera_prev_denoiser_moment_history;
     device::RS_Vector<logic::RS_CameraDenoiserHistoryLength> camera_prev_denoiser_history_length;
     /// SVGF variance propagation (ping-pong scratch across a-trous passes).
@@ -698,19 +698,17 @@ struct RS_AnyContext {
 
 #define VFN_S_0()
 #define VFN_S_1()
-#define VFN_S_2(property, value)                                                            \
-    ctx.structure_voxel_face_normals                                                        \
-        .template set<                                                                      \
-            Pr(typename decltype(ctx.structure_voxel_face_normals)::ObjectType, property)>( \
-            voxel_face_normal, value DEBUG_ARGS(voxel_face_normal_set)                      \
-        )
+#define VFN_S_2(property, value)                                                        \
+    ctx.structure_voxel_face_normals.template set<                                      \
+        Pr(typename decltype(ctx.structure_voxel_face_normals)::ObjectType, property)>( \
+        voxel_face_normal, value DEBUG_ARGS(voxel_face_normal_set)                      \
+    )
 
-#define VFN_S_3(voxel_face_normal_idx, property, value)                                     \
-    ctx.structure_voxel_face_normals                                                        \
-        .template set<                                                                      \
-            Pr(typename decltype(ctx.structure_voxel_face_normals)::ObjectType, property)>( \
-            voxel_face_normal_idx, value DEBUG_ARGS(voxel_face_normal_set)                  \
-        )
+#define VFN_S_3(voxel_face_normal_idx, property, value)                                 \
+    ctx.structure_voxel_face_normals.template set<                                      \
+        Pr(typename decltype(ctx.structure_voxel_face_normals)::ObjectType, property)>( \
+        voxel_face_normal_idx, value DEBUG_ARGS(voxel_face_normal_set)                  \
+    )
 #define VFN_S_X(x, A, B, C, FUNC, ...) FUNC
 #define VFN_S(...)            \
     VFN_S_X(                  \

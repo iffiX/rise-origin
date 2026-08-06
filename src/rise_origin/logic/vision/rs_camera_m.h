@@ -19,15 +19,15 @@ namespace logic {
  * @brief Surface type at the end of the PTUD specular chain.
  * @note PTUD: Path Tracing Until Diffuse.
  * @details
- *   SURFACE  - chain landed on a diffuse / glossy surface (common ReSTIR case)
- *   SKY      - chain ray escaped into the world background (sky miss)
- *   EMISSIVE - chain ray hit an emissive voxel directly (radiance out)
+ *   SURFACE           - chain landed on a diffuse / glossy surface (common ReSTIR case)
+ *   COSMIC_BACKGROUND - chain ray escaped into the world background
+ *   EMISSIVE          - chain ray hit an emissive voxel directly (radiance out)
  */
 RS_ENUM(
     RSE_VisionRestirChainTerminalType,
     unsigned int,
     (RSE_VISION_RESTIR_CHAIN_TERMINAL_SURFACE, 0),
-    (RSE_VISION_RESTIR_CHAIN_TERMINAL_SKY, 1),
+    (RSE_VISION_RESTIR_CHAIN_TERMINAL_COSMIC_BACKGROUND, 1),
     (RSE_VISION_RESTIR_CHAIN_TERMINAL_EMISSIVE, 2)
 )
 
@@ -169,8 +169,8 @@ class RS_CameraMem {
 
 /// Identity of the hit object at a pixel: entity_gid + packed vision material key.
 /// entity_gid: cosmic background = 0, floor = 1, structure voxel = its entity gid.
-/// vision_material_key: packed material gid and optical mid for voxel hits; 0 for floor; sentinel
-/// sky miss. See RS_VisionMaterialKeyUnion.
+/// vision_material_key: packed material gid and optical mid for voxel hits; 0 for floor;
+/// sentinel cosmic-background miss. See RS_VisionMaterialKeyUnion.
 struct RS_CameraPixelObjectKey {
     RIndex entity_gid = RS_WORLD_RSC_COSMIC_BACKGROUND_GID;
     RIndex vision_material_key = 0;
@@ -183,13 +183,13 @@ struct RS_CameraPixelObjectKey {
         return !(*this == other);
     }
 
-    /// True when this key marks a miss / sky pixel.
-    HOST_DEVICE_INLINE_QUALIFIER bool isMissed() const {
+    /// True when this key marks a cosmic-background pixel.
+    HOST_DEVICE_INLINE_QUALIFIER bool isCosmicBackground() const {
         return entity_gid == RS_WORLD_RSC_COSMIC_BACKGROUND_GID;
     }
 };
 
-/// Sentinel for miss/sky pixels: the cosmic background entity with no material.
+/// Sentinel for cosmic-background pixels: the cosmic background entity with no material.
 constexpr RS_CameraPixelObjectKey RS_CAMERA_PIXEL_OBJECT_KEY_MISS_SENTINEL = {
     RS_WORLD_RSC_COSMIC_BACKGROUND_GID,
     ~RIndex(0)
@@ -239,10 +239,10 @@ struct RS_ReservoirGI {
     /// BRDF-sampled bounce direction at the endpoint at survivor time.
     RVec3f bounce_direction = RVec3f::zero();
 
-    /// World-space closest hit of the bounce ray; zero on sky miss.
+    /// World-space closest hit of the bounce ray; zero on cosmic-background miss.
     RVec3f bounce_hit_position = RVec3f::zero();
 
-    /// Surface normal at bounce_hit_position; zero on sky miss.
+    /// Surface normal at bounce_hit_position; zero on cosmic-background miss.
     RVec3f bounce_hit_normal = RVec3f::zero();
 
     /// Incoming radiance at the bounce hit gathered toward the endpoint.
@@ -268,11 +268,12 @@ constexpr RIndex RS_VISION_SUN_LIGHT_INDEX = 0;
 using RS_CameraRGBCanvas = device::RS_Array<RVec3f, 2>;
 
 /// General info-pass AOV buffers for denoising and ReSTIR.
+/// Note: do not use oct normal for normal because decoding is heavy.
 using RS_CameraAuxNormal = device::RS_Array<RVec3f, 2>;
 using RS_CameraAuxDepthZ = device::RS_Array<float, 2>;
 using RS_CameraAuxHitPosition = device::RS_Array<RVec3f, 2>;
 using RS_CameraAuxObjectKey = device::RS_Array<RS_CameraPixelObjectKey, 2>;
-using RS_CameraAuxAlbedo = device::RS_Array<RVec3f, 2>;
+using RS_CameraAuxAlbedo = device::RS_Array<RS_Vec3DMem<RSE_FLOAT_16>, 2>;
 using RS_CameraAuxRoughness = device::RS_Array<float, 2>;
 using RS_CameraAuxMetalness = device::RS_Array<float, 2>;
 using RS_CameraAuxIntensity = device::RS_Array<float, 2>;
@@ -295,7 +296,7 @@ using RS_CameraPrevAuxDepthZ = device::RS_Array<float, 2>;
 using RS_CameraPrevAuxObjectKey = device::RS_Array<RS_CameraPixelObjectKey, 2>;
 
 /// SVGF temporal history: color, luminance moments (m1, m2), length, variance.
-using RS_CameraDenoiserColorHistory = device::RS_Array<RVec3f, 2>;
+using RS_CameraDenoiserRGBHistory = device::RS_Array<RS_Vec3DMem<RSE_FLOAT_16>, 2>;
 using RS_CameraDenoiserMomentHistory = device::RS_Array<RVec2f, 2>;
 using RS_CameraDenoiserHistoryLength = device::RS_Array<RFloat, 2>;
 using RS_CameraDenoiserVariance = device::RS_Array<RFloat, 2>;
