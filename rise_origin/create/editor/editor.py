@@ -34,6 +34,7 @@ from rise_origin import (
     RSC_MaterialPhysicalPropertyRigid,
     RSC_MaterialPhysicalPropertySoft,
     RSC_ResourceBase,
+    RSC_SimulationVisionDenoiseNone,
     RSC_StructureVoxel,
     RSE_WorldTaskState,
 )
@@ -44,7 +45,7 @@ from rise_origin.rsc.essence import (
     MaterialPhysicalPropertyFixed,
 )
 from rise_origin.rsc.resource import TextureGrid
-from rise_origin.rsc.simulation import Simulation
+from rise_origin.rsc.simulation import Simulation, VisionDenoiseSVGF
 from rise_origin.rsc.world import World
 
 from ..constants import (
@@ -940,7 +941,10 @@ class Editor:
         a freshly created thing shows at the origin. Content missing a
         cosmic background gets a default Hosek-Wilkie sky, and content
         missing a floor gets a grid ground plane, so a bare draft reads;
-        content bringing its own keeps it. A side thread asks the live
+        content bringing its own keeps it. A resolved simulation carrying
+        no denoiser gets SVGF, so a preview stands clean at the few
+        samples per pixel a live view affords; one naming its own denoiser
+        keeps it. A side thread asks the live
         handle for the world's real voxel numbers and prints them once,
         so every preview reports what the engine actually allocated.
 
@@ -962,6 +966,8 @@ class Editor:
         data = self._resolve_materials(target)
         simulation = self.get_simulation_rsc(node=target)
         simulation.runtime.is_paused_on_start = is_interactive
+        if isinstance(simulation.vision.denoise, RSC_SimulationVisionDenoiseNone):
+            simulation.vision.denoise = VisionDenoiseSVGF()
         self.logger.info("preview: compiling world")
         entities = target.bake_entities()
         extra_entities, extra_essences, extra_resources = (

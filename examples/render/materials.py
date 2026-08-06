@@ -193,8 +193,7 @@ def _nested_cube(name, shell, core, center, air_center=False):
         segments[mid, mid, mid] = RS_NULL_INDEX
 
     body = rsc.entity.StructureVoxelBody.from_grid(
-        materials != RS_NULL_INDEX,
-        material_grid=materials,
+        materials,
         segment_grid=segments,
         voxel_size=VOXEL,
         relative_origin_position=(-size / 2, -size / 2, 0.0),
