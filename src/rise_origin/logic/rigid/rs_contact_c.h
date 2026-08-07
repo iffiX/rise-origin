@@ -74,7 +74,7 @@ class RS_ContactCompute {
      *
      * @param k                        simulation kernel.
      * @param flags                    per voxel-slot flag buffer, three entries per surface voxel.
-     * @param rigid_body_surface_voxel handle of the surface voxel being flagged.
+     * @param rigid_body_bound_voxel   handle of the surface voxel being flagged.
      * @param dense_index              dense index of this surface voxel in the launch.
      */
     class RSCF_CountRigidContacts : public device::RS_ComputeFunction<RSCF_CountRigidContacts> {
@@ -83,7 +83,7 @@ class RS_ContactCompute {
 
         template <typename Kernel>
         HOST_DEVICE_INLINE_QUALIFIER static void
-        run(Kernel *k, RHandle rigid_body_surface_voxel, RIndex dense_index, RS_MemoryPtr flags) {
+        run(Kernel *k, RHandle rigid_body_bound_voxel, RIndex dense_index, RS_MemoryPtr flags) {
             if (k == nullptr) return;
             auto &ctx = k->ctx;
             RIndex base = dense_index * RIndex(3);
@@ -91,8 +91,8 @@ class RS_ContactCompute {
             flags.template get<RIndex>(base + RIndex(1)) = 0;
             flags.template get<RIndex>(base + RIndex(2)) = 0;
 
-            if (rigid_body_surface_voxel == RS_NULL_HANDLE) return;
-            RHandle voxel = RBSV_G(voxel);
+            if (rigid_body_bound_voxel == RS_NULL_HANDLE) return;
+            RHandle voxel = RBBV_G(voxel);
             if (voxel == RS_NULL_HANDLE) return;
 
             RS_VoxelStateUnion su{V_G(voxel, state)};
@@ -121,7 +121,7 @@ class RS_ContactCompute {
      *
      * @param k                        simulation kernel.
      * @param flags                    per voxel-slot flag buffer from RSCF_CountRigidContacts.
-     * @param rigid_body_surface_voxel handle of the surface voxel emitting contacts.
+     * @param rigid_body_bound_voxel   handle of the surface voxel emitting contacts.
      * @param dense_index              dense index of this surface voxel in the launch.
      * @param contacts                 compacted rigid contact list, the emit destination.
      * @param prefix                   inclusive prefix sum of flags, the compacted slot offsets.
@@ -133,7 +133,7 @@ class RS_ContactCompute {
         template <typename Kernel, typename Contacts>
         HOST_DEVICE_INLINE_QUALIFIER static void run(
             Kernel *k,
-            RHandle rigid_body_surface_voxel,
+            RHandle rigid_body_bound_voxel,
             RIndex dense_index,
             RS_MemoryPtr flags,
             Contacts contacts,
@@ -143,9 +143,9 @@ class RS_ContactCompute {
             auto &ctx = k->ctx;
             using C = typename Contacts::ObjectType;
             RIndex base = dense_index * RIndex(3);
-            if (rigid_body_surface_voxel == RS_NULL_HANDLE) return;
-            RHandle voxel = RBSV_G(voxel);
-            RHandle body = RBSV_G(rigid_body);
+            if (rigid_body_bound_voxel == RS_NULL_HANDLE) return;
+            RHandle voxel = RBBV_G(voxel);
+            RHandle body = RBBV_G(rigid_body);
             if (voxel == RS_NULL_HANDLE || body == RS_NULL_HANDLE) return;
 
             RHandle voxel_material = V_G(voxel, voxel_material);

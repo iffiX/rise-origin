@@ -163,6 +163,9 @@ class RS_CameraMem {
     /// World time of the last pose update.
     RBigFloat last_update_time = 0;
 
+    /// World time passed between the last two pose updates.
+    RBigFloat last_update_passed_time = 0;
+
     /// Number of frames rendered so far.
     RBigSize frame_count = 0;
 };
@@ -339,6 +342,7 @@ using RS_CameraDenoiserVariance = device::RS_Array<RFloat, 2>;
         field(prev_position),                 \
         field(prev_orientation),              \
         field(last_update_time),              \
+        field(last_update_passed_time),       \
         field(frame_count)                    \
     )
 

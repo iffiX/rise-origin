@@ -139,7 +139,7 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.structure_links.init(0, _device_provider);
         k.ctx.structure_voxels.init(0, _device_provider);
         k.ctx.structure_rigid_bodies.init(0, _device_provider);
-        k.ctx.structure_rigid_body_surface_voxels.init(0, _device_provider);
+        k.ctx.structure_rigid_body_bound_voxels.init(0, _device_provider);
         k.ctx.structure_constraint_joints.init(0, _device_provider);
 
         k.ctx.structure_constraint_joint_block_ranges.init(0, _device_provider);
@@ -167,7 +167,7 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.structure_link_layout.init(_device_provider);
         k.ctx.structure_voxel_layout.init(_device_provider);
         k.ctx.structure_rigid_body_layout.init(_device_provider);
-        k.ctx.structure_rigid_body_surface_voxel_layout.init(_device_provider);
+        k.ctx.structure_rigid_body_bound_voxel_layout.init(_device_provider);
         k.ctx.structure_constraint_joint_layout.init(_device_provider);
 
         k.ctx.structure_constraint_joint_block_range_layout.init(_device_provider);
@@ -305,7 +305,7 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.host_data = new RS_ContextHostData();
 
         k.ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
-            .associateInputLayout(k.ctx.host_data->structure_rigid_body_surface_voxel_layout);
+            .associateInputLayout(k.ctx.host_data->structure_rigid_body_bound_voxel_layout);
         k.ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
             .associateOutputLayout(k.ctx.host_data->structure_rigid_body_layout);
 
@@ -362,7 +362,7 @@ void RS_KernelManager::freeKernel() {
         k.ctx.structure_links.free();
         k.ctx.structure_voxels.free();
         k.ctx.structure_rigid_bodies.free();
-        k.ctx.structure_rigid_body_surface_voxels.free();
+        k.ctx.structure_rigid_body_bound_voxels.free();
         k.ctx.structure_constraint_joints.free();
 
         k.ctx.structure_constraint_joint_block_ranges.free();
@@ -390,7 +390,7 @@ void RS_KernelManager::freeKernel() {
         k.ctx.structure_link_layout.free();
         k.ctx.structure_voxel_layout.free();
         k.ctx.structure_rigid_body_layout.free();
-        k.ctx.structure_rigid_body_surface_voxel_layout.free();
+        k.ctx.structure_rigid_body_bound_voxel_layout.free();
         k.ctx.structure_constraint_joint_layout.free();
 
         k.ctx.structure_constraint_joint_block_range_layout.free();
@@ -1882,9 +1882,9 @@ void RS_KernelManager::_configureLayoutGrowthPolicies(RS_ContextHostData* host_d
         1024
     );
     apply(
-        host_data->structure_rigid_body_surface_voxel_layout,
-        is_f64 ? sizeof(logic::RS_RigidBodySurfaceVoxelMem<RSE_FLOAT_64>)
-               : sizeof(logic::RS_RigidBodySurfaceVoxelMem<RSE_FLOAT_32>),
+        host_data->structure_rigid_body_bound_voxel_layout,
+        is_f64 ? sizeof(logic::RS_RigidBodyBoundVoxelMem<RSE_FLOAT_64>)
+               : sizeof(logic::RS_RigidBodyBoundVoxelMem<RSE_FLOAT_32>),
         16384
     );
     apply(

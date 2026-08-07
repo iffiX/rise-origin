@@ -327,6 +327,28 @@ class RSCF_CompactVoxelHandles : public device::RS_ComputeFunction<RSCF_CompactV
     }
 };
 
+/**
+ * @brief Record a voxel's pose for the next vision update's screen motion.
+ * @details Runs over the dynamic voxels once a vision update has finished rendering, so the
+ * recorded pose is one vision update old and the tracer can reproject a hit without
+ * extrapolating a velocity. Expansion and distortion are not recorded, so a hit inside a cell
+ * that deformed is off by a fraction of the voxel, which is accepted.
+ *
+ * @param k     simulation kernel.
+ * @param voxel handle of the voxel to record.
+ */
+class RSCF_UpdateVoxelPreviousPose
+    : public device::RS_ComputeFunction<RSCF_UpdateVoxelPreviousPose> {
+   public:
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel *k, RHandle voxel) {
+        if (k == nullptr || voxel == RS_NULL_HANDLE) return;
+        auto &ctx = k->ctx;
+        V_S(prev_position, V_G(position));
+        V_S(prev_orientation, V_G(orientation));
+    }
+};
+
 template <RSE_FloatType FloatComputeAccuracy>
 class RS_VoxelCompute {
    public:

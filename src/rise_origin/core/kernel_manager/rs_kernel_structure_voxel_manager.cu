@@ -11,8 +11,8 @@
 #include "rise_origin/device/algorithm/rs_generate.h"
 #include "rise_origin/logic/record/rs_basic_record_c.h"
 #include "rise_origin/logic/rigid/rs_constraint_c.h"
+#include "rise_origin/logic/rigid/rs_rigid_body_bound_voxel_c.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_c.h"
-#include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_c.h"
 #include "rise_origin/logic/soft/rs_link_c.h"
 #include "rise_origin/logic/soft/rs_link_material_c.h"
 #include "rise_origin/logic/soft/rs_voxel_c.h"
@@ -161,12 +161,12 @@ RS_KernelStructureVoxelManager::RS_KernelStructureVoxelManager(
     RS_LOG(
         _kernel_manager->getLogger(),
         debug,
-        "Structure {} has voxel: {} link: {} rigid body: {} rigid body surface voxel: {} joint: {}",
+        "Structure {} has voxel: {} link: {} rigid body: {} rigid body bound voxel: {} joint: {}",
         _structure().name,
         _voxel_num,
         _link_num,
         _rigid_body_num,
-        _rigid_body_surface_voxel_num,
+        _rigid_body_bound_voxel_num,
         _joint_num
     );
     RS_LOG(_kernel_manager->getLogger(), info, "Added structure {}", _structure().name);
@@ -1359,6 +1359,9 @@ void RS_KernelStructureVoxelManager::_addBody(
     //----------------------------------------------------------------
     // Step 5: Find valid voxels, assign sid, and save them
     //----------------------------------------------------------------
+    // A dropped voxel gets its sid cleared, since a cached body carries the sid it was given
+    // when the cache was built and later steps read the sid to tell a kept voxel from a dropped
+    // one.
     if (_structure().is_fixed) {
         // For a fixed body, only add voxels that are ray-traceable or collidable.
         for (RIndex v = 0; v < all_voxel_num; v++) {
@@ -1367,6 +1370,8 @@ void RS_KernelStructureVoxelManager::_addBody(
                 if (_hasVoxelFaceNormal(all_voxels[v]))
                     all_voxels[v].voxel_face_normal_sid = _voxel_face_normal_num++;
                 _voxels.emplace_back(all_voxels[v]);
+            } else {
+                all_voxels[v].sid = RS_NULL_INDEX;
             }
         }
     } else {
@@ -1380,6 +1385,8 @@ void RS_KernelStructureVoxelManager::_addBody(
                 if (_hasVoxelFaceNormal(all_voxels[v]))
                     all_voxels[v].voxel_face_normal_sid = _voxel_face_normal_num++;
                 _voxels.emplace_back(all_voxels[v]);
+            } else {
+                all_voxels[v].sid = RS_NULL_INDEX;
             }
         }
     }
@@ -1615,7 +1622,7 @@ void RS_KernelStructureVoxelManager::_addBody(
             timer.reset();
         }
 
-        // Process at last to make sure that rigid body surface voxels are contiguous
+        // Process at last to make sure that rigid body bound voxels are contiguous
         // in rigid body index and ordered by rigid body index
         for (auto rigid_body_sid : added_rigid_body_sid) {
             auto &rigid_body = _rigid_bodies[rigid_body_sid];
@@ -1642,24 +1649,42 @@ void RS_KernelStructureVoxelManager::_addBody(
                 initial_body_origin_position +
                 initial_body_orientation.rotateVec3D(rigid_body.origin_b_position);
 
-            // Create rigid body surface voxels
-            rigid_body.rigid_body_surface_voxel_start = _rigid_body_surface_voxel_num;
+            // Create rigid body bound voxels, the surface ones first so that they form a prefix
+            // the soft coupling reduction can range over.
+            rigid_body.rigid_body_bound_voxel_start = _rigid_body_bound_voxel_num;
             for (auto &&[voxel_tmp_index, material_rb_position] :
                  zip(rigid_body.contained_voxel_tmp_indices,
                      rigid_body.contained_material_rb_positions)) {
-                // Add rigid body voxel if this rigid voxel is a surface voxel
+                // A voxel step 5 dropped has no sid, so there is no voxel left to drive
                 auto &voxel = all_voxels[voxel_tmp_index];
 
-                if (voxel.is_surface) {
-                    auto rigid_body_surface_voxel = RigidBodySurfaceVoxelData::preset();
-                    rigid_body_surface_voxel.voxel_sid = all_voxels[voxel_tmp_index].sid;
-                    rigid_body_surface_voxel.rigid_body_sid = rigid_body_sid;
-                    rigid_body_surface_voxel.voxel_rb_position = material_rb_position;
-                    _rigid_body_surface_voxels.emplace_back(rigid_body_surface_voxel);
-                    _rigid_body_surface_voxel_num++;
+                if (voxel.sid != RS_NULL_INDEX && voxel.is_surface) {
+                    auto rigid_body_bound_voxel = RigidBodyBoundVoxelData::preset();
+                    rigid_body_bound_voxel.voxel_sid = voxel.sid;
+                    rigid_body_bound_voxel.rigid_body_sid = rigid_body_sid;
+                    rigid_body_bound_voxel.voxel_rb_position = material_rb_position;
+                    _rigid_body_bound_voxels.emplace_back(rigid_body_bound_voxel);
+                    _rigid_body_bound_voxel_num++;
                 }
             }
-            rigid_body.rigid_body_surface_voxel_end = _rigid_body_surface_voxel_num;
+            rigid_body.rigid_body_surface_voxel_end = _rigid_body_bound_voxel_num;
+
+            // Then the rest of the voxels the body carries, which only need their pose driven
+            for (auto &&[voxel_tmp_index, material_rb_position] :
+                 zip(rigid_body.contained_voxel_tmp_indices,
+                     rigid_body.contained_material_rb_positions)) {
+                auto &voxel = all_voxels[voxel_tmp_index];
+
+                if (voxel.sid != RS_NULL_INDEX && !voxel.is_surface) {
+                    auto rigid_body_bound_voxel = RigidBodyBoundVoxelData::preset();
+                    rigid_body_bound_voxel.voxel_sid = voxel.sid;
+                    rigid_body_bound_voxel.rigid_body_sid = rigid_body_sid;
+                    rigid_body_bound_voxel.voxel_rb_position = material_rb_position;
+                    _rigid_body_bound_voxels.emplace_back(rigid_body_bound_voxel);
+                    _rigid_body_bound_voxel_num++;
+                }
+            }
+            rigid_body.rigid_body_bound_voxel_end = _rigid_body_bound_voxel_num;
         }
 
         // Keep the rigid body origins so _addConstraint and the post-commit queries can read them
@@ -2187,7 +2212,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
     using VoxelMaterialMem = RS_VoxelMaterialMem<FloatMemAccuracy>;
     using LinkMaterialMem = RS_LinkMaterialMem<FloatMemAccuracy>;
     using RigidBodyMem = RS_RigidBodyMem<FloatMemAccuracy>;
-    using RigidBodySurfaceVoxelMem = RS_RigidBodySurfaceVoxelMem<FloatMemAccuracy>;
+    using RigidBodyBoundVoxelMem = RS_RigidBodyBoundVoxelMem<FloatMemAccuracy>;
     using ConstraintJointMem = RS_ConstraintJointMem<FloatMemAccuracy>;
 
     using VoxelArray = RS_Array<VoxelMem, 1>;
@@ -2195,7 +2220,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
     using VoxelMaterialArray = RS_Array<RS_VoxelMaterialMem<FloatMemAccuracy>, 1>;
     using LinkMaterialArray = RS_Array<RS_LinkMaterialMem<FloatMemAccuracy>, 1>;
     using RigidBodyArray = RS_Array<RigidBodyMem, 1>;
-    using RigidBodySurfaceVoxelArray = RS_Array<RigidBodySurfaceVoxelMem, 1>;
+    using RigidBodyBoundVoxelArray = RS_Array<RigidBodyBoundVoxelMem, 1>;
     using ConstraintJointArray = RS_Array<ConstraintJointMem, 1>;
     using VoxelFaceNormalArray = RS_Array<RS_VoxelFaceNormalMem, 1>;
     using RigidBodyFloatArray = RS_Array<RS_FloatMem<FloatMemAccuracy>, 1>;
@@ -2219,8 +2244,8 @@ RS_KernelStructureVoxelManager::_getAll() const {
     RS_MemoryPtr links = host_provider->allocate(sizeof(LinkMem) * _links.size(), true);
     RS_MemoryPtr rigid_bodies =
         host_provider->allocate(sizeof(RigidBodyMem) * _rigid_bodies.size(), true);
-    RS_MemoryPtr rigid_body_surface_voxels = host_provider->allocate(
-        sizeof(RigidBodySurfaceVoxelMem) * _rigid_body_surface_voxels.size(), true
+    RS_MemoryPtr rigid_body_bound_voxels = host_provider->allocate(
+        sizeof(RigidBodyBoundVoxelMem) * _rigid_body_bound_voxels.size(), true
     );
     RS_MemoryPtr constraint_joints =
         host_provider->allocate(sizeof(ConstraintJointMem) * _constraint_joints.size(), true);
@@ -2350,6 +2375,8 @@ RS_KernelStructureVoxelManager::_getAll() const {
                                                             [voxel.material_optical_reference_mid];
                     voxel_out.position = voxel.g_position;
                     voxel_out.orientation = voxel.g_orientation;
+                    voxel_out.prev_position = voxel.g_position;
+                    voxel_out.prev_orientation = voxel.g_orientation;
 
                     FloatM body_voxel_size = _structure().bodies[voxel.body_sid].voxel_size;
                     FloatM half_voxel_size = 0.5 * body_voxel_size;
@@ -2508,21 +2535,21 @@ RS_KernelStructureVoxelManager::_getAll() const {
     // print("rb {}\n", timer.elapsedTimeString());
     // timer.reset();
 
-    if (!_rigid_body_surface_voxels.empty())
+    if (!_rigid_body_bound_voxels.empty())
         _kernel_manager->getThreadPool()
             ->submitLoop(
                 0,
-                _rigid_body_surface_voxels.size(),
+                _rigid_body_bound_voxels.size(),
                 [&](RIndex i) {
-                    auto &rigid_body_surface_voxel = _rigid_body_surface_voxels[i];
-                    auto rigid_body_surface_voxel_out = RigidBodySurfaceVoxelMem();
-                    rigid_body_surface_voxel_out.voxel_sid = rigid_body_surface_voxel.voxel_sid;
-                    rigid_body_surface_voxel_out.rigid_body_sid =
-                        rigid_body_surface_voxel.rigid_body_sid;
-                    rigid_body_surface_voxel_out.voxel_rb_position =
-                        rigid_body_surface_voxel.voxel_rb_position;
-                    rigid_body_surface_voxels.get<RigidBodySurfaceVoxelMem>(i) =
-                        rigid_body_surface_voxel_out;
+                    auto &rigid_body_bound_voxel = _rigid_body_bound_voxels[i];
+                    auto rigid_body_bound_voxel_out = RigidBodyBoundVoxelMem();
+                    rigid_body_bound_voxel_out.voxel_sid = rigid_body_bound_voxel.voxel_sid;
+                    rigid_body_bound_voxel_out.rigid_body_sid =
+                        rigid_body_bound_voxel.rigid_body_sid;
+                    rigid_body_bound_voxel_out.voxel_rb_position =
+                        rigid_body_bound_voxel.voxel_rb_position;
+                    rigid_body_bound_voxels.get<RigidBodyBoundVoxelMem>(i) =
+                        rigid_body_bound_voxel_out;
                 }
             )
             .wait();
@@ -2603,11 +2630,9 @@ RS_KernelStructureVoxelManager::_getAll() const {
     data.rigid_bodies = RigidBodyArray(_rigid_bodies.size(), provider);
     data.rigid_bodies.write(rigid_bodies.as<RigidBodyMem>(), false);
 
-    data.rigid_body_surface_voxels =
-        RigidBodySurfaceVoxelArray(_rigid_body_surface_voxels.size(), provider);
-    data.rigid_body_surface_voxels.write(
-        rigid_body_surface_voxels.as<RigidBodySurfaceVoxelMem>(), false
-    );
+    data.rigid_body_bound_voxels =
+        RigidBodyBoundVoxelArray(_rigid_body_bound_voxels.size(), provider);
+    data.rigid_body_bound_voxels.write(rigid_body_bound_voxels.as<RigidBodyBoundVoxelMem>(), false);
 
     data.constraint_joints = ConstraintJointArray(_constraint_joints.size(), provider);
     // Last write is synchronized
@@ -2618,7 +2643,7 @@ RS_KernelStructureVoxelManager::_getAll() const {
     voxels.free();
     links.free();
     rigid_bodies.free();
-    rigid_body_surface_voxels.free();
+    rigid_body_bound_voxels.free();
     constraint_joints.free();
 
     // print("write {}\n", timer.elapsedTimeString());
@@ -2654,7 +2679,7 @@ void RS_KernelStructureVoxelManager::_cleanupGeneratedData() {
     _voxels = std::vector<VoxelData>();
     _links = std::vector<LinkData>();
     _rigid_bodies = std::vector<RigidBodyData>();
-    _rigid_body_surface_voxels = std::vector<RigidBodySurfaceVoxelData>();
+    _rigid_body_bound_voxels = std::vector<RigidBodyBoundVoxelData>();
     _constraint_joints = std::vector<ConstraintJointData>();
     _voxel_materials = std::vector<VoxelMaterialData>();
     _link_materials = std::vector<LinkMaterialData>();
@@ -2683,7 +2708,7 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         RSize voxel_face_normal_num = structure.voxel_face_normals.size();
         RSize link_num = structure.links.size();
         RSize rigid_body_num = structure.rigid_bodies.size();
-        RSize rigid_body_surface_voxel_num = structure.rigid_body_surface_voxels.size();
+        RSize rigid_body_bound_voxel_num = structure.rigid_body_bound_voxels.size();
         RSize constraint_joint_num = structure.constraint_joints.size();
 
         // Update host layout.
@@ -2703,8 +2728,8 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         ctx.host_data->structure_link_layout.add(link_num, _structure_gid, is_active);
         ctx.host_data->structure_voxel_layout.add(voxel_num, _structure_gid, true);
         ctx.host_data->structure_rigid_body_layout.add(rigid_body_num, _structure_gid, is_active);
-        ctx.host_data->structure_rigid_body_surface_voxel_layout.add(
-            rigid_body_surface_voxel_num, _structure_gid, is_active
+        ctx.host_data->structure_rigid_body_bound_voxel_layout.add(
+            rigid_body_bound_voxel_num, _structure_gid, is_active
         );
         ctx.host_data->structure_constraint_joint_layout.add(
             constraint_joint_num, _structure_gid, is_active
@@ -2716,9 +2741,9 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
                 ctx.host_data->structure_rigid_body_surface_voxel_to_rigid_body_reduction_layout
                     .associate(
                         _structure_gid,
-                        rigid_body.rigid_body_surface_voxel_start,
+                        rigid_body.rigid_body_bound_voxel_start,
                         rigid_body.rigid_body_surface_voxel_end -
-                            rigid_body.rigid_body_surface_voxel_start,
+                            rigid_body.rigid_body_bound_voxel_start,
                         _structure_gid,
                         rigid_body_sid
                     );
@@ -2740,8 +2765,8 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         ctx.host_data->structure_rigid_body_layout.syncDeviceLayout(
             ctx.structure_rigid_body_layout
         );
-        ctx.host_data->structure_rigid_body_surface_voxel_layout.syncDeviceLayout(
-            ctx.structure_rigid_body_surface_voxel_layout
+        ctx.host_data->structure_rigid_body_bound_voxel_layout.syncDeviceLayout(
+            ctx.structure_rigid_body_bound_voxel_layout
         );
         ctx.host_data->structure_constraint_joint_layout.syncDeviceLayout(
             ctx.structure_constraint_joint_layout
@@ -2771,8 +2796,8 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         ctx.structure_links.resize(ctx.host_data->structure_link_layout.capacity());
         ctx.structure_voxels.resize(ctx.host_data->structure_voxel_layout.capacity());
         ctx.structure_rigid_bodies.resize(ctx.host_data->structure_rigid_body_layout.capacity());
-        ctx.structure_rigid_body_surface_voxels.resize(
-            ctx.host_data->structure_rigid_body_surface_voxel_layout.capacity()
+        ctx.structure_rigid_body_bound_voxels.resize(
+            ctx.host_data->structure_rigid_body_bound_voxel_layout.capacity()
         );
         ctx.structure_constraint_joints.resize(
             ctx.host_data->structure_constraint_joint_layout.capacity()
@@ -2828,15 +2853,15 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         );
         copy(ctx.structure_rigid_bodies, structure.rigid_bodies, rigid_body_num, rigid_body_offset);
 
-        RSize rigid_body_surface_voxel_offset =
-            ctx.host_data->structure_rigid_body_surface_voxel_layout.segmentOffset(
-                ctx.host_data->structure_rigid_body_surface_voxel_layout.find(_structure_gid)
+        RSize rigid_body_bound_voxel_offset =
+            ctx.host_data->structure_rigid_body_bound_voxel_layout.segmentOffset(
+                ctx.host_data->structure_rigid_body_bound_voxel_layout.find(_structure_gid)
             );
         copy(
-            ctx.structure_rigid_body_surface_voxels,
-            structure.rigid_body_surface_voxels,
-            rigid_body_surface_voxel_num,
-            rigid_body_surface_voxel_offset
+            ctx.structure_rigid_body_bound_voxels,
+            structure.rigid_body_bound_voxels,
+            rigid_body_bound_voxel_num,
+            rigid_body_bound_voxel_offset
         );
 
         RSize constraint_joint_offset =
@@ -2877,9 +2902,9 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
                 {link_num}, link_offset, voxel_offset, link_material_offset
             );
             p_ptr->template run<
-                RSCF_LaunchDirect<RSCF_ResolveRigidBodySurfaceVoxelDependency, KernelType>>(
-                {rigid_body_surface_voxel_num},
-                rigid_body_surface_voxel_offset,
+                RSCF_LaunchDirect<RSCF_ResolveRigidBodyBoundVoxelDependency, KernelType>>(
+                {rigid_body_bound_voxel_num},
+                rigid_body_bound_voxel_offset,
                 voxel_offset,
                 rigid_body_offset
             );
@@ -2902,7 +2927,7 @@ void RS_KernelStructureVoxelManager::_initKernelData() {
         structure.links.free();
         structure.voxels.free();
         structure.rigid_bodies.free();
-        structure.rigid_body_surface_voxels.free();
+        structure.rigid_body_bound_voxels.free();
         structure.constraint_joints.free();
         structure.rigid_body_mass.free();
         structure.rigid_body_mass_inverses.free();
@@ -2993,8 +3018,8 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
         ctx.host_data->structure_rigid_body_layout.remove(
             ctx.host_data->structure_rigid_body_layout.find(_structure_gid)
         );
-        ctx.host_data->structure_rigid_body_surface_voxel_layout.remove(
-            ctx.host_data->structure_rigid_body_surface_voxel_layout.find(_structure_gid)
+        ctx.host_data->structure_rigid_body_bound_voxel_layout.remove(
+            ctx.host_data->structure_rigid_body_bound_voxel_layout.find(_structure_gid)
         );
         ctx.host_data->structure_constraint_joint_layout.remove(
             ctx.host_data->structure_constraint_joint_layout.find(_structure_gid)
@@ -3018,8 +3043,8 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
         ctx.host_data->structure_rigid_body_layout.syncDeviceLayout(
             ctx.structure_rigid_body_layout
         );
-        ctx.host_data->structure_rigid_body_surface_voxel_layout.syncDeviceLayout(
-            ctx.structure_rigid_body_surface_voxel_layout
+        ctx.host_data->structure_rigid_body_bound_voxel_layout.syncDeviceLayout(
+            ctx.structure_rigid_body_bound_voxel_layout
         );
         ctx.host_data->structure_constraint_joint_layout.syncDeviceLayout(
             ctx.structure_constraint_joint_layout
@@ -3049,8 +3074,8 @@ void RS_KernelStructureVoxelManager::_freeKernelData() {
         ctx.structure_links.resize(ctx.host_data->structure_link_layout.capacity());
         ctx.structure_voxels.resize(ctx.host_data->structure_voxel_layout.capacity());
         ctx.structure_rigid_bodies.resize(ctx.host_data->structure_rigid_body_layout.capacity());
-        ctx.structure_rigid_body_surface_voxels.resize(
-            ctx.host_data->structure_rigid_body_surface_voxel_layout.capacity()
+        ctx.structure_rigid_body_bound_voxels.resize(
+            ctx.host_data->structure_rigid_body_bound_voxel_layout.capacity()
         );
         ctx.structure_constraint_joints.resize(
             ctx.host_data->structure_constraint_joint_layout.capacity()
@@ -3427,8 +3452,8 @@ void RS_KernelStructureVoxelManager::_freezeKernelData(bool is_freeze) {
         ctx.host_data->structure_link_layout.setSegmentIsActive(
             ctx.host_data->structure_link_layout.find(_structure_gid), is_active
         );
-        ctx.host_data->structure_rigid_body_surface_voxel_layout.setSegmentIsActive(
-            ctx.host_data->structure_rigid_body_surface_voxel_layout.find(_structure_gid), is_active
+        ctx.host_data->structure_rigid_body_bound_voxel_layout.setSegmentIsActive(
+            ctx.host_data->structure_rigid_body_bound_voxel_layout.find(_structure_gid), is_active
         );
         ctx.host_data->structure_constraint_joint_layout.setSegmentIsActive(
             ctx.host_data->structure_constraint_joint_layout.find(_structure_gid), is_active
@@ -3456,8 +3481,8 @@ void RS_KernelStructureVoxelManager::_freezeKernelData(bool is_freeze) {
             ctx.structure_link_material_layout
         );
         ctx.host_data->structure_link_layout.syncDeviceLayout(ctx.structure_link_layout);
-        ctx.host_data->structure_rigid_body_surface_voxel_layout.syncDeviceLayout(
-            ctx.structure_rigid_body_surface_voxel_layout
+        ctx.host_data->structure_rigid_body_bound_voxel_layout.syncDeviceLayout(
+            ctx.structure_rigid_body_bound_voxel_layout
         );
         ctx.host_data->structure_constraint_joint_layout.syncDeviceLayout(
             ctx.structure_constraint_joint_layout

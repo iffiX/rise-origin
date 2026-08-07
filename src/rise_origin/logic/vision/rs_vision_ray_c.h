@@ -217,12 +217,10 @@ class RS_VisionRayCompute {
             ctx.camera_aux_object_key[camera][{i, j}] = _packObjectKey(rec);
             ctx.camera_aux_roughness[camera][{i, j}] = float(rec.roughness);
 
-            Vec3C primary_world_velocity;
-            _computeWorldVelocity(k, rec.voxel, rec.p, primary_world_velocity);
+            Vec3C primary_prev_hit_position;
+            _computePrevHitPosition(k, rec.voxel, rec.p, primary_prev_hit_position);
             RVec2f primary_screen_motion(0.0f, 0.0f);
-            _computeScreenMotion(
-                k, camera, rec.p, primary_world_velocity, i, j, primary_screen_motion
-            );
+            _computeScreenMotion(k, camera, primary_prev_hit_position, i, j, primary_screen_motion);
             ctx.camera_aux_screen_motion[camera][{i, j}] = primary_screen_motion;
         }
     };
@@ -327,7 +325,7 @@ class RS_VisionRayCompute {
      *
      * @details Adds three buckets beyond the basic pass: endpoint shading
      *          AOVs (hit_position, normal, object_key, albedo, roughness,
-     *          metalness, material_type, world_velocity, screen_motion),
+     *          metalness, material_type, screen_motion),
      *          chain_throughput, and chain_terminal_type. OPAQUE primaries
      *          short-circuit with endpoint = primary and throughput = (1,1,1);
      *          specular primaries follow the chain to the diffuse surface,
@@ -378,11 +376,11 @@ class RS_VisionRayCompute {
                 ctx.camera_aux_object_key[camera][{i, j}] = _packObjectKey(rec);
                 ctx.camera_aux_roughness[camera][{i, j}] = float(rec.roughness);
 
-                Vec3C primary_world_velocity;
-                _computeWorldVelocity(k, rec.voxel, rec.p, primary_world_velocity);
+                Vec3C primary_prev_hit_position;
+                _computePrevHitPosition(k, rec.voxel, rec.p, primary_prev_hit_position);
                 RVec2f primary_screen_motion(0.0f, 0.0f);
                 _computeScreenMotion(
-                    k, camera, rec.p, primary_world_velocity, i, j, primary_screen_motion
+                    k, camera, primary_prev_hit_position, i, j, primary_screen_motion
                 );
                 ctx.camera_aux_screen_motion[camera][{i, j}] = primary_screen_motion;
             }
@@ -462,11 +460,13 @@ class RS_VisionRayCompute {
             ctx.camera_aux_endpoint_intensity[camera][{i, j}] = float(endpoint_rec.intensity);
             ctx.camera_aux_endpoint_material_type[camera][{i, j}] = endpoint_material_type;
 
-            Vec3C endpoint_world_velocity;
-            _computeWorldVelocity(k, endpoint_rec.voxel, endpoint_rec.p, endpoint_world_velocity);
+            Vec3C endpoint_prev_hit_position;
+            _computePrevHitPosition(
+                k, endpoint_rec.voxel, endpoint_rec.p, endpoint_prev_hit_position
+            );
             RVec2f endpoint_screen_motion(0.0f, 0.0f);
             _computeScreenMotion(
-                k, camera, endpoint_rec.p, endpoint_world_velocity, i, j, endpoint_screen_motion
+                k, camera, endpoint_prev_hit_position, i, j, endpoint_screen_motion
             );
             ctx.camera_aux_endpoint_screen_motion[camera][{i, j}] = endpoint_screen_motion;
         }
@@ -2600,8 +2600,8 @@ class RS_VisionRayCompute {
             // The baked normal points out of the material, so on an exit it faces away from the
             // side the geometry picked. Turn it onto that side rather than drop it, or only
             // entry crossings would bend and a lens could not hold a focus.
-            rec_in_out.shading_normal =
-                smooth.dot(rec_in_out.normal) < FloatC(0) ? -smooth : smooth;
+            rec_in_out.shading_normal = smooth.dot(rec_in_out.normal) < FloatC(0) ? -smooth
+                                                                                  : smooth;
         }
 
         RHandle vision_material = rec_in_out.vision_material;
@@ -4463,68 +4463,54 @@ class RS_VisionRayCompute {
     }
 
     /**
-     * @brief World-space surface velocity at a hit voxel. Dispatches on the
-     *        voxel's is_rigid bit: rigid voxels use the owning rigid body's
-     *        momenta and COM, non-rigid voxels use their own per-voxel momenta
-     *        and the voxel material's inverse mass / inertia.
+     * @brief World point the hit surface sat at on the last vision update.
+     *        Carries the hit through the voxel's recorded pose, so a body that
+     *        rotated or was thrown about between renders still lands right. A
+     *        hit on the floor or the cosmic background has no voxel and stays
+     *        where it is, which is correct for geometry that cannot move.
+     * @details The voxel's expansion and distortion are not recorded, so a hit
+     *          inside a cell that deformed is off by a fraction of the voxel.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static void _computeWorldVelocity(
+    HOST_DEVICE_INLINE_QUALIFIER static void _computePrevHitPosition(
         Kernel* k,
         RHandle hit_voxel,
         const Vec3C& hit_position,
-        Vec3C& world_velocity_out
+        Vec3C& prev_hit_position_out
     ) {
         auto& ctx = k->ctx;
         if (hit_voxel == RS_NULL_HANDLE) {
-            world_velocity_out = Vec3C::zero();
+            prev_hit_position_out = hit_position;
             return;
         }
         RS_VoxelStateUnion state_union{V_G(hit_voxel, state)};
-        if (state_union.voxel_state.is_rigid) {
-            RHandle rigid_body = V_G(hit_voxel, rigid_body);
-            if (rigid_body == RS_NULL_HANDLE) {
-                world_velocity_out = Vec3C::zero();
-                return;
-            }
-            using Mat3C = RS_Mat3D<FloatC>;
-            FloatC mass_inverse = FloatC(RB_G(rigid_body, mass_inverse));
-            Vec3C lin_vel = Vec3C(RB_G(rigid_body, linear_momentum)) * mass_inverse;
-            Vec3C ang_vel = Mat3C(RB_G(rigid_body, moment_inertia_inverse)) *
-                            Vec3C(RB_G(rigid_body, angular_momentum));
-            Vec3C com = Vec3C(RB_G(rigid_body, com));
-            world_velocity_out = lin_vel + ang_vel.cross(hit_position - com);
-        } else {
-            RHandle voxel_material = V_G(hit_voxel, voxel_material);
-            FloatC mass_inverse = FloatC(VM_G(voxel_material, mass_inverse));
-            FloatC inertia_inverse = FloatC(VM_G(voxel_material, moment_inertia_inverse));
-            Vec3C lin_vel = Vec3C(V_G(hit_voxel, linear_momentum)) * mass_inverse;
-            Vec3C ang_vel = Vec3C(V_G(hit_voxel, angular_momentum)) * inertia_inverse;
-            Vec3C voxel_position = Vec3C(V_G(hit_voxel, position));
-            world_velocity_out = lin_vel + ang_vel.cross(hit_position - voxel_position);
+        if (state_union.voxel_state.is_static) {
+            prev_hit_position_out = hit_position;
+            return;
         }
+        Quat3C orientation = Quat3C(V_G(hit_voxel, orientation));
+        Vec3C position = Vec3C(V_G(hit_voxel, position));
+        Vec3C voxel_offset = orientation.rotateVec3DInv(hit_position - position);
+        prev_hit_position_out = Vec3C(V_G(hit_voxel, prev_position)) +
+                                Quat3C(V_G(hit_voxel, prev_orientation)).rotateVec3D(voxel_offset);
     }
 
     /**
-     * @brief Screen-space motion vector at a pixel. Un-moves the world point
-     *        one frame back along the surface velocity and projects through the
-     *        previous camera pose; the resulting offset is normalized by image
-     *        dimensions so the denoiser and reservoir reprojection apply the
-     *        same convention.
+     * @brief Screen-space motion vector at a pixel. Projects the world point
+     *        the surface sat at one frame back through the previous camera
+     *        pose; the resulting offset is normalized by image dimensions so
+     *        the denoiser and reservoir reprojection apply the same convention.
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void _computeScreenMotion(
         Kernel* k,
         RHandle camera,
-        const Vec3C& hit_position,
-        const Vec3C& world_velocity,
+        const Vec3C& prev_hit_position,
         RSize ii_curr,
         RSize jj_curr,
         RVec2f& screen_motion_out
     ) {
         auto& ctx = k->ctx;
-        FloatC dt = FloatC(k->getDeviceDt());
-        Vec3C prev_world = hit_position - world_velocity * dt;
         Vec3C prev_camera_position = Vec3C(CA_G(prev_position));
         Quat3C prev_camera_orientation = Quat3C(CA_G(prev_orientation));
 
@@ -4532,7 +4518,7 @@ class RS_VisionRayCompute {
         bool is_in_frustum = _projectToPixel(
             k,
             camera,
-            prev_world,
+            prev_hit_position,
             prev_camera_position,
             prev_camera_orientation,
             ii_prev_f,

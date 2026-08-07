@@ -413,6 +413,12 @@ class RS_VoxelMem {
     /// Global orientation of this voxel.
     Quat3M orientation = Quat3M::unit();
 
+    /// Global position of this voxel at the last vision update
+    PositionVec prev_position = PositionVec::zero();
+
+    /// Global orientation of this voxel at the last vision update
+    Quat3M prev_orientation = Quat3M::unit();
+
     /// External force applied to this voxel
     Vec3M ext_force = Vec3M::zero();
 
@@ -491,6 +497,8 @@ class RS_VoxelMem {
         field(contact_lambda_t_floor),    \
         field(position),                  \
         field(orientation),               \
+        field(prev_position),             \
+        field(prev_orientation),          \
         field(ext_force),                 \
         field(ext_moment),                \
         field(size),                      \

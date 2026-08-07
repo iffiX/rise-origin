@@ -170,6 +170,7 @@ class RS_SimulationExecutor {
     void _resolveVoxelContactActivePartition();
     void _resolveVoxelRayActivePartition();
     bool _resolveRigidBodyMobilityPartitionIfNeeded();
+    bool _resolveRigidBodyBoundVoxelSurfacePartitionIfNeeded();
     void _resizeReduceBufferIfNeeded(RBigSize needed_input_size, RBigSize needed_output_size);
 
     /**

@@ -22,8 +22,8 @@
 #include "rise_origin/logic/record/rs_structure_record_c.h"
 #include "rise_origin/logic/rigid/rs_constraint_c.h"
 #include "rise_origin/logic/rigid/rs_contact_c.h"
+#include "rise_origin/logic/rigid/rs_rigid_body_bound_voxel_c.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_c.h"
-#include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_c.h"
 #include "rise_origin/logic/signal/rs_force_c.h"
 #include "rise_origin/logic/signal/rs_torque_c.h"
 #include "rise_origin/logic/signal/rs_transform_c.h"
@@ -651,7 +651,7 @@ void RS_SimulationExecutor::_runRigidbodyCoupling() {
         k_ptr->updateOperationTimeOnHost(RSE_KERNEL_UPDATE_OPERATION_RIGID_BODY_INTEGRATE);
 
         if (ctx.structure_rigid_body_layout.size() == 0) return;
-        auto rigid_body_surface_voxel_handles = _getLaunchHandles("rigid_body_surface_voxel");
+        auto rigid_body_bound_voxel_handles = _getLaunchHandles("rigid_body_bound_voxel");
 
         // Gather each surface voxel's soft coupling correction and reduce onto its body.
         const std::vector<RSize> reduction_group_sizes =
@@ -663,7 +663,7 @@ void RS_SimulationExecutor::_runRigidbodyCoupling() {
             reduction_group_sizes.size() * sizeof(RS_CouplingCorrection)
         );
         p_ptr->template run<RSCF_LaunchSetOrGetWithLayout<
-            typename RS_RigidBodySurfaceVoxelCompute<
+            typename RS_RigidBodyBoundVoxelCompute<
                 ComputeAccuracy>::RSCF_GetRigidBodyCouplingCorrectionFromVoxel,
             KernelType>>(
             {ctx.structure_rigid_body_surface_voxel_to_rigid_body_reduction_input_layout.size(),
@@ -689,13 +689,12 @@ void RS_SimulationExecutor::_runRigidbodyCoupling() {
             _reduce_output_buffer
         );
 
-        // Push integrated pose to surface voxels so next soft step sees moving anchors.
+        // Push integrated pose to bound voxels so next soft step sees moving anchors.
         p_ptr->template run<RSCF_LaunchWithHandles<
-            typename RS_RigidBodySurfaceVoxelCompute<
-                ComputeAccuracy>::RSCF_UpdateVoxelFromRigidBody,
+            typename RS_RigidBodyBoundVoxelCompute<ComputeAccuracy>::RSCF_UpdateVoxelFromRigidBody,
             KernelType>>(
-            {rigid_body_surface_voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
-            rigid_body_surface_voxel_handles
+            {rigid_body_bound_voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false},
+            rigid_body_bound_voxel_handles
         );
     });
 }
@@ -1278,6 +1277,14 @@ void RS_SimulationExecutor::_syncExecutorInfo() {
             std::to_string(handle_count("dynamic_and_ray_active_voxel"))
         );
         _kernel->setExecutorInfo(
+            "world_rigid_body_bound_voxel_num",
+            std::to_string(handle_count("rigid_body_bound_voxel"))
+        );
+        _kernel->setExecutorInfo(
+            "world_rigid_body_surface_voxel_num",
+            std::to_string(handle_count("rigid_body_surface_voxel"))
+        );
+        _kernel->setExecutorInfo(
             "world_static_rigid_body_num", std::to_string(rigid_body_num - dynamic_rigid_body_num)
         );
         _kernel->setExecutorInfo(
@@ -1329,6 +1336,7 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
     _rebuildStaticVoxelRayBVHIfNeeded();
     _rebuildFloorTriangleBVHIfNeeded();
     _rebuildDynamicVoxelRayBVH();
+    auto dynamic_voxel_handles = _getLaunchHandles("dynamic_voxel");
 
     castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
@@ -1477,9 +1485,7 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
                         {ctx.camera_info_ray_layout.size(), RS_AUTO_BLOCK_SIZE, false},
                         ctx.camera_info_ray_layout
                     );
-                    exchange(
-                        ctx.camera_denoiser_rgb_history, ctx.camera_prev_denoiser_rgb_history
-                    );
+                    exchange(ctx.camera_denoiser_rgb_history, ctx.camera_prev_denoiser_rgb_history);
                     exchange(
                         ctx.camera_denoiser_moment_history, ctx.camera_prev_denoiser_moment_history
                     );
@@ -1522,6 +1528,12 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
                 exchange(ctx.camera_prev_reservoir_di, ctx.camera_current_reservoir_di);
                 exchange(ctx.camera_prev_reservoir_gi, ctx.camera_current_reservoir_gi);
             }
+
+            // Snapshot voxel pose for reprojection.
+            p_ptr->template run<
+                RSCF_LaunchWithHandles<logic::RSCF_UpdateVoxelPreviousPose, KernelType>>(
+                {dynamic_voxel_handles.size(), RS_AUTO_BLOCK_SIZE, false}, dynamic_voxel_handles
+            );
             if (denoise_active || k_ptr->vision_is_restir_enabled) {
                 _kernel_manager->markKernelModified();
                 _kernel_manager->syncKernelIfNeeded();
@@ -2175,7 +2187,7 @@ RS_Vector<RHandle> RS_SimulationExecutor::_getLaunchHandles(const std::string &n
         castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
             auto &ctx = k_ptr->ctx;
             if ((name == "voxel" || name == "link" || name == "rigid_body" ||
-                 name == "rigid_body_surface_voxel" || name == "constraint_joint") &&
+                 name == "rigid_body_bound_voxel" || name == "constraint_joint") &&
                 _handles.find(name) == _handles.end()) {
                 _handles.insert({name, RS_Vector<RHandle>(p_ptr)});
                 _handle_version_ids[name] = 0;
@@ -2243,22 +2255,26 @@ RS_Vector<RHandle> RS_SimulationExecutor::_getLaunchHandles(const std::string &n
                 // The mobile subset is derived from the full rigid body set.
                 _resolveRigidBodyMobilityPartitionIfNeeded();
                 indices = _handles.at(name);
-            } else if (name == "rigid_body_surface_voxel") {
-                if (ctx.host_data->structure_rigid_body_surface_voxel_layout.versionID() !=
+            } else if (name == "rigid_body_bound_voxel") {
+                if (ctx.host_data->structure_rigid_body_bound_voxel_layout.versionID() !=
                     _handle_version_ids.at(name)) {
                     ensure_vector_size(
-                        _handles["rigid_body_surface_voxel"],
-                        ctx.host_data->structure_rigid_body_surface_voxel_layout.size()
+                        _handles["rigid_body_bound_voxel"],
+                        ctx.host_data->structure_rigid_body_bound_voxel_layout.size()
                     );
                     p_ptr->template run<RSCF_ResolveThreadHandleFromLayout>(
-                        {ctx.structure_rigid_body_surface_voxel_layout.size()},
-                        ctx.structure_rigid_body_surface_voxel_layout,
-                        _handles["rigid_body_surface_voxel"]
+                        {ctx.structure_rigid_body_bound_voxel_layout.size()},
+                        ctx.structure_rigid_body_bound_voxel_layout,
+                        _handles["rigid_body_bound_voxel"]
                     );
                     _handle_version_ids[name] =
-                        ctx.host_data->structure_rigid_body_surface_voxel_layout.versionID();
+                        ctx.host_data->structure_rigid_body_bound_voxel_layout.versionID();
                 }
-                indices = _handles["rigid_body_surface_voxel"];
+                indices = _handles["rigid_body_bound_voxel"];
+            } else if (name == "rigid_body_surface_voxel") {
+                // The surface subset is derived from the full bound voxel set.
+                _resolveRigidBodyBoundVoxelSurfacePartitionIfNeeded();
+                indices = _handles.at(name);
             } else if (name == "constraint_joint") {
                 if (ctx.host_data->structure_constraint_joint_layout.versionID() !=
                     _handle_version_ids.at(name)) {
@@ -2489,6 +2505,68 @@ bool RS_SimulationExecutor::_resolveRigidBodyMobilityPartitionIfNeeded() {
 
             _handle_version_ids["rigid_body_partition"] = version;
             _kernel_manager->clearRigidBodyPartitionModified();
+            recomputed = true;
+        });
+    });
+    return recomputed;
+}
+
+bool RS_SimulationExecutor::_resolveRigidBodyBoundVoxelSurfacePartitionIfNeeded() {
+    bool recomputed = false;
+    castKernelPtrAndCall(_kernel, [&](auto k_ptr) {
+        castProviderPtrAndCall(_device_provider, [&](auto p_ptr) {
+            using KernelType = std::remove_pointer_t<std::remove_reference_t<decltype(k_ptr)>>;
+            auto &ctx = k_ptr->ctx;
+
+            // Contacts iterate the surface subset, so a voxel buried inside its body costs no
+            // thread and no contact slot; the full set still drives every bound voxel's pose.
+            if (_handles.find("rigid_body_surface_voxel") == _handles.end()) {
+                _handles.insert({"rigid_body_surface_voxel", RS_Vector<RHandle>(p_ptr)});
+                _handle_version_ids["rigid_body_bound_voxel_partition"] = 0;
+            }
+
+            // A rigid voxel is fixed as surface or not at build time, so the layout topology is
+            // the only thing that can change the subset.
+            uint64_t version = ctx.host_data->structure_rigid_body_bound_voxel_layout.versionID();
+            if (_handle_version_ids.at("rigid_body_bound_voxel_partition") == version) return;
+
+            auto rigid_body_bound_voxel_handles = _getLaunchHandles("rigid_body_bound_voxel");
+            RSize rigid_body_bound_voxel_num = rigid_body_bound_voxel_handles.size();
+
+            if (rigid_body_bound_voxel_num == 0) {
+                _handles["rigid_body_surface_voxel"].occupy(0);
+            } else {
+                ensure_vector_size(_prefix_sum_flags_0, rigid_body_bound_voxel_num);
+                ensure_vector_size(_prefix_sum_result_0, rigid_body_bound_voxel_num);
+
+                p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                    logic::RSCF_GetRigidBodyBoundVoxelSurfaceFlags,
+                    KernelType>>(
+                    {rigid_body_bound_voxel_num, RS_AUTO_BLOCK_SIZE, false},
+                    rigid_body_bound_voxel_handles,
+                    _prefix_sum_flags_0
+                );
+
+                _scan.template inclusiveSum<RIndex, RIndex>(
+                    _prefix_sum_flags_0, _prefix_sum_result_0
+                );
+                RIndex count = 0;
+                _prefix_sum_result_0.readSlice(&count, 1, rigid_body_bound_voxel_num - 1, true);
+                ensure_vector_size(_handles["rigid_body_surface_voxel"], count);
+                if (count > 0) {
+                    p_ptr->template run<RSCF_LaunchSetOrGetWithHandles<
+                        logic::RSCF_CompactRigidBodyBoundVoxelHandles,
+                        KernelType>>(
+                        {rigid_body_bound_voxel_num, RS_AUTO_BLOCK_SIZE, false},
+                        rigid_body_bound_voxel_handles,
+                        _prefix_sum_flags_0,
+                        _prefix_sum_result_0,
+                        _handles["rigid_body_surface_voxel"]
+                    );
+                }
+            }
+
+            _handle_version_ids["rigid_body_bound_voxel_partition"] = version;
             recomputed = true;
         });
     });

@@ -23,8 +23,8 @@
 #include "rise_origin/logic/record/rs_ray_sensor_record_m.h"
 #include "rise_origin/logic/rigid/rs_constraint_m.h"
 #include "rise_origin/logic/rigid/rs_contact_m.h"
+#include "rise_origin/logic/rigid/rs_rigid_body_bound_voxel_m.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_m.h"
-#include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_m.h"
 #include "rise_origin/logic/signal/rs_camera_signal_m.h"
 #include "rise_origin/logic/signal/rs_force_m.h"
 #include "rise_origin/logic/signal/rs_ray_sensor_signal_m.h"
@@ -82,7 +82,7 @@ struct RS_ContextHostData {
     RS_PooledLayout structure_link_layout;
     RS_PooledLayout structure_voxel_layout;
     RS_PooledLayout structure_rigid_body_layout;
-    RS_PooledLayout structure_rigid_body_surface_voxel_layout;
+    RS_PooledLayout structure_rigid_body_bound_voxel_layout;
     RS_PooledLayout structure_constraint_joint_layout;
 
     RS_CompactLayout structure_constraint_joint_block_range_layout;
@@ -164,7 +164,7 @@ struct RS_Context {
     using LinkMemType = logic::RS_LinkMem<FloatMemAccuracy_>;
     using VoxelMemType = logic::RS_VoxelMem<FloatMemAccuracy_>;
     using RigidBodyMemType = logic::RS_RigidBodyMem<FloatMemAccuracy_>;
-    using RigidBodySurfaceVoxelMemType = logic::RS_RigidBodySurfaceVoxelMem<FloatMemAccuracy_>;
+    using RigidBodyBoundVoxelMemType = logic::RS_RigidBodyBoundVoxelMem<FloatMemAccuracy_>;
     using ConstraintJointMemType = logic::RS_ConstraintJointMem<FloatMemAccuracy_>;
     using RigidContactMemType = logic::RS_RigidContactMem<FloatMemAccuracy_>;
 
@@ -208,7 +208,7 @@ struct RS_Context {
     device::RS_StructOfArrays<LinkMemType> structure_links;
     device::RS_StructOfArrays<VoxelMemType> structure_voxels;
     device::RS_StructOfArrays<RigidBodyMemType> structure_rigid_bodies;
-    device::RS_StructOfArrays<RigidBodySurfaceVoxelMemType> structure_rigid_body_surface_voxels;
+    device::RS_StructOfArrays<RigidBodyBoundVoxelMemType> structure_rigid_body_bound_voxels;
     device::RS_StructOfArrays<ConstraintJointMemType> structure_constraint_joints;
 
     device::RS_Vector<logic::RS_ConstraintJointBlockRange> structure_constraint_joint_block_ranges;
@@ -236,7 +236,7 @@ struct RS_Context {
     device::RS_DeviceLayout structure_link_layout;
     device::RS_DeviceLayout structure_voxel_layout;
     device::RS_DeviceLayout structure_rigid_body_layout;
-    device::RS_DeviceLayout structure_rigid_body_surface_voxel_layout;
+    device::RS_DeviceLayout structure_rigid_body_bound_voxel_layout;
     device::RS_DeviceLayout structure_constraint_joint_layout;
 
     device::RS_DeviceLayout structure_constraint_joint_block_range_layout;
@@ -484,42 +484,42 @@ struct RS_AnyContext {
         RB_S_0(__VA_ARGS__)  \
     )
 
-#define RBSV_G_0()
-#define RBSV_G_1(property)                                                                     \
-    (ctx.structure_rigid_body_surface_voxels.template get<                                     \
-        Pr(typename decltype(ctx.structure_rigid_body_surface_voxels)::ObjectType, property)>( \
-        rigid_body_surface_voxel DEBUG_ARGS(rigid_body_surface_voxel_get)                      \
+#define RBBV_G_0()
+#define RBBV_G_1(property)                                                                   \
+    (ctx.structure_rigid_body_bound_voxels.template get<                                     \
+        Pr(typename decltype(ctx.structure_rigid_body_bound_voxels)::ObjectType, property)>( \
+        rigid_body_bound_voxel DEBUG_ARGS(rigid_body_bound_voxel_get)                        \
     ))
-#define RBSV_G_2(rigid_body_surface_voxel_idx, property)                                       \
-    (ctx.structure_rigid_body_surface_voxels.template get<                                     \
-        Pr(typename decltype(ctx.structure_rigid_body_surface_voxels)::ObjectType, property)>( \
-        rigid_body_surface_voxel_idx DEBUG_ARGS(rigid_body_surface_voxel_get)                  \
+#define RBBV_G_2(rigid_body_bound_voxel_idx, property)                                       \
+    (ctx.structure_rigid_body_bound_voxels.template get<                                     \
+        Pr(typename decltype(ctx.structure_rigid_body_bound_voxels)::ObjectType, property)>( \
+        rigid_body_bound_voxel_idx DEBUG_ARGS(rigid_body_bound_voxel_get)                    \
     ))
-#define RBSV_G_X(x, A, B, FUNC, ...) FUNC
-#define RBSV_G(...) \
-    RBSV_G_X(, ##__VA_ARGS__, RBSV_G_2(__VA_ARGS__), RBSV_G_1(__VA_ARGS__), RBSV_G_0(__VA_ARGS__))
+#define RBBV_G_X(x, A, B, FUNC, ...) FUNC
+#define RBBV_G(...) \
+    RBBV_G_X(, ##__VA_ARGS__, RBBV_G_2(__VA_ARGS__), RBBV_G_1(__VA_ARGS__), RBBV_G_0(__VA_ARGS__))
 
-#define RBSV_S_0()
-#define RBSV_S_1()
-#define RBSV_S_2(property, value)                                                              \
-    ctx.structure_rigid_body_surface_voxels.template set<                                      \
-        Pr(typename decltype(ctx.structure_rigid_body_surface_voxels)::ObjectType, property)>( \
-        rigid_body_surface_voxel, value DEBUG_ARGS(rigid_body_surface_voxel_set)               \
+#define RBBV_S_0()
+#define RBBV_S_1()
+#define RBBV_S_2(property, value)                                                            \
+    ctx.structure_rigid_body_bound_voxels.template set<                                      \
+        Pr(typename decltype(ctx.structure_rigid_body_bound_voxels)::ObjectType, property)>( \
+        rigid_body_bound_voxel, value DEBUG_ARGS(rigid_body_bound_voxel_set)                 \
     )
-#define RBSV_S_3(rigid_body_surface_voxel_idx, property, value)                                \
-    ctx.structure_rigid_body_surface_voxels.template set<                                      \
-        Pr(typename decltype(ctx.structure_rigid_body_surface_voxels)::ObjectType, property)>( \
-        rigid_body_surface_voxel_idx, value DEBUG_ARGS(rigid_body_surface_voxel_set)           \
+#define RBBV_S_3(rigid_body_bound_voxel_idx, property, value)                                \
+    ctx.structure_rigid_body_bound_voxels.template set<                                      \
+        Pr(typename decltype(ctx.structure_rigid_body_bound_voxels)::ObjectType, property)>( \
+        rigid_body_bound_voxel_idx, value DEBUG_ARGS(rigid_body_bound_voxel_set)             \
     )
-#define RBSV_S_X(x, A, B, C, FUNC, ...) FUNC
-#define RBSV_S(...)            \
-    RBSV_S_X(                  \
+#define RBBV_S_X(x, A, B, C, FUNC, ...) FUNC
+#define RBBV_S(...)            \
+    RBBV_S_X(                  \
         ,                      \
         ##__VA_ARGS__,         \
-        RBSV_S_3(__VA_ARGS__), \
-        RBSV_S_2(__VA_ARGS__), \
-        RBSV_S_1(__VA_ARGS__), \
-        RBSV_S_0(__VA_ARGS__)  \
+        RBBV_S_3(__VA_ARGS__), \
+        RBBV_S_2(__VA_ARGS__), \
+        RBBV_S_1(__VA_ARGS__), \
+        RBBV_S_0(__VA_ARGS__)  \
     )
 
 #define CJ_G_0()

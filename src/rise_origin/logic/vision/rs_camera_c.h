@@ -89,8 +89,16 @@ class RS_CameraCompute {
                 bool is_rigid = type == RSE_CAMERA_RIGID_BODY_LINKED_PERSPECTIVE ||
                                 type == RSE_CAMERA_RIGID_BODY_LINKED_STEREO;
 
+                // A camera's first update has no pose update before it, set passed time to 0.
+                RBigFloat current_time = k->getDeviceTime();
+                bool is_first_update = CA_G(frame_count) == 0;
                 CA_S(prev_position, CA_G(position));
                 CA_S(prev_orientation, CA_G(orientation));
+                CA_S(
+                    last_update_passed_time,
+                    is_first_update ? RBigFloat(0) : current_time - CA_G(last_update_time)
+                );
+                CA_S(last_update_time, current_time);
                 CA_S(frame_count, CA_G(frame_count) + RBigSize(1));
 
                 if (is_rigid) {
@@ -180,8 +188,6 @@ class RS_CameraCompute {
                                 pixel_width, viewport_width / static_cast<FloatC>(CA_G(image_width))
                             );
                         }
-                        RBigFloat current_time = k->getDeviceTime();
-                        CA_S(last_update_time, current_time);
                     }
                 }
             }

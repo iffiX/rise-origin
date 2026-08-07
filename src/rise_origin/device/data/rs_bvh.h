@@ -463,8 +463,6 @@ class RS_BVHBase {
     RS_Vector<RIndex> leaf_parent_nodes;
     RS_Vector<BoundType> leaf_bounds;
 
-    // TODO: add BVH optimization
-
     /*****************************************************************
      * Methods
      *****************************************************************/

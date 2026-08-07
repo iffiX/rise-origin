@@ -22,8 +22,8 @@
 #include "rise_origin/device/data/rs_buffer.h"
 #include "rise_origin/device/data/rs_sparse.h"
 #include "rise_origin/logic/rigid/rs_constraint_m.h"
+#include "rise_origin/logic/rigid/rs_rigid_body_bound_voxel_m.h"
 #include "rise_origin/logic/rigid/rs_rigid_body_m.h"
-#include "rise_origin/logic/rigid/rs_rigid_body_surface_voxel_m.h"
 #include "rise_origin/logic/soft/rs_link_m.h"
 #include "rise_origin/logic/soft/rs_link_material_m.h"
 #include "rise_origin/logic/soft/rs_voxel_face_normal_m.h"
@@ -711,10 +711,13 @@ class RS_KernelStructureVoxelManager {
         // Contained material voxel positions relative to the origin, in its own coordinate system
         std::vector<RVec3rf> contained_material_rb_positions;
 
-        // Start index of the rigid body surface voxels in _rigid_body_surface_voxels
-        RIndex rigid_body_surface_voxel_start = RS_NULL_INDEX;
+        // Start index of the rigid body bound voxels in _rigid_body_bound_voxels
+        RIndex rigid_body_bound_voxel_start = RS_NULL_INDEX;
 
-        // End index of the rigid body surface voxels in _rigid_body_surface_voxels
+        // End index of the rigid body bound voxels in _rigid_body_bound_voxels
+        RIndex rigid_body_bound_voxel_end = RS_NULL_INDEX;
+
+        // End index of the surface ones, which are emitted first and so form a prefix
         RIndex rigid_body_surface_voxel_end = RS_NULL_INDEX;
 
         // Default constructor (initializes vectors)
@@ -736,12 +739,15 @@ class RS_KernelStructureVoxelManager {
             data.mass_inverse = 0;
             data.com_rb_position = RVec3rf::zero();
             data.local_moment_inertia_inverse = RMat3rf::zero();
+            data.rigid_body_bound_voxel_start = RS_NULL_INDEX;
+            data.rigid_body_bound_voxel_end = RS_NULL_INDEX;
+            data.rigid_body_surface_voxel_end = RS_NULL_INDEX;
             // Vectors are already initialized by the constructor
             return data;
         }
     };
 
-    class RigidBodySurfaceVoxelData {
+    class RigidBodyBoundVoxelData {
        public:
         // Structure scope ID of the voxel
         RIndex voxel_sid;
@@ -753,11 +759,11 @@ class RS_KernelStructureVoxelManager {
         RVec3rf voxel_rb_position;
 
         // Default constructor (doesn't do anything to speed up vector initialization)
-        RigidBodySurfaceVoxelData() {}
+        RigidBodyBoundVoxelData() {}
 
         // Static method to get preset values
-        static RigidBodySurfaceVoxelData preset() {
-            RigidBodySurfaceVoxelData data;
+        static RigidBodyBoundVoxelData preset() {
+            RigidBodyBoundVoxelData data;
             data.voxel_sid = RS_NULL_INDEX;
             data.rigid_body_sid = RS_NULL_INDEX;
             data.voxel_rb_position = RVec3rf::zero();
@@ -971,8 +977,8 @@ class RS_KernelStructureVoxelManager {
         device::RS_Array<logic::RS_VoxelFaceNormalMem, 1> voxel_face_normals;
         device::RS_Array<logic::RS_LinkMaterialMem<FloatMemAccuracy>, 1> link_materials;
         device::RS_Array<logic::RS_RigidBodyMem<FloatMemAccuracy>, 1> rigid_bodies;
-        device::RS_Array<logic::RS_RigidBodySurfaceVoxelMem<FloatMemAccuracy>, 1>
-            rigid_body_surface_voxels;
+        device::RS_Array<logic::RS_RigidBodyBoundVoxelMem<FloatMemAccuracy>, 1>
+            rigid_body_bound_voxels;
         device::RS_Array<logic::RS_ConstraintJointMem<FloatMemAccuracy>, 1> constraint_joints;
         device::RS_Array<RS_FloatMem<FloatMemAccuracy>, 1> rigid_body_mass;
         device::RS_Array<RS_FloatMem<FloatMemAccuracy>, 1> rigid_body_mass_inverses;
@@ -1017,7 +1023,7 @@ class RS_KernelStructureVoxelManager {
     RSize _emissive_voxel_num = 0;
     RSize _link_num = 0;
     RSize _rigid_body_num = 0;
-    RSize _rigid_body_surface_voxel_num = 0;
+    RSize _rigid_body_bound_voxel_num = 0;
     RSize _joint_num = 0;
     RSize _constraint_joint_num = 0;
     RSize _motor_num = 0;
@@ -1045,7 +1051,7 @@ class RS_KernelStructureVoxelManager {
     std::vector<VoxelData> _voxels;
     std::vector<LinkData> _links;
     std::vector<RigidBodyData> _rigid_bodies;
-    std::vector<RigidBodySurfaceVoxelData> _rigid_body_surface_voxels;
+    std::vector<RigidBodyBoundVoxelData> _rigid_body_bound_voxels;
     std::vector<ConstraintJointData> _constraint_joints;
     std::vector<VoxelMaterialData> _voxel_materials;
     std::vector<LinkMaterialData> _link_materials;
