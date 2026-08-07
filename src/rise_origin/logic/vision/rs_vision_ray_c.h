@@ -1675,6 +1675,7 @@ class RS_VisionRayCompute {
      */
     HOST_DEVICE_INLINE_QUALIFIER static bool _isRayIntersectingAABB(
         const Ray& ray,
+        const Vec3C& dir_reciprocal,
         const Vec3C& aabb_min,
         const Vec3C& aabb_max,
         FloatC t_min,
@@ -1682,7 +1683,6 @@ class RS_VisionRayCompute {
         FloatC& t_enter_out,
         FloatC& t_exit_out
     ) {
-        Vec3C dir_reciprocal = ray.ray_direction.reciprocalFast();
         Vec3C t0 = (aabb_min - ray.ray_origin).elemMul(dir_reciprocal);
         Vec3C t1 = (aabb_max - ray.ray_origin).elemMul(dir_reciprocal);
         Vec3C t_min_vec = t0.min(t1);
@@ -2042,6 +2042,13 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Closest-hit voxel BVH walk: test-before-push, closer-first ordered descent.
+     *
+     * @details The node being visited is carried in `idx` rather than being pushed and
+     * popped again. A node whose children both survive the test descends into the nearer
+     * one and pushes only the farther one; a node with one surviving child descends
+     * straight into it and touches the stack not at all. The stack is thread local memory
+     * whatever the register budget, because a run time index cannot address a register, so
+     * every push and pop that goes away is a load or a store removed from the walk.
      */
     template <typename Kernel, typename BVHAccessor>
     HOST_DEVICE_INLINE_QUALIFIER static void _findHitVoxelInBVH(
@@ -2053,19 +2060,28 @@ class RS_VisionRayCompute {
         HitRecord& rec_in_out
     ) {
         if (root.current() == RS_NULL_INDEX) return;
+        // Every bound in this walk is tested against the same ray, so the slab test's
+        // reciprocal is formed once here rather than three times per node visited.
+        Vec3C dir_reciprocal = ray.ray_direction.reciprocalFast();
         RIndex stack[RS_RUNTIME_BVH_STACK_SIZE];
         int stack_top = 0;
-        stack[stack_top++] = root.current();
-        while (stack_top > 0) {
-            RIndex idx = stack[--stack_top];
+        RIndex idx = root.current();
+        while (true) {
+            if (idx == RS_NULL_INDEX) {
+                if (stack_top == 0) break;
+                idx = stack[--stack_top];
+                continue;
+            }
             auto node = root;
             node.moveTo(idx);
-            if (node.current() == RS_NULL_INDEX) continue;
+            // Nothing left to descend into unless a child survives the test below.
+            idx = RS_NULL_INDEX;
             if (node.isLeaf()) {
                 FloatC t_enter, t_exit;
                 auto bnd = node.bound();
                 if (!_isRayIntersectingAABB(
                         ray,
+                        dir_reciprocal,
                         Vec3C(bnd.minBound()),
                         Vec3C(bnd.maxBound()),
                         t_min,
@@ -2118,6 +2134,7 @@ class RS_VisionRayCompute {
             bool is_left_hit = internal_node.left != RS_NULL_INDEX &&
                                _isRayIntersectingAABB(
                                    ray,
+                                   dir_reciprocal,
                                    Vec3C(internal_node.left_bound.minBound()),
                                    Vec3C(internal_node.left_bound.maxBound()),
                                    t_min,
@@ -2128,6 +2145,7 @@ class RS_VisionRayCompute {
             bool is_right_hit = internal_node.right != RS_NULL_INDEX &&
                                 _isRayIntersectingAABB(
                                     ray,
+                                    dir_reciprocal,
                                     Vec3C(internal_node.right_bound.minBound()),
                                     Vec3C(internal_node.right_bound.maxBound()),
                                     t_min,
@@ -2135,18 +2153,15 @@ class RS_VisionRayCompute {
                                     t_right_enter,
                                     t_exit_unused
                                 );
-            if (is_left_hit && is_right_hit && stack_top + 2 <= RS_RUNTIME_BVH_STACK_SIZE) {
-                if (t_left_enter < t_right_enter) {
-                    stack[stack_top++] = internal_node.right;
-                    stack[stack_top++] = internal_node.left;
-                } else {
-                    stack[stack_top++] = internal_node.left;
-                    stack[stack_top++] = internal_node.right;
-                }
-            } else if (is_left_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
-                stack[stack_top++] = internal_node.left;
-            } else if (is_right_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
-                stack[stack_top++] = internal_node.right;
+            if (is_left_hit && is_right_hit) {
+                bool is_left_nearer = t_left_enter < t_right_enter;
+                idx = is_left_nearer ? internal_node.left : internal_node.right;
+                RIndex far_node = is_left_nearer ? internal_node.right : internal_node.left;
+                if (stack_top < RS_RUNTIME_BVH_STACK_SIZE) stack[stack_top++] = far_node;
+            } else if (is_left_hit) {
+                idx = internal_node.left;
+            } else if (is_right_hit) {
+                idx = internal_node.right;
             }
         }
     }
@@ -2211,18 +2226,27 @@ class RS_VisionRayCompute {
 
         FloatC t_closest = t_max;
         bool found = false;
+        // Every bound in this walk is tested against the same ray, so the slab test's
+        // reciprocal is formed once here rather than three times per node visited.
+        Vec3C dir_reciprocal = ray.ray_direction.reciprocalFast();
         RIndex stack[RS_RUNTIME_BVH_STACK_SIZE];
         int stack_top = 0;
-        stack[stack_top++] = root.current();
-        while (stack_top > 0) {
-            RIndex idx = stack[--stack_top];
+        RIndex idx = root.current();
+        while (true) {
+            if (idx == RS_NULL_INDEX) {
+                if (stack_top == 0) break;
+                idx = stack[--stack_top];
+                continue;
+            }
             auto node = root;
             node.moveTo(idx);
-            if (node.current() == RS_NULL_INDEX) continue;
+            // Nothing left to descend into unless a child survives the test below.
+            idx = RS_NULL_INDEX;
             FloatC t_enter, t_exit;
             auto bnd = node.bound();
             if (!_isRayIntersectingAABB(
                     ray,
+                    dir_reciprocal,
                     Vec3C(bnd.minBound()),
                     Vec3C(bnd.maxBound()),
                     t_min,
@@ -2257,6 +2281,7 @@ class RS_VisionRayCompute {
             FloatC t_left_enter, t_right_enter, t_exit_unused;
             bool is_left_hit = ln.current() != RS_NULL_INDEX && _isRayIntersectingAABB(
                                                                     ray,
+                                                                    dir_reciprocal,
                                                                     Vec3C(ln.bound().minBound()),
                                                                     Vec3C(ln.bound().maxBound()),
                                                                     t_min,
@@ -2266,6 +2291,7 @@ class RS_VisionRayCompute {
                                                                 );
             bool is_right_hit = rn.current() != RS_NULL_INDEX && _isRayIntersectingAABB(
                                                                      ray,
+                                                                     dir_reciprocal,
                                                                      Vec3C(rn.bound().minBound()),
                                                                      Vec3C(rn.bound().maxBound()),
                                                                      t_min,
@@ -2273,18 +2299,15 @@ class RS_VisionRayCompute {
                                                                      t_right_enter,
                                                                      t_exit_unused
                                                                  );
-            if (is_left_hit && is_right_hit && stack_top + 2 <= RS_RUNTIME_BVH_STACK_SIZE) {
-                if (t_left_enter < t_right_enter) {
-                    stack[stack_top++] = r;
-                    stack[stack_top++] = l;
-                } else {
-                    stack[stack_top++] = l;
-                    stack[stack_top++] = r;
-                }
-            } else if (is_left_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
-                stack[stack_top++] = l;
-            } else if (is_right_hit && stack_top + 1 <= RS_RUNTIME_BVH_STACK_SIZE) {
-                stack[stack_top++] = r;
+            if (is_left_hit && is_right_hit) {
+                bool is_left_nearer = t_left_enter < t_right_enter;
+                idx = is_left_nearer ? l : r;
+                RIndex far_node = is_left_nearer ? r : l;
+                if (stack_top < RS_RUNTIME_BVH_STACK_SIZE) stack[stack_top++] = far_node;
+            } else if (is_left_hit) {
+                idx = l;
+            } else if (is_right_hit) {
+                idx = r;
             }
         }
         t_out = t_closest;

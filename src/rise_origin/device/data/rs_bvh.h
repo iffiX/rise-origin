@@ -32,9 +32,14 @@ RS_ENUM(
  * test both children — no scattered loads from separate child / bound arrays. A
  * node's own bound is union(left_bound, right_bound). Child bounds are filled
  * bottom-up by RSCF_BuildBVHTree.
+ *
+ * Padded to 32 bytes so a node starts on a sector boundary. Packed, the 56 byte
+ * node starts at any multiple of 4 and a fetch touches three 32 byte sectors
+ * where two would do; padding to 64 makes every fetch exactly two sectors, at
+ * the cost of an eighth more memory for the node array.
  */
 template <typename BoundType>
-struct RS_BVHInternalNode {
+struct alignas(32) RS_BVHInternalNode {
     RIndex left = RS_NULL_INDEX;
     RIndex right = RS_NULL_INDEX;
     BoundType left_bound;

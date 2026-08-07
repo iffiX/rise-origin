@@ -68,7 +68,7 @@ class RS_RandomState {
      * @brief Generate a random unsigned integer in the sequence.
      */
     HOST_DEVICE_INLINE_QUALIFIER uint32_t next() {
-        uint32_t res = result[get_counter];
+        uint32_t res = _getResultAt(get_counter);
         if (++get_counter == 4) {
             _increaseCounter(counter);
             result = _generate(key, counter);
@@ -196,6 +196,23 @@ class RS_RandomState {
     }
 
    private:
+    /**
+     * @brief Read one of the four generated words by its position in the block.
+     *
+     * @details Subscripting the vector with a run time position takes the
+     * address of the state, and an array reached through a run time index has
+     * to live in local memory. The compare chain reads the same word while the
+     * whole state stays in registers.
+     *
+     * @param position which of the four words to read, 0 to 3.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER uint32_t _getResultAt(int position) const {
+        if (position == 0) return result.x;
+        if (position == 1) return result.y;
+        if (position == 2) return result.z;
+        return result.w;
+    }
+
     HOST_DEVICE_INLINE_QUALIFIER void _increaseCounter(RVec4ui& counter) {
         counter.x++;
         uint32_t overflow = counter.x == 0 ? 1 : 0;
