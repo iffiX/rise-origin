@@ -74,7 +74,7 @@ void initRSPYEssence(py::module &m) {
             &RSC_MaterialOpticalPropertySimpleMicrofacet::emission_texture_reference
         )
         .def_readwrite(
-            "emission_intensity", &RSC_MaterialOpticalPropertySimpleMicrofacet::emission_intensity
+            "emission_radiance", &RSC_MaterialOpticalPropertySimpleMicrofacet::emission_radiance
         );
 
     rspyRSC<RSC_MaterialPairPropertyBase, RSC_EssenceBase>(m, "RSC_MaterialPairPropertyBase")

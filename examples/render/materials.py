@@ -8,7 +8,7 @@ What you'll learn:
   :class:`rsc.essence.MaterialOpticalPropertySimpleMicrofacet`: an opaque lobe
   with roughness and metalness in a packed texture, a refractive transparent lobe
   (``is_transparent`` with ``ior``), and an emissive lobe
-  (``emission_texture_reference`` with ``emission_intensity``).
+  (``emission_texture_reference`` with ``emission_radiance``).
 * See light travel through nested materials: the back row wraps a transparent
   glass shell around a different-material core, so a ray refracts into the glass,
   crosses the inner interface, and shades or refracts again.
@@ -96,8 +96,8 @@ def transparent(name, resources, essences, *, color, ior, roughness) -> None:
     )
 
 
-def emissive(name, resources, essences, *, color, intensity) -> None:
-    """Emissive lobe; emitted radiance is ``color * intensity``."""
+def emissive(name, resources, essences, *, color, radiance) -> None:
+    """Emissive lobe; emitted radiance is ``color * radiance``."""
     _fixed_material(name, resources, essences)
     resources.append(
         rsc.resource.TextureConstant(f"{name}#emit", value=_common._rgb(color))
@@ -107,7 +107,7 @@ def emissive(name, resources, essences, *, color, intensity) -> None:
             f"{name}#optic",
             material_reference=name,
             emission_texture_reference=f"{name}#emit",
-            emission_intensity=intensity,
+            emission_radiance=radiance,
         )
     )
 
@@ -133,7 +133,7 @@ def _materials(resources, essences):
     transparent(
         "glass", resources, essences, color=(230, 240, 255), ior=1.5, roughness=0.05
     )
-    emissive("emissive", resources, essences, color=(255, 200, 120), intensity=10.0)
+    emissive("emissive", resources, essences, color=(255, 200, 120), radiance=10.0)
     transparent(
         "dense_glass",
         resources,

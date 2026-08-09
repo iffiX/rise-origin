@@ -55,7 +55,7 @@ from ..constants import (
     PREVIEW_GRID_SPACING,
     PREVIEW_GROUND_FILL_COLOR,
     PREVIEW_SKY_GROUND_COLOR,
-    PREVIEW_SKY_INTENSITY,
+    PREVIEW_SKY_RADIANCE_SCALE,
     PREVIEW_SKY_SUN_COLOR,
     RIGID_CONSTRAINT_DT_PER_VOXEL_SIZE,
     SOFT_INTEGRATION_FREQUENCY_MULTIPLIER,
@@ -1983,7 +1983,7 @@ class Editor:
                     "preview.sky",
                     sun_color=Editor._make_byte_color(PREVIEW_SKY_SUN_COLOR),
                     ground_color=Editor._make_byte_color(PREVIEW_SKY_GROUND_COLOR),
-                    intensity=PREVIEW_SKY_INTENSITY,
+                    radiance_scale=PREVIEW_SKY_RADIANCE_SCALE,
                 )
             )
         if not any(isinstance(entity, RSC_FloorBase) for entity in entities):

@@ -100,7 +100,7 @@ RS_KernelCameraStereoManager::RS_KernelCameraStereoManager(
         _camera_aux_endpoint_albedo[eye].init({_height, _width}, memory_provider);
         _camera_aux_endpoint_roughness[eye].init({_height, _width}, memory_provider);
         _camera_aux_endpoint_metalness[eye].init({_height, _width}, memory_provider);
-        _camera_aux_endpoint_intensity[eye].init({_height, _width}, memory_provider);
+        _camera_aux_endpoint_emission_radiance[eye].init({_height, _width}, memory_provider);
         _camera_aux_endpoint_material_type[eye].init({_height, _width}, memory_provider);
         _camera_aux_endpoint_screen_motion[eye].init({_height, _width}, memory_provider);
         _camera_aux_chain_throughput[eye].init({_height, _width}, memory_provider);
@@ -137,7 +137,7 @@ RS_KernelCameraStereoManager::RS_KernelCameraStereoManager(
         _camera_aux_endpoint_albedo[eye].fill(RS_Vec3DMem<RSE_FLOAT_16>::zero(), false);
         _camera_aux_endpoint_roughness[eye].fill(RFloat(1), false);
         _camera_aux_endpoint_metalness[eye].fill(RFloat(0), false);
-        _camera_aux_endpoint_intensity[eye].fill(RFloat(0), false);
+        _camera_aux_endpoint_emission_radiance[eye].fill(RFloat(0), false);
         _camera_aux_endpoint_material_type[eye].fill(RSE_VISION_MATERIAL_OPAQUE, false);
         _camera_aux_endpoint_screen_motion[eye].fill(RVec2f::zero(), false);
         _camera_aux_chain_throughput[eye].fill(RVec3f::one(), false);
@@ -440,6 +440,7 @@ void RS_KernelCameraStereoManager::_initKernelData() {
                 camera.orientation = head_orientation;
             }
 
+            camera.saturation_radiance = base_rsc.saturation_radiance;
             camera.aspect_ratio = static_cast<RFloat>(base_rsc.image_height) /
                                   static_cast<RFloat>(base_rsc.image_width);
             camera.image_width = base_rsc.image_width;
@@ -510,7 +511,9 @@ void RS_KernelCameraStereoManager::_initKernelData() {
             ctx.camera_aux_endpoint_albedo.append(_camera_aux_endpoint_albedo[eye]);
             ctx.camera_aux_endpoint_roughness.append(_camera_aux_endpoint_roughness[eye]);
             ctx.camera_aux_endpoint_metalness.append(_camera_aux_endpoint_metalness[eye]);
-            ctx.camera_aux_endpoint_intensity.append(_camera_aux_endpoint_intensity[eye]);
+            ctx.camera_aux_endpoint_emission_radiance.append(
+                _camera_aux_endpoint_emission_radiance[eye]
+            );
             ctx.camera_aux_endpoint_material_type.append(_camera_aux_endpoint_material_type[eye]);
             ctx.camera_aux_endpoint_screen_motion.append(_camera_aux_endpoint_screen_motion[eye]);
             ctx.camera_aux_chain_throughput.append(_camera_aux_chain_throughput[eye]);
@@ -635,7 +638,7 @@ void RS_KernelCameraStereoManager::_freeKernelData() {
             ctx.camera_aux_endpoint_albedo.erase(camera_index);
             ctx.camera_aux_endpoint_roughness.erase(camera_index);
             ctx.camera_aux_endpoint_metalness.erase(camera_index);
-            ctx.camera_aux_endpoint_intensity.erase(camera_index);
+            ctx.camera_aux_endpoint_emission_radiance.erase(camera_index);
             ctx.camera_aux_endpoint_material_type.erase(camera_index);
             ctx.camera_aux_endpoint_screen_motion.erase(camera_index);
             ctx.camera_aux_chain_throughput.erase(camera_index);

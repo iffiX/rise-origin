@@ -9,6 +9,7 @@
 namespace rise {
 
 namespace device {
+
 class RSCF_GenerateIndexArray1DLike : public RS_ComputeFunction<RSCF_GenerateIndexArray1DLike> {
    public:
     template <typename Array1DLike>

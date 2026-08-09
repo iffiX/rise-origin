@@ -225,7 +225,7 @@ bool RSC_MaterialOpticalPropertySimpleMicrofacet::operator==(
            is_transparent == other.is_transparent &&
            is_smooth_surface == other.is_smooth_surface && ior == other.ior &&
            emission_texture_reference == other.emission_texture_reference &&
-           emission_intensity == other.emission_intensity;
+           emission_radiance == other.emission_radiance;
 }
 
 void RSC_MaterialOpticalPropertySimpleMicrofacet::_read(const RS_RSCFileTreeReader& tree) {
@@ -238,7 +238,7 @@ void RSC_MaterialOpticalPropertySimpleMicrofacet::_read(const RS_RSCFileTreeRead
     is_smooth_surface = tree.get("is_smooth_surface", is_smooth_surface);
     ior = tree.get("ior", ior);
     emission_texture_reference = tree.get("emission_texture_reference", emission_texture_reference);
-    emission_intensity = tree.get("emission_intensity", emission_intensity);
+    emission_radiance = tree.get("emission_radiance", emission_radiance);
 }
 
 void RSC_MaterialOpticalPropertySimpleMicrofacet::_write(RS_RSCFileTreeWriter& tree) const {
@@ -250,7 +250,7 @@ void RSC_MaterialOpticalPropertySimpleMicrofacet::_write(RS_RSCFileTreeWriter& t
     tree.add("is_smooth_surface", is_smooth_surface);
     tree.add("ior", ior);
     tree.add("emission_texture_reference", emission_texture_reference);
-    tree.add("emission_intensity", emission_intensity);
+    tree.add("emission_radiance", emission_radiance);
 }
 
 void RSC_MaterialOpticalPropertySimpleMicrofacet::_deserialize(RS_RSCArchive& archive) {
@@ -263,7 +263,7 @@ void RSC_MaterialOpticalPropertySimpleMicrofacet::_deserialize(RS_RSCArchive& ar
     archive.deserialize("is_smooth_surface", is_smooth_surface);
     archive.deserialize("ior", ior);
     archive.deserialize("emission_texture_reference", emission_texture_reference);
-    archive.deserialize("emission_intensity", emission_intensity);
+    archive.deserialize("emission_radiance", emission_radiance);
 }
 
 void RSC_MaterialOpticalPropertySimpleMicrofacet::_serialize(RS_RSCArchive& archive) const {
@@ -276,7 +276,7 @@ void RSC_MaterialOpticalPropertySimpleMicrofacet::_serialize(RS_RSCArchive& arch
     archive.serialize("is_smooth_surface", is_smooth_surface);
     archive.serialize("ior", ior);
     archive.serialize("emission_texture_reference", emission_texture_reference);
-    archive.serialize("emission_intensity", emission_intensity);
+    archive.serialize("emission_radiance", emission_radiance);
 }
 
 }  // namespace rsc

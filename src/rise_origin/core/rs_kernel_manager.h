@@ -217,23 +217,6 @@ class RS_KernelManager {
     std::string purgeStructure(RIndex structure_gid);
 
     /**
-     * @brief Mark the ReSTIR reservoir history stale after the emissive light set changed, so the
-     * next resample skips reuse. Sets the kernel flag and marks the kernel modified.
-     */
-    void markVisionRestirReservoirStale();
-
-    /**
-     * @brief Whether the ReSTIR reservoir history is stale and reuse must be skipped this frame.
-     */
-    [[nodiscard]] bool isVisionRestirReservoirStale() const;
-
-    /**
-     * @brief Clear the ReSTIR reservoir stale flag once a fresh-only resample has rebuilt the
-     * history. Sets the kernel flag and marks the kernel modified.
-     */
-    void clearVisionRestirReservoirStale();
-
-    /**
      * @brief Mark the voxel partition modified so the next step rebuilds the dynamic voxel BVH.
      */
     void markVoxelPartitionModified();

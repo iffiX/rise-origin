@@ -112,7 +112,7 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     _camera_aux_endpoint_albedo.init({_height, _width}, memory_provider);
     _camera_aux_endpoint_roughness.init({_height, _width}, memory_provider);
     _camera_aux_endpoint_metalness.init({_height, _width}, memory_provider);
-    _camera_aux_endpoint_intensity.init({_height, _width}, memory_provider);
+    _camera_aux_endpoint_emission_radiance.init({_height, _width}, memory_provider);
     _camera_aux_endpoint_material_type.init({_height, _width}, memory_provider);
     _camera_aux_endpoint_screen_motion.init({_height, _width}, memory_provider);
     _camera_aux_chain_throughput.init({_height, _width}, memory_provider);
@@ -147,7 +147,7 @@ RS_KernelCameraPerspectiveManager::RS_KernelCameraPerspectiveManager(
     _camera_aux_endpoint_albedo.fill(RS_Vec3DMem<RSE_FLOAT_16>::zero(), false);
     _camera_aux_endpoint_roughness.fill(RFloat(1), false);
     _camera_aux_endpoint_metalness.fill(RFloat(0), false);
-    _camera_aux_endpoint_intensity.fill(RFloat(0), false);
+    _camera_aux_endpoint_emission_radiance.fill(RFloat(0), false);
     _camera_aux_endpoint_material_type.fill(RSE_VISION_MATERIAL_OPAQUE, false);
     _camera_aux_endpoint_screen_motion.fill(RVec2f::zero(), false);
     _camera_aux_chain_throughput.fill(RVec3f::one(), false);
@@ -416,6 +416,7 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
         }
         const auto& record_rsc = *perspective_base->record;
 
+        camera.saturation_radiance = perspective_base->saturation_radiance;
         camera.aspect_ratio = static_cast<RFloat>(perspective_base->image_height) /
                               static_cast<RFloat>(perspective_base->image_width);
         camera.image_width = perspective_base->image_width;
@@ -518,7 +519,7 @@ void RS_KernelCameraPerspectiveManager::_initKernelData() {
         ctx.camera_aux_endpoint_albedo.append(_camera_aux_endpoint_albedo);
         ctx.camera_aux_endpoint_roughness.append(_camera_aux_endpoint_roughness);
         ctx.camera_aux_endpoint_metalness.append(_camera_aux_endpoint_metalness);
-        ctx.camera_aux_endpoint_intensity.append(_camera_aux_endpoint_intensity);
+        ctx.camera_aux_endpoint_emission_radiance.append(_camera_aux_endpoint_emission_radiance);
         ctx.camera_aux_endpoint_material_type.append(_camera_aux_endpoint_material_type);
         ctx.camera_aux_endpoint_screen_motion.append(_camera_aux_endpoint_screen_motion);
         ctx.camera_aux_chain_throughput.append(_camera_aux_chain_throughput);
@@ -604,7 +605,7 @@ void RS_KernelCameraPerspectiveManager::_freeKernelData() {
         ctx.camera_aux_endpoint_albedo.erase(camera_index);
         ctx.camera_aux_endpoint_roughness.erase(camera_index);
         ctx.camera_aux_endpoint_metalness.erase(camera_index);
-        ctx.camera_aux_endpoint_intensity.erase(camera_index);
+        ctx.camera_aux_endpoint_emission_radiance.erase(camera_index);
         ctx.camera_aux_endpoint_material_type.erase(camera_index);
         ctx.camera_aux_endpoint_screen_motion.erase(camera_index);
         ctx.camera_aux_chain_throughput.erase(camera_index);

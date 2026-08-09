@@ -14,10 +14,31 @@ namespace rise {
 
 namespace rsc {
 
-void RSC_CameraBase::_deserialize(RS_RSCArchive &archive) { RSC_EntityBase::_deserialize(archive); }
+void RSC_CameraBase::_validate(RS_RSCValidator &validator) const {
+    RSC_EntityBase::_validate(validator);
+    validator.submitValidatorIfNotExists("RSC_CameraBase::_validate", this, [this] {
+        RSC_EXPECT_GT(RSC_CameraBase, saturation_radiance, 0);
+    });
+}
+
+void RSC_CameraBase::_read(const RS_RSCFileTreeReader &tree) {
+    RSC_EntityBase::_read(tree);
+    saturation_radiance = tree.get<RFloat>("saturation_radiance", saturation_radiance);
+}
+
+void RSC_CameraBase::_write(RS_RSCFileTreeWriter &tree) const {
+    RSC_EntityBase::_write(tree);
+    tree.add("saturation_radiance", saturation_radiance);
+}
+
+void RSC_CameraBase::_deserialize(RS_RSCArchive &archive) {
+    RSC_EntityBase::_deserialize(archive);
+    archive.deserialize("saturation_radiance", saturation_radiance);
+}
 
 void RSC_CameraBase::_serialize(RS_RSCArchive &archive) const {
     RSC_EntityBase::_serialize(archive);
+    archive.serialize("saturation_radiance", saturation_radiance);
 }
 
 bool RSC_CameraPerspectiveRecord::operator==(const RSC_CameraPerspectiveRecord &other) const {
@@ -132,7 +153,7 @@ void RSC_CameraPerspectiveSignal::_serialize(RS_RSCArchive &archive) const {
 }
 
 void RSC_CameraPerspectiveBase::_validate(RS_RSCValidator &validator) const {
-    RSC_EntityBase::_validate(validator);
+    RSC_CameraBase::_validate(validator);
     validator.submitValidatorIfNotExists("RSC_CameraPerspectiveBase::_validate", this, [this] {
         RSC_EXPECT_GT(RSC_CameraPerspectiveBase, image_width, 0);
         RSC_EXPECT_GT(RSC_CameraPerspectiveBase, image_height, 0);
@@ -146,7 +167,7 @@ void RSC_CameraPerspectiveBase::_validate(RS_RSCValidator &validator) const {
 }
 
 void RSC_CameraPerspectiveBase::_read(const RS_RSCFileTreeReader &tree) {
-    RSC_EntityBase::_read(tree);
+    RSC_CameraBase::_read(tree);
     image_width = tree.get<RSize>("image_width", image_width);
     image_height = tree.get<RSize>("image_height", image_height);
     samples_per_pixel = tree.get<RSize>("samples_per_pixel", samples_per_pixel);
@@ -163,7 +184,7 @@ void RSC_CameraPerspectiveBase::_read(const RS_RSCFileTreeReader &tree) {
 }
 
 void RSC_CameraPerspectiveBase::_write(RS_RSCFileTreeWriter &tree) const {
-    RSC_EntityBase::_write(tree);
+    RSC_CameraBase::_write(tree);
     tree.add("image_width", image_width);
     tree.add("image_height", image_height);
     tree.add("samples_per_pixel", samples_per_pixel);
@@ -387,7 +408,7 @@ void RSC_CameraStereoSignal::_serialize(RS_RSCArchive &archive) const {
 }
 
 void RSC_CameraStereoBase::_validate(RS_RSCValidator &validator) const {
-    RSC_EntityBase::_validate(validator);
+    RSC_CameraBase::_validate(validator);
     validator.submitValidatorIfNotExists("RSC_CameraStereoBase::_validate", this, [this] {
         RSC_EXPECT_GT(RSC_CameraStereoBase, image_width, 0);
         RSC_EXPECT_GT(RSC_CameraStereoBase, image_height, 0);
@@ -402,7 +423,7 @@ void RSC_CameraStereoBase::_validate(RS_RSCValidator &validator) const {
 }
 
 void RSC_CameraStereoBase::_read(const RS_RSCFileTreeReader &tree) {
-    RSC_EntityBase::_read(tree);
+    RSC_CameraBase::_read(tree);
     image_width = tree.get<RSize>("image_width", image_width);
     image_height = tree.get<RSize>("image_height", image_height);
     samples_per_pixel = tree.get<RSize>("samples_per_pixel", samples_per_pixel);
@@ -422,7 +443,7 @@ void RSC_CameraStereoBase::_read(const RS_RSCFileTreeReader &tree) {
 }
 
 void RSC_CameraStereoBase::_write(RS_RSCFileTreeWriter &tree) const {
-    RSC_EntityBase::_write(tree);
+    RSC_CameraBase::_write(tree);
     tree.add("image_width", image_width);
     tree.add("image_height", image_height);
     tree.add("samples_per_pixel", samples_per_pixel);

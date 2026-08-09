@@ -255,6 +255,9 @@ struct alignas(8) RS_KernelBase {
     RFloat rigidbody_linear_damping_z = 0;
     RFloat rigidbody_angular_damping_z = 0;
 
+    RFloat vision_light_bin_cell_size = 8;
+    RSize vision_light_bin_probe_num = 7;
+
     RFloat vision_trace_firefly_cap = 8;
     RSize vision_trace_russian_roulette_start_depth = 3;
 
@@ -285,12 +288,6 @@ struct alignas(8) RS_KernelBase {
     RFloat record_frequency = 0;
 
     RFloat world_grav_acc = 0;
-
-    // Simulation flags
-    // True when the emissive light set changed and the previous reservoirs may index a removed
-    // light. The ReSTIR resample skips temporal and spatial reuse for one frame so a stale
-    // reservoir light index is never dereferenced.
-    bool vision_is_restir_reservoir_stale = false;
 
     /**
      * Runtime states

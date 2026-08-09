@@ -447,7 +447,7 @@ def build():
             color=PAD_C,
             kind="rigid_fixed",
             emission_color=(255, 250, 235),
-            emission_intensity=0.5,
+            emission_radiance=0.5,
         ),
         _common.MaterialSpec("rail", color=RAIL_C, kind="fixed"),
         _common.MaterialSpec("bumper", color=BUMPER_C, kind="fixed"),

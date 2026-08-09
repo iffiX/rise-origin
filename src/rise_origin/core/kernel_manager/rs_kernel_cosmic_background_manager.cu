@@ -122,10 +122,11 @@ void RS_KernelCosmicBackgroundManager::_updateKernelUniformData(
         st.cosmic_background_state.color_input_type = color_input_type;
         cb.state = st.cosmic_background_state_packed;
         cb.color = color;
-        cb.intensity = uniform.intensity;
-        cb.rotation_rad = uniform.rotation_rad;
+        cb.radiance_scale = float(uniform.radiance);
+        cb.rotation_rad = float(uniform.rotation_rad);
         // Uniform backgrounds carry no sun disk.
         cb.sun_color = RColor3f::zero();
+        cb.sun_irradiance = 0.0f;
 
         // Context data is modified, needs to update kernel.
         _kernel_manager->markKernelModified();
@@ -148,9 +149,10 @@ void RS_KernelCosmicBackgroundManager::_updateKernelGradientData(
         cb.zenith_color = zenith;
         cb.horizon_color = horizon;
         cb.sun_color = sun_color;
+        cb.sun_irradiance = float(gradient.sun_irradiance);
         cb.sun_direction = sun_dir;
-        cb.sun_angular_radius = gradient.sun_angular_radius;
-        cb.intensity = RFloat(1);
+        cb.sun_angular_radius = float(gradient.sun_angular_radius);
+        cb.radiance_scale = 1.0f;
 
         // Context data is modified, needs to update kernel.
         _kernel_manager->markKernelModified();
@@ -172,8 +174,8 @@ void RS_KernelCosmicBackgroundManager::_updateKernelHosekWilkieData(
     double elevation = std::asin(std::clamp(double(sun_dir.z), -1.0, 1.0));
     double turbidity = std::clamp(double(hosek.turbidity), 1.0, 10.0);
 
-    RFloat hw_config[27] = {0};
-    RFloat hw_radiance[3] = {0, 0, 0};
+    float hw_config[27] = {0};
+    float hw_radiance[3] = {0, 0, 0};
 
     if (elevation >= 0) {
         ArHosekSkyModelState* hosek_state =
@@ -219,9 +221,9 @@ void RS_KernelCosmicBackgroundManager::_updateKernelHosekWilkieData(
 
         for (int ch = 0; ch < 3; ++ch) {
             for (int i = 0; i < 9; ++i) {
-                hw_config[ch * 9 + i] = RFloat(hosek_state->configs[ch][i]);
+                hw_config[ch * 9 + i] = float(hosek_state->configs[ch][i]);
             }
-            hw_radiance[ch] = RFloat(hosek_state->radiances[ch] * norm);
+            hw_radiance[ch] = float(hosek_state->radiances[ch] * norm);
         }
 
         arhosekskymodelstate_free(hosek_state);
@@ -234,8 +236,9 @@ void RS_KernelCosmicBackgroundManager::_updateKernelHosekWilkieData(
         cb.state = st.cosmic_background_state_packed;
         cb.sun_direction = sun_dir;
         cb.sun_color = sun_color;
-        cb.sun_angular_radius = hosek.sun_angular_radius;
-        cb.intensity = hosek.intensity;
+        cb.sun_irradiance = float(hosek.sun_irradiance);
+        cb.sun_angular_radius = float(hosek.sun_angular_radius);
+        cb.radiance_scale = float(hosek.radiance_scale);
         for (int i = 0; i < 27; ++i) cb.hw_config[i] = hw_config[i];
         for (int ch = 0; ch < 3; ++ch) cb.hw_radiance[ch] = hw_radiance[ch];
 

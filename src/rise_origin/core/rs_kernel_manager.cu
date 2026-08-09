@@ -213,7 +213,7 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.camera_aux_endpoint_albedo.init(0, _device_provider);
         k.ctx.camera_aux_endpoint_roughness.init(0, _device_provider);
         k.ctx.camera_aux_endpoint_metalness.init(0, _device_provider);
-        k.ctx.camera_aux_endpoint_intensity.init(0, _device_provider);
+        k.ctx.camera_aux_endpoint_emission_radiance.init(0, _device_provider);
         k.ctx.camera_aux_endpoint_material_type.init(0, _device_provider);
         k.ctx.camera_aux_endpoint_screen_motion.init(0, _device_provider);
         k.ctx.camera_aux_chain_throughput.init(0, _device_provider);
@@ -254,8 +254,7 @@ void RS_KernelManager::initKernel(RSE_FloatType context_mem_accuracy) {
         k.ctx.vision_materials.init(0, _device_provider);
         k.ctx.vision_material_layout.init(_device_provider);
 
-        k.ctx.light_weight.init(0, _device_provider);
-        k.ctx.light_cdf.init(0, _device_provider);
+        k.ctx.light_bin.init(_device_provider);
 
         k.ctx.ray_sensors.init(0, _device_provider);
         k.ctx.ray_sensor_records.init(0, _device_provider);
@@ -432,7 +431,7 @@ void RS_KernelManager::freeKernel() {
         k.ctx.camera_aux_endpoint_albedo.free();
         k.ctx.camera_aux_endpoint_roughness.free();
         k.ctx.camera_aux_endpoint_metalness.free();
-        k.ctx.camera_aux_endpoint_intensity.free();
+        k.ctx.camera_aux_endpoint_emission_radiance.free();
         k.ctx.camera_aux_endpoint_material_type.free();
         k.ctx.camera_aux_endpoint_screen_motion.free();
         k.ctx.camera_aux_chain_throughput.free();
@@ -473,8 +472,7 @@ void RS_KernelManager::freeKernel() {
         k.ctx.vision_materials.free();
         k.ctx.vision_material_layout.free();
 
-        k.ctx.light_weight.free();
-        k.ctx.light_cdf.free();
+        k.ctx.light_bin.free();
 
         k.ctx.ray_sensors.free();
         k.ctx.ray_sensor_records.free();
@@ -965,20 +963,6 @@ std::string RS_KernelManager::purgeStructure(RIndex structure_gid) {
     _flushPendingCommits();
 
     return name;
-}
-
-void RS_KernelManager::markVisionRestirReservoirStale() {
-    kernel.vision_is_restir_reservoir_stale = true;
-    markKernelModified();
-}
-
-bool RS_KernelManager::isVisionRestirReservoirStale() const {
-    return kernel.vision_is_restir_reservoir_stale;
-}
-
-void RS_KernelManager::clearVisionRestirReservoirStale() {
-    kernel.vision_is_restir_reservoir_stale = false;
-    markKernelModified();
 }
 
 void RS_KernelManager::markVoxelPartitionModified() {
@@ -1966,6 +1950,8 @@ void RS_KernelManager::_setSimulationRSC(const RSC_Simulation& simulation, TaskP
     kernel.rigidbody_angular_damping_z = simulation.rigid_body.angular_damping_z;
 
     // Vision trace
+    kernel.vision_light_bin_cell_size = simulation.vision.light.light_bin_cell_size;
+    kernel.vision_light_bin_probe_num = simulation.vision.light.light_bin_probe_num;
     kernel.vision_trace_firefly_cap = simulation.vision.trace.firefly_cap;
     kernel.vision_trace_russian_roulette_start_depth =
         simulation.vision.trace.russian_roulette_start_depth;

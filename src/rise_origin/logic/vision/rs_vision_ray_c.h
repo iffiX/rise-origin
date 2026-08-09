@@ -5,7 +5,9 @@
 #define RS_VISION_RAY_C_H
 
 #include "rise_origin/device/algorithm/rs_random.h"
+#include "rise_origin/device/data/rs_hash.h"
 #include "rise_origin/device/rs_compute.h"
+#include "rise_origin/logic/data/rs_light_bin.h"
 #include "rise_origin/logic/soft/rs_voxel_c.h"
 #include "rise_origin/logic/soft/rs_voxel_m.h"
 #include "rise_origin/logic/vision/rs_camera_m.h"
@@ -84,6 +86,9 @@ class RS_VisionRayCompute {
     /// Default IOR for shading sites that do not carry one (ReSTIR endpoints).
     static constexpr FloatC PBR_DEFAULT_IOR = FloatC(1.5);
 
+    /// Mean projected area of a cube is a quarter of its surface, so 1.5 faces.
+    static constexpr FloatC VOXEL_MEAN_PROJECTED_AREA_RATIO = FloatC(1.5);
+
     /// Stack-allocated camera ray.
     struct Ray {
         Vec3C ray_origin;
@@ -148,7 +153,7 @@ class RS_VisionRayCompute {
         FloatC roughness = FloatC(1);
         FloatC metalness = FloatC(0);
         FloatC ior = FloatC(1);
-        FloatC intensity = FloatC(0);
+        FloatC emission_radiance = FloatC(0);
 
         RHandle voxel = RS_NULL_HANDLE;
         RHandle vision_material = RS_NULL_HANDLE;
@@ -287,6 +292,7 @@ class RS_VisionRayCompute {
             FloatC current_medium_ior = FloatC(1);
             // Sentinel = no previous bounce; sky-on-miss at depth 0 weights 1.
             FloatC last_bounce_brdf_pdf = MIS_DELTA_BRDF_PDF;
+            FloatC last_bounce_probed_irradiance = FloatC(0);
 
             for (RSize depth = 0; depth < max_depth; ++depth) {
                 HitRecord rec;
@@ -304,6 +310,7 @@ class RS_VisionRayCompute {
                     throughput,
                     current_medium_ior,
                     last_bounce_brdf_pdf,
+                    last_bounce_probed_irradiance,
                     contribution,
                     continue_tracing
                 );
@@ -433,7 +440,7 @@ class RS_VisionRayCompute {
                 ctx.camera_aux_endpoint_albedo[camera][{i, j}] = RVec3f::zero();
                 ctx.camera_aux_endpoint_roughness[camera][{i, j}] = float(1);
                 ctx.camera_aux_endpoint_metalness[camera][{i, j}] = float(0);
-                ctx.camera_aux_endpoint_intensity[camera][{i, j}] = float(0);
+                ctx.camera_aux_endpoint_emission_radiance[camera][{i, j}] = float(0);
                 ctx.camera_aux_endpoint_material_type[camera][{i, j}] = RSE_VISION_MATERIAL_OPAQUE;
                 ctx.camera_aux_endpoint_screen_motion[camera][{i, j}] = RVec2f(0.0f, 0.0f);
                 return;
@@ -457,7 +464,8 @@ class RS_VisionRayCompute {
             );
             ctx.camera_aux_endpoint_roughness[camera][{i, j}] = float(endpoint_rec.roughness);
             ctx.camera_aux_endpoint_metalness[camera][{i, j}] = float(endpoint_rec.metalness);
-            ctx.camera_aux_endpoint_intensity[camera][{i, j}] = float(endpoint_rec.intensity);
+            ctx.camera_aux_endpoint_emission_radiance[camera][{i, j}] =
+                float(endpoint_rec.emission_radiance);
             ctx.camera_aux_endpoint_material_type[camera][{i, j}] = endpoint_material_type;
 
             Vec3C endpoint_prev_hit_position;
@@ -512,34 +520,43 @@ class RS_VisionRayCompute {
     };
 
     /**
-     * @brief Per-emissive-voxel kernel that writes the ReSTIR DI light-weight at
-     *        slot `1 + emissive_idx`. Slot 0 is the sun and is written from the
-     *        host before this launch.
+     * @brief Per-emissive-voxel kernel that fills the light bin: the cell each
+     *        light sits in, its voxel handle, and its selection weight.
      *
-     * @details Resolves the voxel handle through `ctx.structure_emissive_voxel_handles`,
-     *          reads the vision material's albedo and intensity, and stores the luminance
-     *          of `intensity` into `light_weight`. Then inclusive scan into `light_cdf`
-     *          runs after this kernel.
+     * @details Runs every step, because a light that moves changes cell. The sun
+     *          is not binned, so every light here is an emissive voxel.
      *
-     * @param k             simulation kernel.
-     * @param emissive_idx  flat index into `ctx.structure_emissive_voxel_handles`.
+     * @param k                  simulation kernel.
+     * @param spatial_codes      one cell code per light, written here.
+     * @param object_identifiers one voxel handle per light, written here.
+     * @param weights            one selection weight per light, written here.
      */
-    class RSCF_WriteEmissiveLightWeights
-        : public device::RS_ComputeFunction<RSCF_WriteEmissiveLightWeights> {
+    class RSCF_WriteLightBinData : public device::RS_ComputeFunction<RSCF_WriteLightBinData> {
        public:
-        using device::RS_ComputeFunction<RSCF_WriteEmissiveLightWeights>::index1D;
+        using device::RS_ComputeFunction<RSCF_WriteLightBinData>::index1D;
 
-        template <typename Kernel>
-        HOST_DEVICE_INLINE_QUALIFIER static void run(Kernel* k) {
+        template <
+            typename Kernel,
+            typename SpatialCodeVector,
+            typename ObjectIdentifierVector,
+            typename WeightVector>
+        HOST_DEVICE_INLINE_QUALIFIER static void run(
+            Kernel* k,
+            SpatialCodeVector spatial_codes,
+            ObjectIdentifierVector object_identifiers,
+            WeightVector weights
+        ) {
             auto& ctx = k->ctx;
             RIndex i = index1D();
             if (RSize(i) >= ctx.structure_emissive_voxel_handles.size()) return;
+
             RHandle voxel = ctx.structure_emissive_voxel_handles[i];
-            RHandle vision_material = V_G(voxel, vision_material);
-            // Approximation using just intensity, for a better estimate, needs to
-            // consider emission color (for texture probably average) and voxel size.
-            FloatC intensity = FloatC(VSM_G(vision_material, emission_intensity));
-            ctx.light_weight[RSize(i) + 1] = float(intensity);
+            Vec3C center = Vec3C(V_G(voxel, position));
+            spatial_codes[i] = RS_LightBinSpatialCodeConverter::toSpatialCode(
+                center, float(k->vision_light_bin_cell_size)
+            );
+            object_identifiers[i].voxel = voxel;
+            weights[i] = float(_evalVoxelLightIrradiance(k, voxel));
         }
     };
 
@@ -590,12 +607,26 @@ class RS_VisionRayCompute {
             RSize initial_candidate_count = CA_G(samples_per_pixel);
             for (RSize candidate_idx = 0; candidate_idx < initial_candidate_count;
                  ++candidate_idx) {
-                FloatC rand_u = rs.template rand<FloatC>();
-                RIndex light_index = _sampleLight(k, rand_u);
-                FloatC source_pdf = _lightSourcePdf(k, light_index);
-                if (source_pdf <= FloatC(0)) continue;
+                FloatC rand_sun = rs.template rand<FloatC>();
+                FloatC rand_voxel = rs.template rand<FloatC>();
+                FloatC source_pdf;
+                // A survivor is shaded by _evalReservoirDI, which may run for
+                // another pixel after spatial reuse, so this point's irradiance
+                // cannot travel with the reservoir and is not kept.
+                FloatC candidate_probed_irradiance;
+                RHandle light_voxel;
+                bool is_light_picked = _sampleLight(
+                    k,
+                    rand_sun,
+                    rand_voxel,
+                    hit_position,
+                    light_voxel,
+                    source_pdf,
+                    candidate_probed_irradiance
+                );
+                if (!is_light_picked || source_pdf <= FloatC(0)) continue;
 
-                LightSample light_sample = _sampleLightSample(k, light_index, hit_position, rs);
+                LightSample light_sample = _sampleLightSample(k, light_voxel, hit_position, rs);
                 Vec3C brdf_cos = _brdfCos(
                     material_type,
                     albedo,
@@ -619,13 +650,9 @@ class RS_VisionRayCompute {
                 // instead of NEE's sum_visible_tp.
                 FloatC max_distance_c = light_sample.is_sun ? FloatC(RS_MAX_FLOAT)
                                                             : light_sample.dist - FloatC(RS_EPS);
-                RHandle light_handle_c =
-                    (light_index == RS_VISION_SUN_LIGHT_INDEX)
-                        ? RS_NULL_HANDLE
-                        : ctx.structure_emissive_voxel_handles[light_index - 1];
                 Vec3C origin_c = _offsetRayOrigin(hit_position, normal);
-                RColor3f transmission_c = _shadowWalkWithTransmission(
-                    k, origin_c, light_sample.dir, max_distance_c, light_handle_c
+                RColor3f transmission_c = _findShadowTransmission(
+                    k, origin_c, light_sample.dir, max_distance_c, light_voxel
                 );
                 Vec3C transmission_c_vec = Vec3C(transmission_c.toVec3D());
                 Vec3C contribution_vis = contribution.elemMul(transmission_c_vec);
@@ -638,8 +665,9 @@ class RS_VisionRayCompute {
                     float(light_sample.position.z)
                 );
                 _reservoirUpdateDI(
+                    k,
                     sample_weight,
-                    light_index,
+                    light_voxel,
                     light_position,
                     transmission_c,
                     target_pdf,
@@ -680,15 +708,15 @@ class RS_VisionRayCompute {
                 FloatC(k->vision_restir_disocclusion_position_threshold);
             FloatC normal_cos_threshold = FloatC(k->vision_restir_disocclusion_normal_threshold);
             bool is_prev_valid =
-                !k->vision_is_restir_reservoir_stale && reservoir_prev.sample_count > 0 &&
-                reservoir_prev.object_key == object_key &&
+                reservoir_prev.sample_count > 0 && reservoir_prev.object_key == object_key &&
+                _isReservoirLightAlive(k, reservoir_prev) &&
                 (Vec3C(reservoir_prev.prev_hit_position) - hit_position).length() <
                     disocclusion_position_threshold &&
                 Vec3C(reservoir_prev.prev_normal).dot(normal) > normal_cos_threshold;
 
             if (is_prev_valid) {
                 LightSample light_sample_prev = _evalStoredLightSample(
-                    k, reservoir_prev.light_index, hit_position, reservoir_prev.light_position
+                    k, reservoir_prev.light_voxel, hit_position, reservoir_prev.light_position
                 );
                 Vec3C brdf_cos_prev = _brdfCos(
                     material_type,
@@ -718,8 +746,9 @@ class RS_VisionRayCompute {
                                             FloatC(reservoir_prev.weight_sum) /
                                             (FloatC(reservoir_prev.target_pdf) + FloatC(RS_EPS));
                 _reservoirUpdateDI(
+                    k,
                     sample_weight_prev,
-                    reservoir_prev.light_index,
+                    reservoir_prev.light_voxel,
                     reservoir_prev.light_position,
                     reservoir_prev.transmission,
                     target_pdf_prev_under_curr,
@@ -744,18 +773,14 @@ class RS_VisionRayCompute {
             // Visibility on the survivor.
             if (reservoir.sample_count > 0 && reservoir.target_pdf > FloatC(0)) {
                 LightSample light_sample_survivor = _evalStoredLightSample(
-                    k, reservoir.light_index, hit_position, reservoir.light_position
+                    k, reservoir.light_voxel, hit_position, reservoir.light_position
                 );
                 FloatC max_distance = light_sample_survivor.is_sun
                                           ? FloatC(RS_MAX_FLOAT)
                                           : light_sample_survivor.dist - FloatC(RS_EPS);
-                RHandle light_handle =
-                    (reservoir.light_index == RS_VISION_SUN_LIGHT_INDEX)
-                        ? RS_NULL_HANDLE
-                        : ctx.structure_emissive_voxel_handles[reservoir.light_index - 1];
                 Vec3C origin = _offsetRayOrigin(hit_position, normal);
-                reservoir.transmission = _shadowWalkWithTransmission(
-                    k, origin, light_sample_survivor.dir, max_distance, light_handle
+                reservoir.transmission = _findShadowTransmission(
+                    k, origin, light_sample_survivor.dir, max_distance, reservoir.light_voxel
                 );
             } else {
                 reservoir.transmission = RColor3f::zero();
@@ -883,10 +908,11 @@ class RS_VisionRayCompute {
                     ctx.camera_current_reservoir_di[camera][{ii_n, jj_n}];
                 if (reservoir_neighbor.sample_count == 0) continue;
                 if (FloatC(reservoir_neighbor.target_pdf) <= FloatC(0)) continue;
+                if (!_isReservoirLightAlive(k, reservoir_neighbor)) continue;
 
                 LightSample light_sample_neighbor = _evalStoredLightSample(
                     k,
-                    reservoir_neighbor.light_index,
+                    reservoir_neighbor.light_voxel,
                     hit_position,
                     reservoir_neighbor.light_position
                 );
@@ -918,8 +944,9 @@ class RS_VisionRayCompute {
                 FloatC sample_weight = target_pdf_at_curr * FloatC(reservoir_neighbor.weight_sum) /
                                        (FloatC(reservoir_neighbor.target_pdf) + FloatC(RS_EPS));
                 _reservoirUpdateDI(
+                    k,
                     sample_weight,
-                    reservoir_neighbor.light_index,
+                    reservoir_neighbor.light_voxel,
                     reservoir_neighbor.light_position,
                     reservoir_neighbor.transmission,
                     target_pdf_at_curr,
@@ -1016,6 +1043,10 @@ class RS_VisionRayCompute {
             // M_init initial candidates: per-camera samples_per_pixel.
             RS_ReservoirGI reservoir{};
             RSize initial_candidate_count = CA_G(samples_per_pixel);
+            // This kernel brdf-samples rather than picking a light, so nothing
+            // has read the bin here yet. Read it once for every candidate's MIS
+            // partner instead of once per candidate.
+            FloatC probed_irradiance = _evalProbedVoxelLightsIrradiance(k, hit_position);
             for (RSize candidate_idx = 0; candidate_idx < initial_candidate_count;
                  ++candidate_idx) {
                 // BRDF-sample a bounce direction via the unified two-lobe scatter.
@@ -1059,7 +1090,8 @@ class RS_VisionRayCompute {
                     Vec3C sky = _findHitBackground(k, bounce_dir);
                     Vec3C sun_disk = _evalCosmicBackgroundSunDisk(k, bounce_dir);
                     if (_luminance(sun_disk) > FloatC(0)) {
-                        FloatC p_nee = _evalNeePdfSun(k, bounce_dir);
+                        FloatC p_nee =
+                            _evalSunLightDirectionNeePdf(k, bounce_dir, probed_irradiance);
                         FloatC sun_mis_brdf = _powerHeuristicMIS(brdf_pdf, p_nee);
                         sky = sky + sun_disk * (sun_mis_brdf - FloatC(1));
                     }
@@ -1072,15 +1104,17 @@ class RS_VisionRayCompute {
                     bounce_hit_normal = bounce_rec.normal;
 
                     if (bounce_mt == RSE_VISION_MATERIAL_EMISSIVE) {
-                        l_incoming = bounce_rec.albedo * bounce_rec.intensity;
-                        FloatC p_nee_voxel =
-                            _evalNeePdfVoxel(k, hit_position, bounce_dir, bounce_rec.voxel);
+                        l_incoming = bounce_rec.albedo * bounce_rec.emission_radiance;
+                        FloatC p_nee_voxel = _evalVoxelLightDirectionNeePdf(
+                            k, hit_position, bounce_dir, bounce_rec.voxel, probed_irradiance
+                        );
                         if (p_nee_voxel > FloatC(0)) {
                             mis_brdf = _powerHeuristicMIS(brdf_pdf, p_nee_voxel);
                         }
                     } else if (bounce_mt == RSE_VISION_MATERIAL_OPAQUE) {
+                        FloatC bounce_probed_irradiance = FloatC(0);
                         if (k->vision_restir_gi_is_bounce_nee_enabled) {
-                            l_incoming = _evalNeeAtBounce(
+                            l_incoming = _evalNeeRadiance(
                                 k,
                                 bounce_rec.p,
                                 bounce_rec.normal,
@@ -1089,8 +1123,12 @@ class RS_VisionRayCompute {
                                 bounce_rec.albedo,
                                 bounce_rec.metalness,
                                 bounce_rec.roughness,
-                                rs
+                                rs,
+                                bounce_probed_irradiance
                             );
+                        } else {
+                            bounce_probed_irradiance =
+                                _evalProbedVoxelLightsIrradiance(k, bounce_rec.p);
                         }
                         l_incoming = l_incoming + _gatherIndirectPath(
                                                       k,
@@ -1101,7 +1139,8 @@ class RS_VisionRayCompute {
                                                       bounce_rec.roughness,
                                                       bounce_dir,
                                                       CA_G(max_depth),
-                                                      rs
+                                                      rs,
+                                                      bounce_probed_irradiance
                                                   );
                     }
                     // TRANSPARENT bounce leaves l_incoming = 0.
@@ -1399,7 +1438,7 @@ class RS_VisionRayCompute {
                 if (target_pdf_at_curr <= FloatC(0)) continue;
 
                 Vec3C shadow_origin = _offsetRayOrigin(hit_position, normal);
-                RColor3f trans = _shadowWalkWithTransmission(
+                RColor3f trans = _findShadowTransmission(
                     k, shadow_origin, bounce_dir, shadow_max_dist, RS_NULL_HANDLE
                 );
                 if (_luminance(Vec3C(trans.toVec3D())) <= FloatC(RS_EPS)) continue;
@@ -2208,10 +2247,10 @@ class RS_VisionRayCompute {
     }
 
     /**
-     * @brief Closest-hit floor triangle BVH walk.
+     * @brief Closest-hit floor triangle BVH walk in one tile of a periodic array floor.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static bool _findHitFloorTriangle(
+    HOST_DEVICE_INLINE_QUALIFIER static bool _findHitFloorTriangleInTile(
         Kernel* k,
         const Ray& ray,
         FloatC t_min,
@@ -2315,14 +2354,14 @@ class RS_VisionRayCompute {
     }
 
     /**
-     * @brief Closest-hit floor BVH walk for periodic ARRAY floors.
+     * @brief Closest-hit floor BVH walk for periodic array floors.
      *
      * @details Treats the heightfield as a periodic 3D tiling of canonical-tile-shaped
      * boxes `[(i-0.5)x_size, (i+0.5)x_size] x [(j-0.5)y_size, (j+0.5)y_size] x
      * [height_min, height_max]`. The ray is first clipped to the global z-slab
      * `[height_min, height_max]` (infinite in xy). Then a 2D DDA over tile indices
      * (i, j) advances along the ray; each tile shifts the ray into canonical
-     * coordinates and runs a bounded `_findHitFloorTriangle` for the (t_curr, t_exit)
+     * coordinates and runs a bounded `_findHitFloorTriangleInTile` for the (t_curr, t_exit)
      * sub-range. The first hit wins.
      *
      * @details Non-repeating axes: when `is_x_repeat == false`, only `tile_i == 0`
@@ -2335,7 +2374,7 @@ class RS_VisionRayCompute {
      * caller still uses the original (unshifted) ray.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static bool _findHitFloorTriangleTiled(
+    HOST_DEVICE_INLINE_QUALIFIER static bool _findHitFloorTriangle(
         Kernel* k,
         const Ray& ray,
         FloatC t_min,
@@ -2348,7 +2387,9 @@ class RS_VisionRayCompute {
 
         // Non-repeating in both axes: single canonical query, same as pre-§2g.
         if (!f.is_x_repeat && !f.is_y_repeat) {
-            return _findHitFloorTriangle(k, ray, t_min, t_max, triangle_out, t_out, normal_out);
+            return _findHitFloorTriangleInTile(
+                k, ray, t_min, t_max, triangle_out, t_out, normal_out
+            );
         }
 
         FloatC x_size = FloatC(f.x_size);
@@ -2422,7 +2463,7 @@ class RS_VisionRayCompute {
                 RHandle tri;
                 FloatC t_hit;
                 Vec3C n;
-                if (_findHitFloorTriangle(k, shifted, t_curr, t_exit, tri, t_hit, n)) {
+                if (_findHitFloorTriangleInTile(k, shifted, t_curr, t_exit, tri, t_hit, n)) {
                     triangle_out = tri;
                     t_out = t_hit;
                     normal_out = n;
@@ -2462,7 +2503,7 @@ class RS_VisionRayCompute {
         Vec3C floor_normal(0, 0, 1);
         bool floor_hit = false;
         if (k->ctx.floor_vision_mem.data_type == RSE_VISION_FLOOR_DATA_ARRAY) {
-            floor_hit = _findHitFloorTriangleTiled(
+            floor_hit = _findHitFloorTriangle(
                 k, ray, RAY_T_MIN, t_floor, floor_triangle, t_floor, floor_normal
             );
         } else if (k->ctx.floor_vision_mem.data_type == RSE_VISION_FLOOR_DATA_FLAT) {
@@ -2546,7 +2587,7 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Resolve the emission color for `vision_material` at the shading coordinate. The
-     *        caller multiplies by emission_intensity to produce final radiance.
+     *        caller multiplies by emission_radiance to produce final radiance.
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void _resolveEmissionColor(
@@ -2640,13 +2681,13 @@ class RS_VisionRayCompute {
         _resolveRoughnessMetalness(k, vision_material, mat_state, pos, uv, roughness, metalness);
         _resolveEmissionColor(k, vision_material, mat_state, pos, uv, emission_color);
 
-        // Emissive surfaces emit emission_color * emission_intensity downstream (rec.albedo *
-        // rec.intensity); route the emission color through the albedo slot in that case.
+        // Emissive surfaces emit emission_color * emission_radiance downstream (rec.albedo *
+        // rec.emission_radiance); route the emission color through the albedo slot.
         rec_in_out.albedo = (render_type == RSE_VISION_MATERIAL_EMISSIVE) ? emission_color : albedo;
         rec_in_out.roughness = roughness;
         rec_in_out.metalness = metalness;
         rec_in_out.ior = FloatC(VSM_G(vision_material, ior));
-        rec_in_out.intensity = FloatC(VSM_G(vision_material, emission_intensity));
+        rec_in_out.emission_radiance = FloatC(VSM_G(vision_material, emission_radiance));
         rec_in_out.vision_material_key = VSM_G(vision_material, vision_material_key);
         rec_in_out.state.hit_state.vision_material_type = render_type;
     }
@@ -2689,7 +2730,7 @@ class RS_VisionRayCompute {
         rec_in_out.roughness = roughness;
         rec_in_out.metalness = metalness;
         rec_in_out.ior = FloatC(VSM_G(vision_material, ior));
-        rec_in_out.intensity = FloatC(VSM_G(vision_material, emission_intensity));
+        rec_in_out.emission_radiance = FloatC(VSM_G(vision_material, emission_radiance));
         rec_in_out.vision_material_key = VSM_G(vision_material, vision_material_key);
         rec_in_out.state.hit_state.vision_material_type = render_type;
     }
@@ -2944,7 +2985,7 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Uniform background: flat color (CONSTANT) or the procedural grid
-     *        sampled at the equirectangular UV (GRID), scaled by intensity.
+     *        sampled at the equirectangular UV (GRID), scaled by radiance_scale.
      *        Has no sun disk.
      */
     template <typename Kernel>
@@ -2954,9 +2995,9 @@ class RS_VisionRayCompute {
         RS_VisionCosmicBackgroundStateUnion st{cb.state};
         if (st.cosmic_background_state.color_input_type == RSE_VISION_SAMPLE_INPUT_GRID) {
             Vec2C uv = _cosmicBackgroundDirToUv(dir, FloatC(cb.rotation_rad));
-            return _sampleGridTexture(k, cb.color.texture, uv, uv) * FloatC(cb.intensity);
+            return _sampleGridTexture(k, cb.color.texture, uv, uv) * FloatC(cb.radiance_scale);
         }
-        return Vec3C(cb.color.constant.toVec3D()) * FloatC(cb.intensity);
+        return Vec3C(cb.color.constant.toVec3D()) * FloatC(cb.radiance_scale);
     }
 
     /**
@@ -3011,7 +3052,7 @@ class RS_VisionRayCompute {
                          (c2 + c3 * expM + c5 * rayM + c6 * mieM + c7 * zenith_term);
             sky_color[ch] = val * FloatC(cb.hw_radiance[ch]);
         }
-        sky_color *= FloatC(cb.intensity);
+        sky_color *= FloatC(cb.radiance_scale);
         return sky_color;
     }
 
@@ -3028,15 +3069,30 @@ class RS_VisionRayCompute {
     }
 
     /**
-     * @brief Sun disk radiance under the hard-cutoff disk model.
-     *        `sun_color` inside the cone, zero outside; shared by both
-     *        the cosmic background path and the NEE sun emission.
+     * @brief Solid angle the sun disk covers (unit: sr). Written as
+     *        `4 pi sin^2(theta / 2)`, which keeps its precision at the small
+     *        angles a real sun subtends where `1 - cos(theta)` loses it.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalCosmicBackgroundSunSolidAngle(Kernel* k) {
+        FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
+        FloatC sin_half = RS_FI::rs_sin(half_angle * FloatC(0.5));
+        return FloatC(4) * FloatC(RS_PI) * sin_half * sin_half;
+    }
+
+    /**
+     * @brief Sun disk radiance under the hard-cutoff disk model. Zero outside
+     *        the cone, and inside it the irradiance spread over the solid angle
+     *        the disk covers, so widening the sun dims it and delivers the same.
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static Vec3C
     _evalCosmicBackgroundSunDisk(Kernel* k, const Vec3C& dir) {
         if (!_isInCosmicBackgroundSunCone(k, dir)) return Vec3C::zero();
-        return Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D());
+        FloatC solid_angle = _evalCosmicBackgroundSunSolidAngle(k);
+        if (solid_angle <= FloatC(RS_EPS)) return Vec3C::zero();
+        const auto& cb = k->ctx.cosmic_background_vision_mem;
+        return Vec3C(cb.sun_color.toVec3D()) * (FloatC(cb.sun_irradiance) / solid_angle);
     }
 
     /**
@@ -3059,7 +3115,7 @@ class RS_VisionRayCompute {
     }
 
     /*****************************************************************
-     * Light traversal
+     * Surface shading
      *****************************************************************/
 
     /**
@@ -3159,6 +3215,95 @@ class RS_VisionRayCompute {
         return spec_prob * pdf_spec + (FloatC(1) - spec_prob) * pdf_diff;
     }
 
+    /*****************************************************************
+     * Reservoir
+     *****************************************************************/
+
+    /**
+     * @brief True when a stored survivor's light is still the light it was.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static bool
+    _isReservoirLightAlive(Kernel* k, const RS_ReservoirDI& reservoir) {
+        if (reservoir.light_entity_gid == RIndex(RS_WORLD_RSC_COSMIC_BACKGROUND_GID)) return true;
+        auto& ctx = k->ctx;
+        RHandle voxel = reservoir.light_voxel;
+        if (RSize(voxel) >= ctx.structure_voxels.size()) return false;
+        if (RIndex(V_G(voxel, structure_gid)) != reservoir.light_entity_gid) return false;
+        RS_VoxelStateUnion voxel_state{V_G(voxel, state)};
+        return voxel_state.voxel_state.is_enabled;
+    }
+
+    /**
+     * @brief Bitterli weighted-reservoir-sampling streaming update. Carries
+     *        a candidate transmission so spatial-reuse merges adopt the
+     *        winning neighbor's shadow walk without a fresh trace.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void _reservoirUpdateDI(
+        Kernel* k,
+        FloatC sample_weight,
+        RHandle light_voxel,
+        const RVec3f& light_position,
+        const RColor3f& transmission,
+        FloatC target_pdf,
+        device::RS_RandomState& rs_in_out,
+        RS_ReservoirDI& reservoir_in_out
+    ) {
+        auto& ctx = k->ctx;
+        reservoir_in_out.sample_count = reservoir_in_out.sample_count + 1;
+        reservoir_in_out.weight_sum = float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
+        FloatC rand_u = rs_in_out.template rand<FloatC>();
+        if (rand_u * FloatC(reservoir_in_out.weight_sum) < sample_weight) {
+            // The gid alone says which of the three states this is: the reserved
+            // cosmic background gid for the sun, a structure gid for a voxel,
+            // and null once the light is gone.
+            reservoir_in_out.light_entity_gid = light_voxel == RS_NULL_HANDLE
+                                                    ? RIndex(RS_WORLD_RSC_COSMIC_BACKGROUND_GID)
+                                                : RSize(light_voxel) < ctx.structure_voxels.size()
+                                                    ? RIndex(V_G(light_voxel, structure_gid))
+                                                    : RS_NULL_INDEX;
+            reservoir_in_out.light_voxel = light_voxel;
+            reservoir_in_out.light_position = light_position;
+            reservoir_in_out.transmission = transmission;
+            reservoir_in_out.target_pdf = float(target_pdf);
+        }
+    }
+
+    /**
+     * @brief Bitterli WRS streaming update on a GI reservoir. Survives the
+     *        bounce direction, bounce-ray hit, and gathered radiance.
+     */
+    HOST_DEVICE_INLINE_QUALIFIER static void _reservoirUpdateGI(
+        FloatC sample_weight,
+        const RVec3f& bounce_direction,
+        const RVec3f& bounce_hit_position,
+        const RVec3f& bounce_hit_normal,
+        const RColor3f& l_incoming,
+        FloatC target_pdf,
+        device::RS_RandomState& rs_in_out,
+        RS_ReservoirGI& reservoir_in_out
+    ) {
+        reservoir_in_out.sample_count = reservoir_in_out.sample_count + 1;
+        reservoir_in_out.weight_sum = float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
+        FloatC rand_u = rs_in_out.template rand<FloatC>();
+        if (rand_u * FloatC(reservoir_in_out.weight_sum) < sample_weight) {
+            reservoir_in_out.bounce_direction = bounce_direction;
+            reservoir_in_out.bounce_hit_position = bounce_hit_position;
+            reservoir_in_out.bounce_hit_normal = bounce_hit_normal;
+            reservoir_in_out.l_incoming = l_incoming;
+            reservoir_in_out.target_pdf = float(target_pdf);
+        }
+    }
+
+    /*****************************************************************
+     * Light traversal
+     *****************************************************************/
+
+    //----------------------------------------------------------------
+    // 0. Pure geometry and color
+    //----------------------------------------------------------------
+
     /**
      * @brief Count voxel cube faces front-facing toward a receiver and return
      *        their total area. Front-facing iff the receiver lies outside the
@@ -3211,123 +3356,93 @@ class RS_VisionRayCompute {
     }
 
     /**
-     * @brief Bitterli weighted-reservoir-sampling streaming update. Carries
-     *        a candidate transmission so spatial-reuse merges adopt the
-     *        winning neighbor's shadow walk without a fresh trace.
+     * @brief Offsets a bin lookup within one cell, so cell edges do not show.
      */
-    HOST_DEVICE_INLINE_QUALIFIER static void _reservoirUpdateDI(
-        FloatC sample_weight,
-        RIndex light_index,
-        const RVec3f& light_position,
-        const RColor3f& transmission,
-        FloatC target_pdf,
-        device::RS_RandomState& rs_in_out,
-        RS_ReservoirDI& reservoir_in_out
-    ) {
-        reservoir_in_out.sample_count = reservoir_in_out.sample_count + 1;
-        reservoir_in_out.weight_sum = float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
-        FloatC rand_u = rs_in_out.template rand<FloatC>();
-        if (rand_u * FloatC(reservoir_in_out.weight_sum) < sample_weight) {
-            reservoir_in_out.light_index = light_index;
-            reservoir_in_out.light_position = light_position;
-            reservoir_in_out.transmission = transmission;
-            reservoir_in_out.target_pdf = float(target_pdf);
-        }
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C
+    _jitterLightBinProbePosition(const Vec3C& position, float cell_size) {
+        // Taken from the point rather than drawn, so the pick and every pdf that
+        // has to match it agree on a millimetre lattice without carrying it along.
+        constexpr FloatC LATTICE_PER_METER = FloatC(1024);
+        constexpr FloatC UINT_TO_UNIT = FloatC(1.0 / 4294967296.0);
+        uint32_t hash = device::hash0(uint32_t(RSignedIndex(position.x * LATTICE_PER_METER)));
+        hash = device::hash0(hash ^ uint32_t(RSignedIndex(position.y * LATTICE_PER_METER)));
+        hash = device::hash0(hash ^ uint32_t(RSignedIndex(position.z * LATTICE_PER_METER)));
+
+        FloatC offset_x = FloatC(hash) * UINT_TO_UNIT - FloatC(0.5);
+        hash = device::hash0(hash);
+        FloatC offset_y = FloatC(hash) * UINT_TO_UNIT - FloatC(0.5);
+        hash = device::hash0(hash);
+        FloatC offset_z = FloatC(hash) * UINT_TO_UNIT - FloatC(0.5);
+        return position + Vec3C(offset_x, offset_y, offset_z) * FloatC(cell_size);
     }
 
-    /**
-     * @brief Bitterli WRS streaming update on a GI reservoir. Survives the
-     *        bounce direction, bounce-ray hit, and gathered radiance.
-     */
-    HOST_DEVICE_INLINE_QUALIFIER static void _reservoirUpdateGI(
-        FloatC sample_weight,
-        const RVec3f& bounce_direction,
-        const RVec3f& bounce_hit_position,
-        const RVec3f& bounce_hit_normal,
-        const RColor3f& l_incoming,
-        FloatC target_pdf,
-        device::RS_RandomState& rs_in_out,
-        RS_ReservoirGI& reservoir_in_out
-    ) {
-        reservoir_in_out.sample_count = reservoir_in_out.sample_count + 1;
-        reservoir_in_out.weight_sum = float(FloatC(reservoir_in_out.weight_sum) + sample_weight);
-        FloatC rand_u = rs_in_out.template rand<FloatC>();
-        if (rand_u * FloatC(reservoir_in_out.weight_sum) < sample_weight) {
-            reservoir_in_out.bounce_direction = bounce_direction;
-            reservoir_in_out.bounce_hit_position = bounce_hit_position;
-            reservoir_in_out.bounce_hit_normal = bounce_hit_normal;
-            reservoir_in_out.l_incoming = l_incoming;
-            reservoir_in_out.target_pdf = float(target_pdf);
-        }
-    }
+    //----------------------------------------------------------------
+    // 1. Reading one light out of the world
+    //----------------------------------------------------------------
 
     /**
-     * @brief CDF-pick a light index proportional to `light_weight`. Returns
-     *        the smallest `i` with `light_cdf[i] >= u * light_cdf.back()`
-     *        via inclusive-CDF binary search.
+     * @brief The irradiance the sun delivers, in the units the split needs.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static RIndex _sampleLight(Kernel* k, FloatC u) {
-        auto& ctx = k->ctx;
-        RSize n = ctx.light_cdf.size();
-        if (n == 0) return RIndex(0);
-        FloatC total = FloatC(ctx.light_cdf[n - 1]);
-        if (total <= FloatC(0)) return RIndex(0);
-        FloatC target = u * total;
-        RSize lo = 0;
-        RSize hi = n;
-        while (lo < hi) {
-            RSize mid = (lo + hi) >> 1;
-            if (FloatC(ctx.light_cdf[mid]) < target) {
-                lo = mid + 1;
-            } else {
-                hi = mid;
-            }
-        }
-        if (lo >= n) lo = n - 1;
-        return RIndex(lo);
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalSunLightIrradiance(Kernel* k) {
+        const auto& cb = k->ctx.cosmic_background_vision_mem;
+        return FloatC(cb.sun_color.luminance()) * FloatC(cb.sun_irradiance);
     }
 
     /**
-     * @brief Probability of drawing `light_index` from the source CDF.
+     * @brief Light selection weight of one emissive voxel.
+     *
+     * @details The luminance of the emitted radiance times the cube's mean
+     *          projected area, so a pick is proportional to the light a receiver
+     *          in a random direction would get. Raw `emission_radiance` is not a
+     *          usable weight: it ignores both the emission color and the voxel
+     *          size, so a dim 2 cm voxel and a bright 10 cm one at the same
+     *          radiance draw equal shares despite 25x the area.
+     *
+     *          The emission texture is sampled at uv zero rather than averaged,
+     *          which is exact for the constant textures the material system
+     *          builds and an approximation for a grid texture.
+     *
+     *          Shared by the bin fill and `_evalVoxelLightPickProbability`, so
+     *          the pdf the MIS partner sees can never drift from the
+     *          distribution sampled.
+     *
+     * @param k      simulation kernel.
+     * @param voxel  handle of the emissive voxel.
+     * @return The unnormalized selection weight; zero for a non-emitting voxel.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC _lightSourcePdf(Kernel* k, RIndex light_index) {
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalVoxelLightIrradiance(Kernel* k, RHandle voxel) {
         auto& ctx = k->ctx;
-        RSize n = ctx.light_cdf.size();
-        if (n == 0 || RSize(light_index) >= n) return FloatC(0);
-        FloatC total = FloatC(ctx.light_cdf[n - 1]);
-        if (total <= FloatC(0)) return FloatC(0);
-        FloatC weight = FloatC(ctx.light_weight[RSize(light_index)]);
-        return weight / total;
-    }
-
-    /**
-     * @brief Resolve an emissive-voxel light index into its world center, cube
-     *        edge, and surface radiance L = chromaticity * intensity (W/m^2/sr).
-     *        Caller does the per-shading-point area sampling.
-     */
-    template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static void _readVoxelLight(
-        Kernel* k,
-        RIndex light_index,
-        Vec3C& position_out,
-        FloatC& voxel_size_out,
-        Vec3C& emission_out
-    ) {
-        auto& ctx = k->ctx;
-        RHandle voxel = ctx.structure_emissive_voxel_handles[light_index - 1];
-        position_out = Vec3C(V_G(voxel, position));
         RHandle vision_material = V_G(voxel, vision_material);
         RS_VisionMaterialStateUnion mat_state{VSM_G(vision_material, state)};
         Vec3C emission_color;
         _resolveEmissionColor(
             k, vision_material, mat_state, Vec2C::zero(), Vec2C::zero(), emission_color
         );
-        FloatC intensity = FloatC(VSM_G(vision_material, emission_intensity));
-        emission_out = emission_color * intensity;
+        FloatC radiance = FloatC(VSM_G(vision_material, emission_radiance));
         RHandle voxel_material = V_G(voxel, voxel_material);
-        voxel_size_out = FloatC(VM_G(voxel_material, voxel_size));
+        FloatC voxel_size = FloatC(VM_G(voxel_material, voxel_size));
+        return _luminance(emission_color) * radiance * VOXEL_MEAN_PROJECTED_AREA_RATIO *
+               voxel_size * voxel_size;
+    }
+
+    /**
+     * @brief Summed weight of the cells reachable from a shading point.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC
+    _evalProbedVoxelLightsIrradiance(Kernel* k, const Vec3C& position) {
+        auto& ctx = k->ctx;
+        float cell_size = float(k->vision_light_bin_cell_size);
+        Vec3C probe_position = _jitterLightBinProbePosition(position, cell_size);
+        return FloatC(
+            (k->vision_light_bin_probe_num <= 1)
+                ? ctx.light_bin.template evalProbedTotalWeight<1, FloatC>(probe_position, cell_size)
+                : ctx.light_bin.template evalProbedTotalWeight<RS_LightBin::MaxProbeNum, FloatC>(
+                      probe_position, cell_size
+                  )
+        );
     }
 
     /**
@@ -3337,7 +3452,7 @@ class RS_VisionRayCompute {
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static Vec3C
-    _sampleSunConeDirection(Kernel* k, device::RS_RandomState& rs_in_out) {
+    _sampleSunLightDirection(Kernel* k, device::RS_RandomState& rs_in_out) {
         Vec3C sun_dir = Vec3C(k->ctx.cosmic_background_vision_mem.sun_direction);
         FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
         FloatC cos_half = RS_FI::rs_cos(half_angle);
@@ -3357,6 +3472,180 @@ class RS_VisionRayCompute {
     }
 
     /**
+     * @brief Resolve an emissive voxel into its world center, cube edge, and
+     *        surface radiance L = chromaticity * emission_radiance (W/m^2/sr).
+     *        Caller does the per-shading-point area sampling.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static void _getVoxelLightProperties(
+        Kernel* k,
+        RHandle voxel,
+        Vec3C& position_out,
+        FloatC& voxel_size_out,
+        Vec3C& emission_out
+    ) {
+        auto& ctx = k->ctx;
+        position_out = Vec3C(V_G(voxel, position));
+        RHandle vision_material = V_G(voxel, vision_material);
+        RS_VisionMaterialStateUnion mat_state{VSM_G(vision_material, state)};
+        Vec3C emission_color;
+        _resolveEmissionColor(
+            k, vision_material, mat_state, Vec2C::zero(), Vec2C::zero(), emission_color
+        );
+        FloatC radiance = FloatC(VSM_G(vision_material, emission_radiance));
+        emission_out = emission_color * radiance;
+        RHandle voxel_material = V_G(voxel, voxel_material);
+        voxel_size_out = FloatC(VM_G(voxel_material, voxel_size));
+    }
+
+    //----------------------------------------------------------------
+    // 2. Which light
+    //----------------------------------------------------------------
+
+    /**
+     * @brief Share of the next event pick the sun takes at this shading point.
+     *
+     * @details Derived rather than configured. A voxel's bin weight is a
+     *          radiance times an area, so dividing the probed total by the cell
+     *          area turns it into the irradiance those lights deliver from about
+     *          one cell away, which is comparable with the sun's.
+     *
+     *          It is deliberately the local probed total and never the world
+     *          total. Weighing against the world would let lights added in a
+     *          distant room starve the sun, which is exactly the fault that gave
+     *          the sun 0.12% of picks and an 861x estimator scale.
+     *
+     *          Doubles as the two way split ratio, since the voxels take
+     *          `1 - it`.
+     *
+     * @param k                  simulation kernel.
+     * @param probed_irradiance  what every voxel this point can reach delivers.
+     * @return The sun's pick probability, in [0, 1].
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC
+    _evalSunLightPickProbability(Kernel* k, FloatC probed_irradiance) {
+        FloatC sun_irradiance = _evalSunLightIrradiance(k);
+        if (sun_irradiance <= FloatC(0)) return FloatC(0);
+        if (!(probed_irradiance > FloatC(0))) return FloatC(1);
+        FloatC cell_size = FloatC(k->vision_light_bin_cell_size);
+        FloatC voxel_irradiance = probed_irradiance / (cell_size * cell_size);
+        return sun_irradiance / (sun_irradiance + voxel_irradiance);
+    }
+
+    /**
+     * @brief Probability that `_sampleLight` would have picked `voxel` from this
+     *        shading point.
+     *
+     * @details Keyed by handle rather than light index, because a brdf ray that
+     *          lands on an emitter already holds the handle. Taking the index
+     *          instead would mean searching the light list for it and then
+     *          reading the same handle straight back out.
+     *
+     * @param k                  simulation kernel.
+     * @param voxel              handle of the emissive voxel being tested.
+     * @param position           world-space shading point the pick was made from.
+     * @param probed_irradiance  what the cells `position` draws from deliver,
+     *                           carried from the pick so the bin is read once.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalVoxelLightPickProbability(
+        Kernel* k,
+        RHandle voxel,
+        const Vec3C& position,
+        FloatC probed_irradiance
+    ) {
+        auto& ctx = k->ctx;
+        if (voxel == RS_NULL_HANDLE || ctx.light_bin.getLightNum() == 0) return FloatC(0);
+
+        Vec3C light_position = Vec3C(V_G(voxel, position));
+        FloatC weight = _evalVoxelLightIrradiance(k, voxel);
+        float cell_size = float(k->vision_light_bin_cell_size);
+        Vec3C probe_position = _jitterLightBinProbePosition(position, cell_size);
+        FloatC bin_pdf =
+            (k->vision_light_bin_probe_num <= 1)
+                ? ctx.light_bin.template evalLightPdf<1, FloatC>(
+                      light_position, probe_position, cell_size, weight, probed_irradiance
+                  )
+                : ctx.light_bin.template evalLightPdf<RS_LightBin::MaxProbeNum, FloatC>(
+                      light_position, probe_position, cell_size, weight, probed_irradiance
+                  );
+        if (!(bin_pdf > FloatC(0))) return FloatC(0);
+
+        FloatC sun_probability = _evalSunLightPickProbability(k, probed_irradiance);
+        return (FloatC(1) - sun_probability) * bin_pdf;
+    }
+
+    /**
+     * @brief Pick one light for a shading point, and report its probability.
+     *
+     * @details Two stages. The sun against the voxels is split by the local
+     *          irradiance each delivers, then which voxel comes from the bin,
+     *          which offers only the lights near this point. A world cdf hands a
+     *          pixel in one room the same distribution as a pixel three rooms
+     *          away.
+     *
+     * @param k                      simulation kernel.
+     * @param u_sun                  uniform sample in [0, 1) deciding sun or voxel.
+     * @param u_voxel                uniform sample in [0, 1) choosing the voxel.
+     * @param position               world-space shading point.
+     * @param voxel_out              the emissive voxel picked, null for the sun.
+     * @param pick_probability_out   probability the returned light was picked.
+     * @param probed_irradiance_out  what the cells this point draws from
+     *                               deliver. Every pdf for this vertex needs it,
+     *                               and the pick already computed it, so it
+     *                               leaves here rather than being read off the
+     *                               bin a second time. Set even when no light is
+     *                               picked, since the caller still needs it.
+     * @return True when a light was picked.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static bool _sampleLight(
+        Kernel* k,
+        FloatC u_sun,
+        FloatC u_voxel,
+        const Vec3C& position,
+        RHandle& voxel_out,
+        FloatC& pick_probability_out,
+        FloatC& probed_irradiance_out
+    ) {
+        auto& ctx = k->ctx;
+        voxel_out = RS_NULL_HANDLE;
+        pick_probability_out = FloatC(0);
+        probed_irradiance_out = FloatC(0);
+
+        // One scan. The bin picks a candidate voxel and reports the light this
+        // point can reach, and that same total decides the sun's share.
+        float cell_size = float(k->vision_light_bin_cell_size);
+        Vec3C probe_position = _jitterLightBinProbePosition(position, cell_size);
+        FloatC bin_pdf = FloatC(0);
+        float probed_irradiance = 0.0f;
+        RS_LightBinObjectIdentifier light =
+            (k->vision_light_bin_probe_num <= 1)
+                ? ctx.light_bin.template sampleLight<1, FloatC>(
+                      probe_position, cell_size, u_voxel, bin_pdf, probed_irradiance
+                  )
+                : ctx.light_bin.template sampleLight<RS_LightBin::MaxProbeNum, FloatC>(
+                      probe_position, cell_size, u_voxel, bin_pdf, probed_irradiance
+                  );
+
+        probed_irradiance_out = FloatC(probed_irradiance);
+        FloatC sun_probability = _evalSunLightPickProbability(k, FloatC(probed_irradiance));
+        if (u_sun < sun_probability) {
+            pick_probability_out = sun_probability;
+            return true;
+        }
+        if (light.voxel == RS_NULL_HANDLE || !(bin_pdf > FloatC(0))) return false;
+        voxel_out = light.voxel;
+        pick_probability_out = (FloatC(1) - sun_probability) * bin_pdf;
+        return true;
+    }
+
+    //----------------------------------------------------------------
+    // 3. Where on the light
+    //----------------------------------------------------------------
+
+    /**
      * @brief Fresh light sample at `hit_pos`. Sun cone-samples a direction;
      *        voxel uniformly picks one of the 1-3 front-facing cube faces and
      *        then a uniform 2D point on it. Uniform face pick is a lofi /
@@ -3367,17 +3656,18 @@ class RS_VisionRayCompute {
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static LightSample _sampleLightSample(
         Kernel* k,
-        RIndex light_index,
+        RHandle voxel,
         const Vec3C& hit_pos,
         device::RS_RandomState& rs_in_out
     ) {
         LightSample ls;
-        if (light_index == RS_VISION_SUN_LIGHT_INDEX) {
-            Vec3C sun_dir = _sampleSunConeDirection(k, rs_in_out);
+        if (voxel == RS_NULL_HANDLE) {
+            Vec3C sun_dir = _sampleSunLightDirection(k, rs_in_out);
             ls.dir = sun_dir;
             ls.dist = FloatC(RS_MAX_FLOAT);
             ls.position = Vec3C::zero();
-            ls.emission = Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D());
+            ls.emission = Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D()) *
+                          FloatC(k->ctx.cosmic_background_vision_mem.sun_irradiance);
             ls.cos_emit = FloatC(1);
             ls.area_visible = FloatC(1);
             ls.is_sun = true;
@@ -3385,7 +3675,7 @@ class RS_VisionRayCompute {
         }
         Vec3C voxel_center, voxel_emission;
         FloatC voxel_size;
-        _readVoxelLight(k, light_index, voxel_center, voxel_size, voxel_emission);
+        _getVoxelLightProperties(k, voxel, voxel_center, voxel_size, voxel_emission);
 
         int n_front;
         FloatC area_visible;
@@ -3476,16 +3766,17 @@ class RS_VisionRayCompute {
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static LightSample _evalStoredLightSample(
         Kernel* k,
-        RIndex light_index,
+        RHandle voxel,
         const Vec3C& hit_pos,
         const RVec3f& stored_position
     ) {
         LightSample ls;
-        if (light_index == RS_VISION_SUN_LIGHT_INDEX) {
+        if (voxel == RS_NULL_HANDLE) {
             ls.dir = Vec3C(k->ctx.cosmic_background_vision_mem.sun_direction);
             ls.dist = FloatC(RS_MAX_FLOAT);
             ls.position = Vec3C::zero();
-            ls.emission = Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D());
+            ls.emission = Vec3C(k->ctx.cosmic_background_vision_mem.sun_color.toVec3D()) *
+                          FloatC(k->ctx.cosmic_background_vision_mem.sun_irradiance);
             ls.cos_emit = FloatC(1);
             ls.area_visible = FloatC(1);
             ls.is_sun = true;
@@ -3493,7 +3784,7 @@ class RS_VisionRayCompute {
         }
         Vec3C voxel_center, voxel_emission;
         FloatC voxel_size;
-        _readVoxelLight(k, light_index, voxel_center, voxel_size, voxel_emission);
+        _getVoxelLightProperties(k, voxel, voxel_center, voxel_size, voxel_emission);
 
         Vec3C sample_point = Vec3C(stored_position);
         Vec3C face_normal = _voxelFaceNormalFromPoint(sample_point, voxel_center);
@@ -3514,44 +3805,87 @@ class RS_VisionRayCompute {
         return ls;
     }
 
+    //----------------------------------------------------------------
+    // 4. Solid angle pdfs
+    //----------------------------------------------------------------
+
+    /**
+     * @brief NEE solid-angle pdf of the sample `ls` conditional on its
+     *        light being picked. Sun: `p_pick_sun / Omega_disc` inside
+     *        the cone, zero outside. Voxel area-sample: convert the surface
+     *        pdf `1 / area_visible` to a solid-angle pdf via `dist^2 / cos_emit`
+     *        — this is finite, so MIS against the BRDF lobe does real work
+     *        instead of always returning 1.
+     *
+     * @param k                  simulation kernel.
+     * @param voxel              the emissive voxel picked, null for the sun.
+     * @param ls                 the light sample whose pdf is wanted.
+     * @param hit_position       world-space shading point it was drawn from.
+     * @param probed_irradiance  what the cells `hit_position` draws from
+     *                           deliver, carried from the pick.
+     */
+    template <typename Kernel>
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalLightSampleNeePdf(
+        Kernel* k,
+        RHandle voxel,
+        const LightSample& ls,
+        const Vec3C& hit_position,
+        FloatC probed_irradiance
+    ) {
+        if (voxel == RS_NULL_HANDLE) {
+            return _evalSunLightDirectionNeePdf(k, ls.dir, probed_irradiance);
+        }
+        if (ls.area_visible <= FloatC(0) || ls.cos_emit <= FloatC(0)) return FloatC(0);
+        FloatC pick = _evalVoxelLightPickProbability(k, voxel, hit_position, probed_irradiance);
+        return pick * ls.dist * ls.dist / (ls.area_visible * ls.cos_emit);
+    }
+
     /**
      * @brief NEE solid-angle pdf for the sun pick at `dir`: returns
      *        `p_pick_sun / omega_sun_cone` inside the cone, zero outside.
+     *
+     * @param k                  simulation kernel.
+     * @param dir                world-space direction tested against the cone.
+     * @param probed_irradiance  what the cells the shading point that cast this
+     *                           ray draws from deliver. The sun's share is
+     *                           local, so it must come from that point.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalNeePdfSun(Kernel* k, const Vec3C& dir) {
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC
+    _evalSunLightDirectionNeePdf(Kernel* k, const Vec3C& dir, FloatC probed_irradiance) {
         if (!_isInCosmicBackgroundSunCone(k, dir)) return FloatC(0);
-        FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
-        FloatC cos_half = RS_FI::rs_cos(half_angle);
-        FloatC one_minus_cos = FloatC(1) - cos_half;
-        if (one_minus_cos <= FloatC(RS_EPS)) return FloatC(0);
-        FloatC pick = _lightSourcePdf(k, RS_VISION_SUN_LIGHT_INDEX);
-        FloatC omega = FloatC(2) * FloatC(RS_PI) * one_minus_cos;
-        return pick / omega;
+        FloatC solid_angle = _evalCosmicBackgroundSunSolidAngle(k);
+        if (solid_angle <= FloatC(RS_EPS)) return FloatC(0);
+        FloatC pick = _evalSunLightPickProbability(k, probed_irradiance);
+        return pick / solid_angle;
     }
 
     /**
      * @brief NEE solid-angle pdf for the specific voxel `bounce_hit_voxel`
-     *        as seen from `hit_position`. Returns zero when the voxel is not
-     *        in the emissive light list or geometrically unreachable.
+     *        as seen from `hit_position`. Returns zero when the voxel emits
+     *        nothing, sits in a cell this point cannot reach, or is turned away.
+     *
+     * @param k                  simulation kernel.
+     * @param hit_position       world-space point the bounce ray started from.
+     * @param dir                world-space direction of the bounce ray.
+     * @param bounce_hit_voxel   the emissive voxel the bounce ray landed on.
+     * @param probed_irradiance  what the cells `hit_position` draws from
+     *                           deliver, carried from the pick made there.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalNeePdfVoxel(
+    HOST_DEVICE_INLINE_QUALIFIER static FloatC _evalVoxelLightDirectionNeePdf(
         Kernel* k,
         const Vec3C& hit_position,
         const Vec3C& dir,
-        RHandle bounce_hit_voxel
+        RHandle bounce_hit_voxel,
+        FloatC probed_irradiance
     ) {
         if (bounce_hit_voxel == RS_NULL_HANDLE) return FloatC(0);
-        auto& ctx = k->ctx;
-        if (ctx.light_cdf.size() == 0) return FloatC(0);
-        FloatC total = FloatC(ctx.light_cdf[ctx.light_cdf.size() - 1]);
-        if (total <= FloatC(0)) return FloatC(0);
 
-        RHandle vision_material = V_G(bounce_hit_voxel, vision_material);
-        FloatC weight_v = FloatC(VSM_G(vision_material, emission_intensity));
-        if (weight_v <= FloatC(0)) return FloatC(0);
-        FloatC p_pick = weight_v / total;
+        auto& ctx = k->ctx;
+        FloatC p_pick =
+            _evalVoxelLightPickProbability(k, bounce_hit_voxel, hit_position, probed_irradiance);
+        if (p_pick <= FloatC(0)) return FloatC(0);
 
         Vec3C voxel_center = Vec3C(V_G(bounce_hit_voxel, position));
         RHandle voxel_material = V_G(bounce_hit_voxel, voxel_material);
@@ -3581,31 +3915,9 @@ class RS_VisionRayCompute {
         return p_pick * d * d / (area_visible * cos_emit);
     }
 
-    /**
-     * @brief NEE solid-angle pdf of the sample `ls` conditional on its
-     *        `light_index` being picked. Sun: `p_pick_sun / Omega_disc` inside
-     *        the cone, zero outside. Voxel area-sample: convert the surface
-     *        pdf `1 / area_visible` to a solid-angle pdf via `dist^2 / cos_emit`
-     *        — this is finite, so MIS against the BRDF lobe does real work
-     *        instead of always returning 1.
-     */
-    template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static FloatC
-    _evalNeePdf(Kernel* k, RIndex light_index, const LightSample& ls) {
-        if (light_index == RS_VISION_SUN_LIGHT_INDEX) {
-            if (!_isInCosmicBackgroundSunCone(k, ls.dir)) return FloatC(0);
-            FloatC half_angle = FloatC(k->ctx.cosmic_background_vision_mem.sun_angular_radius);
-            FloatC cos_half = RS_FI::rs_cos(half_angle);
-            FloatC one_minus_cos = FloatC(1) - cos_half;
-            if (one_minus_cos <= FloatC(RS_EPS)) return FloatC(0);
-            FloatC pick = _lightSourcePdf(k, RS_VISION_SUN_LIGHT_INDEX);
-            FloatC omega = FloatC(2) * FloatC(RS_PI) * one_minus_cos;
-            return pick / omega;
-        }
-        if (ls.area_visible <= FloatC(0) || ls.cos_emit <= FloatC(0)) return FloatC(0);
-        FloatC pick = _lightSourcePdf(k, light_index);
-        return pick * ls.dist * ls.dist / (ls.area_visible * ls.cos_emit);
-    }
+    //----------------------------------------------------------------
+    // 5. Visibility
+    //----------------------------------------------------------------
 
     /**
      * @brief Marches `_findHit` along the ray, multiplying the running transmission
@@ -3614,7 +3926,7 @@ class RS_VisionRayCompute {
      *        `SHADOW_EPS`. Returns the surviving per-channel transmission.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static RColor3f _shadowWalkWithTransmission(
+    HOST_DEVICE_INLINE_QUALIFIER static RColor3f _findShadowTransmission(
         Kernel* k,
         const Vec3C& origin,
         const Vec3C& dir,
@@ -3651,13 +3963,32 @@ class RS_VisionRayCompute {
         return RColor3f(float(transmission.x), float(transmission.y), float(transmission.z));
     }
 
+    //----------------------------------------------------------------
+    // 6. The estimator
+    //----------------------------------------------------------------
+
     /**
      * @brief One-sample next event estimation at a bounce vertex. Returns the
      *        per-channel radiance contribution; caller scales by throughput
      *        and applies the firefly clamp.
+     *
+     * @param k                       simulation kernel.
+     * @param hit_position            world-space shading point.
+     * @param normal                  surface normal at the shading point.
+     * @param view_dir                direction back towards the viewer.
+     * @param material_type           surface material type.
+     * @param albedo                  surface albedo.
+     * @param metalness               surface metalness.
+     * @param roughness               surface roughness.
+     * @param rs_in_out               random state advanced by the light sample.
+     * @param probed_irradiance_out   what the cells this point draws from
+     *                                deliver, for the caller to hand to the
+     *                                brdf ray MIS pdfs it evaluates from this
+     *                                same vertex. Set on every path, including
+     *                                the ones that contribute nothing.
      */
     template <typename Kernel>
-    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _evalNeeAtBounce(
+    HOST_DEVICE_INLINE_QUALIFIER static Vec3C _evalNeeRadiance(
         Kernel* k,
         const Vec3C& hit_position,
         const Vec3C& normal,
@@ -3666,17 +3997,23 @@ class RS_VisionRayCompute {
         const Vec3C& albedo,
         FloatC metalness,
         FloatC roughness,
-        device::RS_RandomState& rs_in_out
+        device::RS_RandomState& rs_in_out,
+        FloatC& probed_irradiance_out
     ) {
         auto& ctx = k->ctx;
-        if (ctx.light_cdf.size() == 0) return Vec3C::zero();
+        probed_irradiance_out = FloatC(0);
+        if (ctx.light_bin.getLightNum() == 0) return Vec3C::zero();
 
-        FloatC rand_u = rs_in_out.template rand<FloatC>();
-        RIndex light_index = _sampleLight(k, rand_u);
-        FloatC source_pdf = _lightSourcePdf(k, light_index);
-        if (source_pdf <= FloatC(0)) return Vec3C::zero();
+        FloatC rand_sun = rs_in_out.template rand<FloatC>();
+        FloatC rand_voxel = rs_in_out.template rand<FloatC>();
+        FloatC source_pdf;
+        RHandle light_voxel;
+        bool is_light_picked = _sampleLight(
+            k, rand_sun, rand_voxel, hit_position, light_voxel, source_pdf, probed_irradiance_out
+        );
+        if (!is_light_picked || source_pdf <= FloatC(0)) return Vec3C::zero();
 
-        LightSample light_sample = _sampleLightSample(k, light_index, hit_position, rs_in_out);
+        LightSample light_sample = _sampleLightSample(k, light_voxel, hit_position, rs_in_out);
         Vec3C brdf_cos = _brdfCos(
             material_type,
             albedo,
@@ -3693,13 +4030,12 @@ class RS_VisionRayCompute {
 
         FloatC max_distance = light_sample.is_sun ? FloatC(RS_MAX_FLOAT)
                                                   : light_sample.dist - FloatC(RS_EPS);
-        RHandle light_handle = (light_index == RS_VISION_SUN_LIGHT_INDEX)
-                                   ? RS_NULL_HANDLE
-                                   : ctx.structure_emissive_voxel_handles[light_index - 1];
         Vec3C origin = _offsetRayOrigin(hit_position, normal);
         RColor3f transmission =
-            _shadowWalkWithTransmission(k, origin, light_sample.dir, max_distance, light_handle);
-        FloatC p_nee_picked = _evalNeePdf(k, light_index, light_sample);
+            _findShadowTransmission(k, origin, light_sample.dir, max_distance, light_voxel);
+        FloatC p_nee_picked = _evalLightSampleNeePdf(
+            k, light_voxel, light_sample, hit_position, probed_irradiance_out
+        );
         FloatC p_brdf_picked = _brdfPdf(
             material_type,
             albedo,
@@ -3757,6 +4093,9 @@ class RS_VisionRayCompute {
      *                      the spec lobe to a perpendicular reflection.
      * @param path_depth    maximum number of bounces in the path.
      * @param rs_in_out     random state advanced by BRDF samples + NEEs.
+     * @param probed_irradiance  what the cells `p` draws from deliver, from the
+     *                      caller's direct NEE at `p`. Later vertices get their
+     *                      own from the NEE done there.
      * @return indirect radiance summed across depth-2..depth-N bounces.
      */
     template <typename Kernel>
@@ -3769,7 +4108,8 @@ class RS_VisionRayCompute {
         FloatC roughness,
         const Vec3C& incoming_dir,
         RSize path_depth,
-        device::RS_RandomState& rs_in_out
+        device::RS_RandomState& rs_in_out,
+        FloatC probed_irradiance
     ) {
         if (path_depth < RSize(2)) return Vec3C::zero();
 
@@ -3785,6 +4125,11 @@ class RS_VisionRayCompute {
         // Traveling direction of the ray that arrived at the current vertex;
         // updated to the outgoing scatter direction after each bounce.
         Vec3C cur_incoming_dir = incoming_dir;
+
+        // Light the current vertex can reach. The MIS pdfs below all belong to
+        // this vertex, so the value follows the vertex down the path and the bin
+        // is never read twice for the same point.
+        FloatC cur_probed_irradiance = probed_irradiance;
         for (RSize d = RSize(1); d < path_depth; ++d) {
             HitRecord scatter_rec;
             scatter_rec.p = cur_p;
@@ -3824,7 +4169,8 @@ class RS_VisionRayCompute {
                 Vec3C sky = _findHitBackground(k, bounce_dir);
                 Vec3C sun_disk = _evalCosmicBackgroundSunDisk(k, bounce_dir);
                 if (_luminance(sun_disk) > FloatC(0)) {
-                    FloatC p_nee = _evalNeePdfSun(k, bounce_dir);
+                    FloatC p_nee =
+                        _evalSunLightDirectionNeePdf(k, bounce_dir, cur_probed_irradiance);
                     FloatC mis_brdf = _powerHeuristicMIS(brdf_pdf, p_nee);
                     sky = sky + sun_disk * (mis_brdf - FloatC(1));
                 }
@@ -3836,8 +4182,10 @@ class RS_VisionRayCompute {
                 static_cast<RSE_VisionMaterialType>(bhs.vision_material_type);
             if (bounce_mt == RSE_VISION_MATERIAL_EMISSIVE) {
                 // BRDF-into-emissive: MIS against the voxel-pick NEE pdf.
-                Vec3C emission = bounce_rec.albedo * bounce_rec.intensity;
-                FloatC p_nee = _evalNeePdfVoxel(k, cur_p, bounce_dir, bounce_rec.voxel);
+                Vec3C emission = bounce_rec.albedo * bounce_rec.emission_radiance;
+                FloatC p_nee = _evalVoxelLightDirectionNeePdf(
+                    k, cur_p, bounce_dir, bounce_rec.voxel, cur_probed_irradiance
+                );
                 FloatC mis_brdf = p_nee > FloatC(0) ? _powerHeuristicMIS(brdf_pdf, p_nee)
                                                     : FloatC(1);
                 indirect = indirect + throughput.elemMul(emission * mis_brdf);
@@ -3848,9 +4196,10 @@ class RS_VisionRayCompute {
                 break;
             }
 
-            // NEE at this opaque vertex contributes for the current depth.
+            // NEE at this opaque vertex contributes for the current depth, and
+            // hands over the light reachable there for the next iteration's MIS.
             if (k->vision_restir_gi_is_bounce_nee_enabled) {
-                Vec3C nee = _evalNeeAtBounce(
+                Vec3C nee = _evalNeeRadiance(
                     k,
                     bounce_rec.p,
                     bounce_rec.normal,
@@ -3859,9 +4208,12 @@ class RS_VisionRayCompute {
                     bounce_rec.albedo,
                     bounce_rec.metalness,
                     bounce_rec.roughness,
-                    rs_in_out
+                    rs_in_out,
+                    cur_probed_irradiance
                 );
                 indirect = indirect + throughput.elemMul(nee);
+            } else {
+                cur_probed_irradiance = _evalProbedVoxelLightsIrradiance(k, bounce_rec.p);
             }
 
             // Advance the path; loop continues for deeper bounces.
@@ -3962,13 +4314,15 @@ class RS_VisionRayCompute {
                 static_cast<RSE_VisionMaterialType>(shs.vision_material_type);
 
             if (smt == RSE_VISION_MATERIAL_EMISSIVE) {
-                Vec3C emission = sub_rec.albedo * sub_rec.intensity;
+                Vec3C emission = sub_rec.albedo * sub_rec.emission_radiance;
                 return sub_throughput.elemMul(emission) * F;
             }
 
             if (!_isSpecularSurface(smt, sub_rec.roughness, sub_rec.metalness)) {
                 Vec3C view_dir = -cur_ray.ray_direction.normalized();
-                Vec3C nee = _evalNeeAtBounce(
+                // The chain ends here, so nothing downstream wants the value.
+                FloatC endpoint_probed_irradiance = FloatC(0);
+                Vec3C nee = _evalNeeRadiance(
                     k,
                     sub_rec.p,
                     sub_rec.normal,
@@ -3977,7 +4331,8 @@ class RS_VisionRayCompute {
                     sub_rec.albedo,
                     sub_rec.metalness,
                     sub_rec.roughness,
-                    rs_in_out
+                    rs_in_out,
+                    endpoint_probed_irradiance
                 );
                 return sub_throughput.elemMul(nee) * F;
             }
@@ -4052,9 +4407,10 @@ class RS_VisionRayCompute {
     ) {
         if (reservoir.sample_count == 0) return Vec3C::zero();
         if (FloatC(reservoir.target_pdf) <= FloatC(RS_EPS)) return Vec3C::zero();
+        if (!_isReservoirLightAlive(k, reservoir)) return Vec3C::zero();
 
         LightSample light_sample = _evalStoredLightSample(
-            k, reservoir.light_index, hit_position, reservoir.light_position
+            k, reservoir.light_voxel, hit_position, reservoir.light_position
         );
         Vec3C brdf_cos = _brdfCos(
             material_type,
@@ -4083,7 +4439,14 @@ class RS_VisionRayCompute {
         if (target_pdf_at_read <= FloatC(RS_EPS)) return Vec3C::zero();
         FloatC restir_weight =
             FloatC(reservoir.weight_sum) / (FloatC(reservoir.sample_count) * target_pdf_at_read);
-        FloatC p_nee_survivor = _evalNeePdf(k, reservoir.light_index, light_sample);
+        // No pick was made here, so the reservoir read pays for its own scan.
+        FloatC p_nee_survivor = _evalLightSampleNeePdf(
+            k,
+            reservoir.light_voxel,
+            light_sample,
+            hit_position,
+            _evalProbedVoxelLightsIrradiance(k, hit_position)
+        );
         FloatC p_brdf_survivor = _brdfPdf(
             material_type,
             albedo,
@@ -4145,8 +4508,15 @@ class RS_VisionRayCompute {
 
     /**
      * @brief Basic path-tracer one-depth-step shader. No reservoir read; one
-     *        NEE sample per opaque bounce vertex via `_evalNeeAtBounce`. Used
+     *        NEE sample per opaque bounce vertex via `_evalNeeRadiance`. Used
      *        when `vision_is_restir_enabled == false`.
+     *
+     * @details `last_bounce_probed_irradiance_in_out` carries the light
+     *          reachable from the vertex that cast the current ray, which the
+     *          sun disc MIS on a sky miss needs. Only an opaque vertex writes
+     *          it, and only an opaque vertex leaves a non delta brdf pdf behind,
+     *          so the value always belongs to the vertex the MIS branch asks
+     *          about.
      */
     template <typename Kernel>
     HOST_DEVICE_INLINE_QUALIFIER static void _shadeRGBOnceBasic(
@@ -4159,6 +4529,7 @@ class RS_VisionRayCompute {
         Vec3C& throughput_in_out,
         FloatC& current_medium_in_out,
         FloatC& last_bounce_brdf_pdf_in_out,
+        FloatC& last_bounce_probed_irradiance_in_out,
         Vec3C& contribution_out,
         bool& is_continue_out
     ) {
@@ -4174,7 +4545,8 @@ class RS_VisionRayCompute {
             if (last_bounce_brdf_pdf_in_out < MIS_DELTA_BRDF_PDF) {
                 Vec3C sun_disk = _evalCosmicBackgroundSunDisk(k, dir);
                 if (_luminance(sun_disk) > FloatC(0)) {
-                    FloatC p_nee = _evalNeePdfSun(k, dir);
+                    FloatC p_nee =
+                        _evalSunLightDirectionNeePdf(k, dir, last_bounce_probed_irradiance_in_out);
                     FloatC mis_brdf = _powerHeuristicMIS(last_bounce_brdf_pdf_in_out, p_nee);
                     sky = sky + sun_disk * (mis_brdf - FloatC(1));
                 }
@@ -4190,7 +4562,7 @@ class RS_VisionRayCompute {
 
         if (material_type == RSE_VISION_MATERIAL_OPAQUE) {
             Vec3C view_dir = -current_ray_in_out.ray_direction;
-            Vec3C nee = _evalNeeAtBounce(
+            Vec3C nee = _evalNeeRadiance(
                 k,
                 rec_in_out.p,
                 rec_in_out.normal,
@@ -4199,7 +4571,8 @@ class RS_VisionRayCompute {
                 rec_in_out.albedo,
                 rec_in_out.metalness,
                 rec_in_out.roughness,
-                rs_in_out
+                rs_in_out,
+                last_bounce_probed_irradiance_in_out
             );
             if (_luminance(nee) > FloatC(0)) {
                 contribution_out =
@@ -4209,7 +4582,9 @@ class RS_VisionRayCompute {
 
         if (material_type == RSE_VISION_MATERIAL_EMISSIVE) {
             contribution_out = _fireflyClamp(
-                k, throughput_in_out.elemMul(rec_in_out.albedo * rec_in_out.intensity), depth
+                k,
+                throughput_in_out.elemMul(rec_in_out.albedo * rec_in_out.emission_radiance),
+                depth
             );
             continue_tracing = false;
         } else if (material_type == RSE_VISION_MATERIAL_TRANSPARENT) {
@@ -4383,8 +4758,9 @@ class RS_VisionRayCompute {
 
         if (terminal_type == RSE_VISION_RESTIR_CHAIN_TERMINAL_EMISSIVE) {
             Vec3C albedo = Vec3C(ctx.camera_aux_endpoint_albedo[camera][{ii, jj}]);
-            FloatC intensity = FloatC(ctx.camera_aux_endpoint_intensity[camera][{ii, jj}]);
-            contribution_out = throughput.elemMul(albedo * intensity);
+            FloatC emission_radiance =
+                FloatC(ctx.camera_aux_endpoint_emission_radiance[camera][{ii, jj}]);
+            contribution_out = throughput.elemMul(albedo * emission_radiance);
             return;
         }
 

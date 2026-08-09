@@ -183,8 +183,8 @@ class RSC_MaterialOpticalPropertySimpleMicrofacet : public RSC_MaterialOpticalPr
     /// Emission color. Name of a texture resource.
     std::string emission_texture_reference;
 
-    /// Emission intensity (0 = no emission); emitted radiance is the emission color scaled by this.
-    RFloat emission_intensity = 0;
+    /// Radiance the surface emits, scaling the emission color; 0 does not emit (unit: W/(m^2*sr)).
+    RFloat emission_radiance = 0;
 
     bool operator==(const RSC_MaterialOpticalPropertySimpleMicrofacet& other) const;
 

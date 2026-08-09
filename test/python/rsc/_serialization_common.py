@@ -70,7 +70,7 @@ def rich_world():
         ray_directions=[rs.RVec3rf(1.0, 0.0, 0.0), rs.RVec3rf(0.0, 1.0, 0.0), rs.RVec3rf(0.0, 0.0, 1.0)],
         max_range=50.0,
     )
-    sky = rsc.entity.CosmicBackgroundUniform("sky", intensity=0.8)
+    sky = rsc.entity.CosmicBackgroundUniform("sky", radiance=0.8)
     simulation = rsc.simulation.Simulation(
         seed=11,
         vision=rsc.simulation.Vision(

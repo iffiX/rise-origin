@@ -16,6 +16,7 @@
 #include "rise_origin/device/data/rs_sov.h"
 #include "rise_origin/device/data/rs_sparse.h"
 #include "rise_origin/device/data/rs_vector.h"
+#include "rise_origin/logic/data/rs_light_bin.h"
 #include "rise_origin/logic/mesh/rs_mesh_triangle_m.h"
 #include "rise_origin/logic/ray/rs_ray_sensor_m.h"
 #include "rise_origin/logic/record/rs_camera_record_m.h"
@@ -282,7 +283,7 @@ struct RS_Context {
     device::RS_Vector<logic::RS_CameraAuxAlbedo> camera_aux_endpoint_albedo;
     device::RS_Vector<logic::RS_CameraAuxRoughness> camera_aux_endpoint_roughness;
     device::RS_Vector<logic::RS_CameraAuxMetalness> camera_aux_endpoint_metalness;
-    device::RS_Vector<logic::RS_CameraAuxIntensity> camera_aux_endpoint_intensity;
+    device::RS_Vector<logic::RS_CameraAuxEmissionRadiance> camera_aux_endpoint_emission_radiance;
     device::RS_Vector<logic::RS_CameraAuxMaterialType> camera_aux_endpoint_material_type;
     device::RS_Vector<logic::RS_CameraAuxScreenMotion> camera_aux_endpoint_screen_motion;
     device::RS_Vector<logic::RS_CameraAuxChainThroughput> camera_aux_chain_throughput;
@@ -326,11 +327,11 @@ struct RS_Context {
     device::RS_StructOfArrays<VisionMaterialMemType> vision_materials;
     device::RS_DeviceLayout vision_material_layout;
 
-    /// Note: ReSTIR DI light list: index 0 is sun, indices 1..N correspond to
-    /// structure_emissive_voxel_handles. light_weight stores the luminance of
-    /// each light's emitted radiance; light_cdf is the inclusive prefix sum.
-    device::RS_Vector<float> light_weight;
-    device::RS_Vector<float> light_cdf;
+    /// Emissive voxels binned by the cell they sit in, so a shading point picks
+    /// among the lights it can reach. Each light carries its voxel handle, and
+    /// the sun is not binned at all. Rebuilt every step from
+    /// structure_emissive_voxel_handles, since a light that moves changes cell.
+    logic::RS_LightBin light_bin;
 
     // Ray sensor data.
     device::RS_Vector<RaySensorMemType> ray_sensors;

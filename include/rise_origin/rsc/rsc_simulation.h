@@ -216,6 +216,28 @@ class RSC_SimulationContact : public RSC_Base {
 };
 
 /**
+ * @brief Light selection settings for next event estimation.
+ */
+class RSC_SimulationVisionLight : public RSC_Base {
+   public:
+    /// Cell edge of the spatial bin a light pick draws from (unit: m).
+    RFloat light_bin_cell_size = 8.0;
+
+    /// Cells a pick draws from, one of {1, 7}: the own cell, or plus six faces.
+    RSize light_bin_probe_num = 7;
+
+    bool operator==(const RSC_SimulationVisionLight& other) const;
+
+   protected:
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
+    void _deserialize(RS_RSCArchive& archive) override;
+    void _serialize(RS_RSCArchive& archive) const override;
+    RSCRef<RSC_Base> _shallowCopy() const override { return RSCRef<RSC_Base>::fromThis(this); }
+};
+
+/**
  * @brief Vision tracer settings.
  */
 class RSC_SimulationVisionTrace : public RSC_Base {
@@ -359,10 +381,10 @@ class RSC_SimulationVisionDenoiseSVGF : public RSC_Base {
     RFloat sigma_depth = 0.1;
 
     /// Temporal EMA weight for color history.
-    RFloat temporal_alpha = 0.2;
+    RFloat temporal_alpha = 0.1;
 
     /// Temporal EMA weight for moment (variance) history.
-    RFloat temporal_alpha_moments = 0.2;
+    RFloat temporal_alpha_moments = 0.1;
 
     /// Effective-history-length floor for the temporal EMA, applied alongside the roughness^2 cap.
     RFloat temporal_min_history = 2;
@@ -388,6 +410,9 @@ using RSC_SimulationVisionDenoiseVariant = RS_Variant<
  */
 class RSC_SimulationVision : public RSC_Base {
    public:
+    /// Light selection settings.
+    RSC_SimulationVisionLight light;
+
     /// Trace settings.
     RSC_SimulationVisionTrace trace;
 

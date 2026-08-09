@@ -36,6 +36,7 @@ from rise_origin.rsc.simulation.vision import (
     VisionDenoiseAtrous,
     VisionDenoiseNone,
     VisionDenoiseSVGF,
+    VisionLight,
     VisionReSTIR,
     VisionTrace,
 )
@@ -46,6 +47,7 @@ __all__ = [
     "SoftBody",
     "RigidBody",
     "Contact",
+    "VisionLight",
     "VisionTrace",
     "VisionReSTIR",
     "VisionDenoiseNone",

@@ -67,7 +67,7 @@ class TestCloudPackage:
             optics = make_optics_by_name(editor.create(cloud.MODULE))
             white = optics[cloud.CLOUD_OPTICAL_REFERENCES[0]]
             assert not white.is_transparent
-            assert white.emission_intensity == 0.0
+            assert white.emission_radiance == 0.0
 
     def test_the_rainy_shells_grade_to_an_opaque_core(self, tmp_path):
         with make_editor(tmp_path) as editor:
@@ -81,7 +81,7 @@ class TestCloudPackage:
             ) in cloud.CLOUD_RAIN_LAYERS:
                 optic = optics[f"{cloud.MODULE}:{name}#optic"]
                 assert optic.is_transparent == is_transparent
-                assert optic.emission_intensity == 0.0
+                assert optic.emission_radiance == 0.0
             core = cloud.CLOUD_RAIN_LAYERS[-1]
             assert not core[3]
 

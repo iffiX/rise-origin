@@ -3374,8 +3374,6 @@ void RS_KernelStructureVoxelManager::_initKernelEmissiveVoxelHandlesData(RSize v
 
         // Context data is modified, needs to update kernel
         _kernel_manager->markKernelModified();
-        // The light list shifted, so previous reservoirs may index a removed light.
-        _kernel_manager->markVisionRestirReservoirStale();
     });
 }
 
@@ -3407,8 +3405,6 @@ void RS_KernelStructureVoxelManager::_freeKernelEmissiveVoxelHandlesData() {
 
         // Context data is modified, needs to update kernel
         _kernel_manager->markKernelModified();
-        // The light list shifted, so previous reservoirs may index a removed light.
-        _kernel_manager->markVisionRestirReservoirStale();
     });
 }
 

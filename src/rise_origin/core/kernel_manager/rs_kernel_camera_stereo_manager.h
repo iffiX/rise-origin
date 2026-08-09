@@ -241,7 +241,7 @@ class RS_KernelCameraStereoManager {
     logic::RS_CameraAuxAlbedo _camera_aux_endpoint_albedo[2];
     logic::RS_CameraAuxRoughness _camera_aux_endpoint_roughness[2];
     logic::RS_CameraAuxMetalness _camera_aux_endpoint_metalness[2];
-    logic::RS_CameraAuxIntensity _camera_aux_endpoint_intensity[2];
+    logic::RS_CameraAuxEmissionRadiance _camera_aux_endpoint_emission_radiance[2];
     logic::RS_CameraAuxMaterialType _camera_aux_endpoint_material_type[2];
     logic::RS_CameraAuxScreenMotion _camera_aux_endpoint_screen_motion[2];
     logic::RS_CameraAuxChainThroughput _camera_aux_chain_throughput[2];

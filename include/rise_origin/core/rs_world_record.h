@@ -1168,7 +1168,7 @@ class RS_WorldRaySensorRecordBase : public RS_WorldRootRecord {
         /// Material id of the hit surface
         RIndex* material_id = nullptr;
 
-        /// Self-emitted intensity of the hit material
+        /// Self-emitted radiance of the hit material
         RFloat* emission = nullptr;
 
         Material() = default;

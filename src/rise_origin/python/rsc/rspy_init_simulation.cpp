@@ -129,6 +129,11 @@ void initRSPYSimulation(py::module &m) {
         .def_readwrite("bvh_rebuild_sub_interval", &RSC_SimulationContact::bvh_rebuild_sub_interval)
         .def_readwrite("bvh_refit_sub_interval", &RSC_SimulationContact::bvh_refit_sub_interval);
 
+    rspyRSC<RSC_SimulationVisionLight, RSC_Base>(m, "RSC_SimulationVisionLight")
+        .def(py::init<>())
+        .def_readwrite("light_bin_cell_size", &RSC_SimulationVisionLight::light_bin_cell_size)
+        .def_readwrite("light_bin_probe_num", &RSC_SimulationVisionLight::light_bin_probe_num);
+
     rspyRSC<RSC_SimulationVisionTrace, RSC_Base>(m, "RSC_SimulationVisionTrace")
         .def(py::init<>())
         .def_readwrite("firefly_cap", &RSC_SimulationVisionTrace::firefly_cap)
@@ -187,6 +192,7 @@ void initRSPYSimulation(py::module &m) {
 
     rspyRSC<RSC_SimulationVision, RSC_Base>(m, "RSC_SimulationVision")
         .def(py::init<>())
+        .def_readwrite("light", &RSC_SimulationVision::light)
         .def_readwrite("trace", &RSC_SimulationVision::trace)
         .def_readwrite("restir", &RSC_SimulationVision::restir)
         .def_property(

@@ -76,7 +76,7 @@ def _build_world():
         ),
     ]
     entities = [
-        rsc.entity.CosmicBackgroundUniform(texture_reference="sky", intensity=1.0),
+        rsc.entity.CosmicBackgroundUniform(texture_reference="sky", radiance=1.0),
         rsc.entity.FloorFlat("floor", material_reference="floor"),
         rsc.entity.StructureVoxel(
             "cube",

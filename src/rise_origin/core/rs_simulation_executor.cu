@@ -1371,27 +1371,27 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
                 ctx.camera_rgb_record_layout
             );
 
-            // Light list is shared by ReSTIR resample and basic-mode NEE.
+            // Light bin is shared by ReSTIR resample and basic-mode NEE, and is
+            // refilled every step because a light that moves changes cell.
             RSize emissive_num = ctx.structure_emissive_voxel_handles.size();
-            ensure_vector_size(ctx.light_weight, emissive_num + 1);
-            ensure_vector_size(ctx.light_cdf, emissive_num + 1);
+            ctx.light_bin.resize(emissive_num, false);
+
+            if (emissive_num > 0) {
+                p_ptr->template run<
+                    RSCF_LaunchDirect<RS_VisionRayCompute<>::RSCF_WriteLightBinData, KernelType>>(
+                    {emissive_num, RS_AUTO_BLOCK_SIZE, false},
+                    ctx.light_bin.spatial_codes,
+                    ctx.light_bin.object_identifiers,
+                    ctx.light_bin.weights
+                );
+            }
+            // Sorts the lights filled above into contiguous per-cell runs. Only the
+            // tracer reads it, on this same stream, so it needs no sync.
+            ctx.light_bin.rebuild(false);
 
             // Sycnrhonize kernel context with updated aux buffers and light data.
             _kernel_manager->markKernelModified();
-
-            float sun_weight = float(ctx.cosmic_background_vision_mem.sun_color.luminance()) *
-                               float(ctx.cosmic_background_vision_mem.intensity);
-            ctx.light_weight.data.copyFrom(
-                RS_ConstMemoryPtr(&sun_weight, sizeof(float)), sizeof(float)
-            );
-
             _kernel_manager->syncKernelIfNeeded();
-            if (emissive_num > 0) {
-                p_ptr->template run<RSCF_LaunchDirect<
-                    RS_VisionRayCompute<>::RSCF_WriteEmissiveLightWeights,
-                    KernelType>>({emissive_num, RS_AUTO_BLOCK_SIZE, false});
-            }
-            _scan.template inclusiveSum<float, float>(ctx.light_weight, ctx.light_cdf);
 
             if (k_ptr->vision_is_restir_enabled) {
                 p_ptr->template run<RSCF_LaunchWithLayoutPerSegment<
@@ -1433,10 +1433,6 @@ void RS_SimulationExecutor::_updateVisionAndRay() {
                     {ctx.camera_info_ray_layout.size(), RS_AUTO_BLOCK_SIZE, false},
                     ctx.camera_info_ray_layout
                 );
-
-                // The resample above rebuilt the reservoirs against the current light set, so
-                // reuse is safe again next frame.
-                _kernel_manager->clearVisionRestirReservoirStale();
 
                 // Restir RGB is depth-0 only (chain throughput + reservoirs
                 // already encode direct + 1-bounce indirect); launched per pixel.
@@ -1562,7 +1558,8 @@ void RS_SimulationExecutor::_updateIntersectRegionRecord() {
                     ctx.intersect_region_bvh.object_identifiers,
                     ctx.intersect_region_bvh.leaf_bounds
                 );
-                ctx.intersect_region_bvh.rebuild();
+                // Only the membership passes below read it, on this same stream.
+                ctx.intersect_region_bvh.rebuild(false);
                 _kernel_manager->markKernelModified();
                 _kernel_manager->syncKernelIfNeeded();
 
@@ -2082,7 +2079,8 @@ void RS_SimulationExecutor::_rebuildFloorTriangleBVHIfNeeded() {
                 ctx.floor_triangle_bvh.leaf_bounds
             );
 
-            ctx.floor_triangle_bvh.rebuild();
+            // Only kernels on this same stream read it, so it needs no sync.
+            ctx.floor_triangle_bvh.rebuild(false);
 
             _kernel_manager->markKernelModified();
             _kernel_manager->syncKernelIfNeeded();
@@ -2115,7 +2113,8 @@ void RS_SimulationExecutor::_buildVoxelBVH(VoxelBVH &bvh, device::RS_Vector<RHan
                         bvh.object_identifiers,
                         bvh.leaf_bounds
                     );
-                    bvh.rebuild();
+                    // Only kernels on this same stream read it, so it needs no sync.
+                    bvh.rebuild(false);
                 }
                 _kernel_manager->markKernelModified();
                 _kernel_manager->syncKernelIfNeeded();
@@ -2145,7 +2144,8 @@ void RS_SimulationExecutor::_refitVoxelBVH(VoxelBVH &bvh) {
                     {leaf_count, RS_AUTO_BLOCK_SIZE, false}, bvh.object_identifiers, bvh.leaf_bounds
                 );
 
-                bvh.refit();
+                // Only kernels on this same stream read it, so it needs no sync.
+                bvh.refit(false);
             });
         });
     });

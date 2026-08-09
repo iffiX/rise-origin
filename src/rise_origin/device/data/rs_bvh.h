@@ -5,7 +5,9 @@
 #define RS_BVH_H
 
 #include "rise_origin/device/algorithm/rs_copy.h"
+#include "rise_origin/device/algorithm/rs_generate.h"
 #include "rise_origin/device/algorithm/rs_sort.h"
+#include "rise_origin/device/data/rs_morton.h"
 #include "rise_origin/device/data/rs_vector.h"
 #include "rise_origin/device/rs_compute.h"
 #include "rise_origin/utils/math/rs_bound.h"
@@ -23,28 +25,6 @@ RS_ENUM(
     (RSE_BVH_UNIT_CENTIMETERS, 2),
     (RSE_BVH_UNIT_MILLIMETERS, 3)
 )
-
-/**
- * @brief Internal (non-leaf) BVH node holding both child indices and each child's full AABB.
- *
- * The child indices carry the leaf flag in their high bit (see IsLeafNodeMask).
- * Caching both child AABBs in the parent lets one node fetch during traversal
- * test both children — no scattered loads from separate child / bound arrays. A
- * node's own bound is union(left_bound, right_bound). Child bounds are filled
- * bottom-up by RSCF_BuildBVHTree.
- *
- * Padded to 32 bytes so a node starts on a sector boundary. Packed, the 56 byte
- * node starts at any multiple of 4 and a fetch touches three 32 byte sectors
- * where two would do; padding to 64 makes every fetch exactly two sectors, at
- * the cost of an eighth more memory for the node array.
- */
-template <typename BoundType>
-struct alignas(32) RS_BVHInternalNode {
-    RIndex left = RS_NULL_INDEX;
-    RIndex right = RS_NULL_INDEX;
-    BoundType left_bound;
-    BoundType right_bound;
-};
 
 template <RSize MortonResolutionModifier = 1, RSE_BVH_Unit Unit = RSE_BVH_UNIT_METERS>
 class RSCF_GenerateMortonSpatialCode
@@ -86,50 +66,7 @@ class RSCF_GenerateMortonSpatialCode
             RS_FI::rs_round_down((centroid.z / range + Float(0.5)) * scale)
         );
 
-        SpatialCode c = _leftShift3(x) | (_leftShift3(y) << 1) | (_leftShift3(z) << 2);
-        spatial_codes[idx] = c;
-    }
-
-   private:
-    template <typename T>
-    HOST_DEVICE_INLINE_QUALIFIER static T _leftShift3(T x) {
-        if constexpr (sizeof(T) == 4)
-            return _leftShift3For32(x);
-        else
-            return _leftShift3For64(x);
-    }
-
-    HOST_DEVICE_INLINE_QUALIFIER static uint32_t _leftShift3For32(uint32_t x) {
-        // Clamp to lower 10 bits; out-of-range centroids saturate at the upper grid bound.
-        x = RS_MIN(x, (uint32_t)0x3ff);
-
-        /* Below code is like this, each time, you shift a group of code
-         * to the left, until you shift all bit to their corresponding place.
-         * x = (x | (x << 16)) & 0b00000011000000000000000011111111;
-         * x = (x | (x << 8)) & 0b00000011000000001111000000001111;
-         * x = (x | (x << 4)) & 0b00000011000011000011000011000011;
-         * x = (x | (x << 2)) & 0b00001001001001001001001001001001;
-         */
-
-        x = (x | (x << 16)) & 0x30000ff;
-        x = (x | (x << 8)) & 0x300f00f;
-        x = (x | (x << 4)) & 0x30c30c3;
-        x = (x | (x << 2)) & 0x9249249;
-
-        return x;
-    }
-
-    HOST_DEVICE_INLINE_QUALIFIER static uint64_t _leftShift3For64(uint64_t x) {
-        // Clamp to lower 21 bits; out-of-range centroids saturate at the upper grid bound.
-        x = RS_MIN(x, (uint64_t)0x1fffffULL);
-
-        x = (x | (x << 32)) & 0x1F00000000FFFFULL;
-        x = (x | (x << 16)) & 0x1F0000FF0000FFULL;
-        x = (x | (x << 8)) & 0x100F00F00F00F00FULL;
-        x = (x | (x << 4)) & 0x10C30C30C30C30C3ULL;
-        x = (x | (x << 2)) & 0x1249249249249249ULL;
-
-        return x;
+        spatial_codes[idx] = RS_MortonCode<SpatialCode>::toMortonCode(x, y, z);
     }
 };
 
@@ -320,15 +257,6 @@ class RSCF_BuildBVHTree : public RS_ComputeFunction<RSCF_BuildBVHTree> {
     }
 };
 
-class RSCF_GenerateIndexVector : public RS_ComputeFunction<RSCF_GenerateIndexVector> {
-   public:
-    template <typename IndexVector>
-    HOST_DEVICE_INLINE_QUALIFIER static void run(IndexVector indices) {
-        RIndex i = index1D();
-        indices[i] = i;
-    }
-};
-
 class RSCF_ReorderObjectIdentifiersAndBounds
     : public RS_ComputeFunction<RSCF_ReorderObjectIdentifiersAndBounds> {
    public:
@@ -345,6 +273,28 @@ class RSCF_ReorderObjectIdentifiersAndBounds
         output_object_identifiers[i] = input_object_identifiers[idx];
         output_bounds[i] = input_bounds[idx];
     }
+};
+
+/**
+ * @brief Internal (non-leaf) BVH node holding both child indices and each child's full AABB.
+ *
+ * The child indices carry the leaf flag in their high bit (see IsLeafNodeMask).
+ * Caching both child AABBs in the parent lets one node fetch during traversal
+ * test both children — no scattered loads from separate child / bound arrays. A
+ * node's own bound is union(left_bound, right_bound). Child bounds are filled
+ * bottom-up by RSCF_BuildBVHTree.
+ *
+ * Padded to 32 bytes so a node starts on a sector boundary. Packed, the 56 byte
+ * node starts at any multiple of 4 and a fetch touches three 32 byte sectors
+ * where two would do; padding to 64 makes every fetch exactly two sectors, at
+ * the cost of an eighth more memory for the node array.
+ */
+template <typename BoundType>
+struct alignas(32) RS_BVHInternalNode {
+    RIndex left = RS_NULL_INDEX;
+    RIndex right = RS_NULL_INDEX;
+    BoundType left_bound;
+    BoundType right_bound;
 };
 
 struct RS_BVHObjectIdentifier {
@@ -366,7 +316,7 @@ struct RS_BVHObjectIdentifierHostHasher {
 };
 
 /**
- * Implemented BVH construction and optimization algorithm from:
+ * @brief Bounding volume hierarchy (BVH) construction and optimization algorithm from:
  *
  * Maximizing Parallelism in the Construction of BVHs, Octrees, and k-d Trees
  * by Tero Karras
@@ -387,6 +337,8 @@ class RS_BVHBase {
     class RS_BVHHostData {
        public:
         std::unordered_map<ObjectIdentifierType, RIndex, ObjectIdentifierHostHasher> object_indices;
+
+        RS_RadixSortPairs sorter;
 
         RS_Vector<RIndex> indices;
         RS_Vector<RIndex> sorted_indices;
@@ -458,7 +410,6 @@ class RS_BVHBase {
      *****************************************************************/
     RS_BVHHostData* host_data = nullptr;
     RS_MemoryProvider* mem_provider = nullptr;
-    RS_RadixSortPairs sorter;
     RS_Vector<SpatialCodeType> spatial_codes;
     RS_Vector<ObjectIdentifierType> object_identifiers;
 
@@ -488,7 +439,7 @@ class RS_BVHBase {
 
         host_data = new RS_BVHHostData();
         mem_provider = provider;
-        sorter = RS_RadixSortPairs(provider);
+        host_data->sorter = RS_RadixSortPairs(provider);
         spatial_codes.init(provider);
         object_identifiers.init(provider);
 
@@ -509,7 +460,6 @@ class RS_BVHBase {
     HOST_DEVICE_INLINE_QUALIFIER RS_BVHBase(const RS_BVHBase& bvh)
         : host_data(bvh.host_data),
           mem_provider(bvh.mem_provider),
-          sorter(bvh.sorter),
           spatial_codes(bvh.spatial_codes),
           object_identifiers(bvh.object_identifiers),
           internal_nodes(bvh.internal_nodes),
@@ -521,6 +471,7 @@ class RS_BVHBase {
     void free() {
         mem_provider = nullptr;
         if (host_data != nullptr) {
+            host_data->sorter.free();
             host_data->indices.free();
             host_data->sorted_indices.free();
             host_data->sorted_spatial_codes.free();
@@ -532,7 +483,6 @@ class RS_BVHBase {
             host_data = nullptr;
         }
 
-        sorter.free();
         spatial_codes.free();
         object_identifiers.free();
 
@@ -582,7 +532,7 @@ class RS_BVHBase {
 
         new_bvh.host_data = new RS_BVHHostData(*host_data);
         new_bvh.mem_provider = provider;
-        new_bvh.sorter = RS_RadixSortPairs(provider);
+        new_bvh.host_data->sorter = RS_RadixSortPairs(provider);
         new_bvh.spatial_codes = spatial_codes.move(provider);
         new_bvh.object_identifiers = object_identifiers.move(provider);
         new_bvh.internal_nodes = internal_nodes.move(provider);
@@ -673,9 +623,11 @@ class RS_BVHBase {
      * @brief Build the bvh tree from the provided object identifiers and bounds.
      * @param object_identifiers The object identifiers of the objects in the bvh tree.
      * @param bounds The bounds of the objects in the bvh tree.
+     * @param sync Whether the build operation is synchronous or asynchronous.
      */
     template <typename ObjectIdentifierContainer, typename BoundContainer>
-    void build(ObjectIdentifierContainer object_identifiers, BoundContainer bounds) {
+    void
+    build(ObjectIdentifierContainer object_identifiers, BoundContainer bounds, bool sync = true) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         RS_DATA_EXPECT_ARGUMENT(
             object_identifiers.size() == bounds.size(),
@@ -698,7 +650,7 @@ class RS_BVHBase {
         device::copy(this->object_identifiers, object_identifiers, new_size);
         device::copy(leaf_bounds, bounds, new_size);
 
-        rebuild();
+        rebuild(sync);
         rebuildHostIndices();
     }
 
@@ -706,9 +658,13 @@ class RS_BVHBase {
      * @brief Build the bvh tree from the provided object identifiers and bounds.
      * @param object_identifiers The object identifiers of the objects in the bvh tree.
      * @param bounds The bounds of the objects in the bvh tree.
+     * @param sync Whether the build operation is synchronous or asynchronous.
      */
-    void
-    build(std::vector<ObjectIdentifierType>& object_identifiers, std::vector<BoundType>& bounds) {
+    void build(
+        std::vector<ObjectIdentifierType>& object_identifiers,
+        std::vector<BoundType>& bounds,
+        bool sync = true
+    ) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
         RS_DATA_EXPECT_ARGUMENT(
             object_identifiers.size() == bounds.size(),
@@ -731,7 +687,7 @@ class RS_BVHBase {
         this->object_identifiers.write(object_identifiers.data());
         leaf_bounds.write(bounds.data());
 
-        rebuild();
+        rebuild(sync);
         rebuildHostIndices();
     }
 
@@ -743,8 +699,9 @@ class RS_BVHBase {
      * Morton-sorted spatial codes / object identifiers) is left untouched.
      * Requires that the bvh has been built or rebuilt at least once before; a
      * no-op when the tree is empty.
+     * @param sync Whether the refit operation is synchronous or asynchronous.
      */
-    void refit() {
+    void refit(bool sync = true) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
 
         castProviderPtrAndCall(mem_provider, [&](auto p_ptr) {
@@ -767,14 +724,18 @@ class RS_BVHBase {
                     host_data->node_operation_count
                 );
             }
+
+            // Synchronize memory provider stream to make sure modifications are completed.
+            if (sync) p_ptr->sync();
         });
     }
 
     /**
      * @brief Rebuild the bvh tree, call these after you directly write data to
      * `object_identifiers` and `leaf_bounds` of the bvh tree.
+     * @param sync Whether the rebuild operation is synchronous or asynchronous.
      */
-    void rebuild() {
+    void rebuild(bool sync = true) {
         RS_DATA_EXPECT_INIT(mem_provider != nullptr);
 
         castProviderPtrAndCall(mem_provider, [&](auto p_ptr) {
@@ -789,12 +750,12 @@ class RS_BVHBase {
             // Clear node operation count
             host_data->node_operation_count.fill(0, false);
 
-            p_ptr->template run<RSCF_GenerateIndexVector>(
+            p_ptr->template run<RSCF_GenerateIndexArray1DLike>(
                 {size, RS_AUTO_BLOCK_SIZE, false}, host_data->indices
             );
 
             // Sort
-            sorter.sort(
+            host_data->sorter.sort(
                 spatial_codes,
                 host_data->indices,
                 host_data->sorted_spatial_codes,
@@ -835,6 +796,9 @@ class RS_BVHBase {
                     host_data->node_operation_count
                 );
             }
+
+            // Synchronize memory provider stream to make sure modifications are completed.
+            if (sync) p_ptr->sync();
         });
     }
 
@@ -957,6 +921,24 @@ class RS_BVHBase {
 
         auto it = host_data->object_indices.find(object_identifier);
         return it != host_data->object_indices.end();
+    }
+
+    /// @brief Returns the memory provider.
+    [[nodiscard]] RS_MemoryProvider* provider() const { return mem_provider; }
+
+    /// @brief Returns the device location.
+    [[nodiscard]] RS_DeviceLocation device() const { return spatial_codes.device(); }
+
+    /// @brief Returns the base size in bytes, including the host data it holds.
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize baseBytes() const {
+        return sizeof(*this) + (host_data != nullptr ? RBigSize(sizeof(RS_BVHHostData)) : 0);
+    }
+
+    /// @brief Returns the extra size in bytes.
+    HOST_DEVICE_INLINE_QUALIFIER RBigSize extraBytes() const {
+        return spatial_codes.extraBytes() + object_identifiers.extraBytes() +
+               internal_nodes.extraBytes() + internal_parent_nodes.extraBytes() +
+               leaf_parent_nodes.extraBytes() + leaf_bounds.extraBytes();
     }
 
     /// @brief Get the root node of the bvh tree.

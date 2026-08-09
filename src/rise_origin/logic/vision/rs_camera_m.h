@@ -76,6 +76,9 @@ class RS_CameraMem {
     /// Handle of the camera's pose signal entry.
     RHandle camera_signal_handle = RS_NULL_HANDLE;
 
+    /// Scene radiance the sensor saturates at (unit: W/(m^2*sr)).
+    FloatM saturation_radiance = 1;
+
     /// Image height divided by image width.
     FloatM aspect_ratio = 0;
 
@@ -203,8 +206,11 @@ struct RS_ReservoirDI {
     /// Identity of the pixel's hit surface; mismatch across frames resets the reservoir.
     RS_CameraPixelObjectKey object_key = RS_CAMERA_PIXEL_OBJECT_KEY_MISS_SENTINEL;
 
-    /// 0 = sun; k >= 1 = structure_emissive_voxel_handles[k - 1].
-    RIndex light_index = 0;
+    /// Entity the survivor lights from; cosmic background gid is the sun.
+    RIndex light_entity_gid = RS_NULL_INDEX;
+
+    /// Emissive voxel within that entity; null for the sun.
+    RHandle light_voxel = RS_NULL_HANDLE;
 
     /// Sampled point on the light at survivor time; unused for the sun.
     RVec3f light_position = RVec3f::zero();
@@ -264,9 +270,6 @@ struct RS_ReservoirGI {
     RSize Z_count = 0;
 };
 
-/// Index 0 of the light list is reserved for the sun; emissive voxels start at 1.
-constexpr RIndex RS_VISION_SUN_LIGHT_INDEX = 0;
-
 /// Per-camera RGB canvas; ping-pong pair lives on RS_Context.
 using RS_CameraRGBCanvas = device::RS_Array<RVec3f, 2>;
 
@@ -279,7 +282,7 @@ using RS_CameraAuxObjectKey = device::RS_Array<RS_CameraPixelObjectKey, 2>;
 using RS_CameraAuxAlbedo = device::RS_Array<RS_Vec3DMem<RSE_FLOAT_16>, 2>;
 using RS_CameraAuxRoughness = device::RS_Array<float, 2>;
 using RS_CameraAuxMetalness = device::RS_Array<float, 2>;
-using RS_CameraAuxIntensity = device::RS_Array<float, 2>;
+using RS_CameraAuxEmissionRadiance = device::RS_Array<float, 2>;
 using RS_CameraAuxMaterialType = device::RS_Array<RSE_VisionMaterialType, 2>;
 using RS_CameraAuxScreenMotion = device::RS_Array<RVec2f, 2>;
 using RS_CameraAuxWorldVelocity = device::RS_Array<RVec3f, 2>;
@@ -315,6 +318,7 @@ using RS_CameraDenoiserVariance = device::RS_Array<RFloat, 2>;
         field(rigid_body_sid),                \
         field(sub_camera_index),              \
         field(camera_signal_handle),          \
+        field(saturation_radiance),           \
         field(aspect_ratio),                  \
         field(image_width),                   \
         field(image_height),                  \

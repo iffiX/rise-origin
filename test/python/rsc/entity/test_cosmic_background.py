@@ -10,8 +10,8 @@ from rise_origin.rsc.entity import (
 
 
 def test_uniform_fields():
-    sky = CosmicBackgroundUniform("sky", intensity=2.0, rotation_rad=0.5)
-    assert sky.intensity == 2.0
+    sky = CosmicBackgroundUniform("sky", radiance=2.0, rotation_rad=0.5)
+    assert sky.radiance == 2.0
     assert sky.rotation_rad == 0.5
 
 

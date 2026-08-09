@@ -484,7 +484,7 @@ def build() -> rsc.World:
     # ReSTIR DI is the point of this scene; SVGF denoises the 1-spp output.
     simulation = rsc.simulation.Simulation(
         environment=rsc.simulation.Environment(gravity_acceleration=-9.81),
-        vision=rsc.simulation.Vision(denoise=rsc.simulation.VisionDenoiseSVGF()),
+        vision=rsc.simulation.Vision(denoise=rsc.simulation.VisionDenoiseSVGF(temporal_alpha=0.1, temporal_alpha_moments=0.1)),
         runtime=rsc.simulation.Runtime(log_level="info"),
     )
     return rsc.World(
@@ -524,7 +524,7 @@ def main():
         None,
         camera_position=camera_position,
         camera_focus=camera_focus,
-        samples_per_pixel=4,
+        samples_per_pixel=16,
         max_depth=4,
     )
 

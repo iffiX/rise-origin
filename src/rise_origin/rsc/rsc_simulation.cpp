@@ -386,6 +386,42 @@ void RSC_SimulationContact::_serialize(RS_RSCArchive &archive) const {
     archive.serialize("bvh_refit_sub_interval", bvh_refit_sub_interval);
 }
 
+bool RSC_SimulationVisionLight::operator==(const RSC_SimulationVisionLight &other) const {
+    return RSC_Base::operator==(other) && light_bin_cell_size == other.light_bin_cell_size &&
+           light_bin_probe_num == other.light_bin_probe_num;
+}
+
+void RSC_SimulationVisionLight::_validate(RS_RSCValidator &validator) const {
+    validator.submitValidatorIfNotExists("RSC_SimulationVisionLight::_validate", this, [this] {
+        RSC_EXPECT_GT(RSC_SimulationVisionLight, light_bin_cell_size, 0);
+        if (light_bin_probe_num != 1 && light_bin_probe_num != 7) {
+            RS_THROW(RS_InvalidCharacterizationException(
+                "Invalid RSC_SimulationVisionLight, light_bin_probe_num must be 1 or 7"
+            ));
+        }
+    });
+}
+
+void RSC_SimulationVisionLight::_read(const RS_RSCFileTreeReader &tree) {
+    light_bin_cell_size = tree.get<RFloat>("light_bin_cell_size", light_bin_cell_size);
+    light_bin_probe_num = tree.get<RSize>("light_bin_probe_num", light_bin_probe_num);
+}
+
+void RSC_SimulationVisionLight::_write(RS_RSCFileTreeWriter &tree) const {
+    tree.add("light_bin_cell_size", light_bin_cell_size);
+    tree.add("light_bin_probe_num", light_bin_probe_num);
+}
+
+void RSC_SimulationVisionLight::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("light_bin_cell_size", light_bin_cell_size);
+    archive.deserialize("light_bin_probe_num", light_bin_probe_num);
+}
+
+void RSC_SimulationVisionLight::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("light_bin_cell_size", light_bin_cell_size);
+    archive.serialize("light_bin_probe_num", light_bin_probe_num);
+}
+
 bool RSC_SimulationVisionTrace::operator==(const RSC_SimulationVisionTrace &other) const {
     return RSC_Base::operator==(other) && firefly_cap == other.firefly_cap &&
            russian_roulette_start_depth == other.russian_roulette_start_depth;
@@ -645,17 +681,21 @@ void RSC_SimulationVisionDenoiseSVGF::_serialize(RS_RSCArchive &archive) const {
 }
 
 bool RSC_SimulationVision::operator==(const RSC_SimulationVision &other) const {
-    return RSC_Base::operator==(other) && trace == other.trace && restir == other.restir &&
-           denoise == other.denoise;
+    return RSC_Base::operator==(other) && light == other.light && trace == other.trace &&
+           restir == other.restir && denoise == other.denoise;
 }
 
 void RSC_SimulationVision::_validate(RS_RSCValidator &validator) const {
+    light.validate(validator);
     trace.validate(validator);
     restir.validate(validator);
     denoise.visit([&validator](const auto &d) { d.validate(validator); });
 }
 
 void RSC_SimulationVision::_read(const RS_RSCFileTreeReader &tree) {
+    if (tree.hasChild("light")) {
+        light.read(tree.getChild("light"));
+    }
     if (tree.hasChild("trace")) {
         trace.read(tree.getChild("trace"));
     }
@@ -691,6 +731,7 @@ void RSC_SimulationVision::_read(const RS_RSCFileTreeReader &tree) {
 }
 
 void RSC_SimulationVision::_write(RS_RSCFileTreeWriter &tree) const {
+    light.write(tree.addChild("light"));
     trace.write(tree.addChild("trace"));
     restir.write(tree.addChild("restir"));
     auto denoise_tree = tree.addChild("denoise");
@@ -707,12 +748,14 @@ void RSC_SimulationVision::_write(RS_RSCFileTreeWriter &tree) const {
 }
 
 void RSC_SimulationVision::_deserialize(RS_RSCArchive &archive) {
+    archive.deserialize("light", light);
     archive.deserialize("trace", trace);
     archive.deserialize("restir", restir);
     archive.deserializeVariant("denoise", denoise);
 }
 
 void RSC_SimulationVision::_serialize(RS_RSCArchive &archive) const {
+    archive.serialize("light", light);
     archive.serialize("trace", trace);
     archive.serialize("restir", restir);
     archive.serializeVariant("denoise", denoise);

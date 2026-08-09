@@ -13,6 +13,7 @@ from rise_origin import (
     RSC_SimulationVisionDenoiseAtrous,
     RSC_SimulationVisionDenoiseNone,
     RSC_SimulationVisionDenoiseSVGF,
+    RSC_SimulationVisionLight,
     RSC_SimulationVisionReSTIR,
     RSC_SimulationVisionTrace,
 )
@@ -20,6 +21,7 @@ from rise_origin import (
 from rise_origin.rsc._utils import _apply
 
 __all__ = [
+    "VisionLight",
     "VisionTrace",
     "VisionReSTIR",
     "VisionDenoiseNone",
@@ -27,6 +29,30 @@ __all__ = [
     "VisionDenoiseSVGF",
     "Vision",
 ]
+
+
+class VisionLight(RSC_SimulationVisionLight):
+    """Light selection settings for next event estimation.
+
+    Args:
+        light_bin_cell_size: Cell edge of the spatial bin a light pick draws
+            from, in meters.
+        light_bin_probe_num: Cells a pick draws from, one of ``{1, 7}``: the
+            shading point's own cell, or that plus its six face neighbours.
+    """
+
+    def __init__(
+        self,
+        *,
+        light_bin_cell_size: Optional[float] = None,
+        light_bin_probe_num: Optional[int] = None,
+    ) -> None:
+        super().__init__()
+        _apply(
+            self,
+            light_bin_cell_size=light_bin_cell_size,
+            light_bin_probe_num=light_bin_probe_num,
+        )
 
 
 class VisionTrace(RSC_SimulationVisionTrace):
@@ -195,6 +221,7 @@ class Vision(RSC_SimulationVision):
     """Top-level vision config bundling the tracer, ReSTIR, and denoiser.
 
     Args:
+        light: Light selection settings.
         trace: Path-tracer integrator settings.
         restir: ReSTIR resampling settings.
         denoise: The denoiser to use (one of the ``VisionDenoise*`` configs).
@@ -203,9 +230,10 @@ class Vision(RSC_SimulationVision):
     def __init__(
         self,
         *,
+        light: Optional[VisionLight] = None,
         trace: Optional[VisionTrace] = None,
         restir: Optional[VisionReSTIR] = None,
         denoise: Optional[DenoiseSpec] = None,
     ) -> None:
         super().__init__()
-        _apply(self, trace=trace, restir=restir, denoise=denoise)
+        _apply(self, light=light, trace=trace, restir=restir, denoise=denoise)

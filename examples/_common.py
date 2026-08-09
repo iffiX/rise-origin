@@ -80,7 +80,7 @@ class MaterialSpec:
         is_transparent: Whether the surface refracts (clear glass-like).
         ior: Index of refraction, used when ``is_transparent``.
         emission_color: Byte RGB glow color; ``None`` is non-emissive.
-        emission_intensity: Scalar multiplier on the emission color.
+        emission_radiance: Scalar multiplier on the emission color.
     """
 
     name: str
@@ -99,7 +99,7 @@ class MaterialSpec:
     is_transparent: bool = False
     ior: float = 1.5
     emission_color: Optional[Tuple[int, int, int]] = None
-    emission_intensity: float = 0.0
+    emission_radiance: float = 0.0
 
 
 def make_world(
@@ -202,7 +202,7 @@ def make_world(
                 is_transparent=spec.is_transparent,
                 ior=spec.ior,
                 emission_texture_reference=emit,
-                emission_intensity=spec.emission_intensity,
+                emission_radiance=spec.emission_radiance,
             )
         )
 

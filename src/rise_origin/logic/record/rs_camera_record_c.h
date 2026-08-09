@@ -27,7 +27,10 @@ class RSCF_StoreCameraRGBRecord : public device::RS_ComputeFunction<RSCF_StoreCa
             auto &ctx = k->ctx;
             auto &r = record.rgb;
 
+            // Maps canvas radiance onto the full scale the sensor expects.
+            float saturation_radiance = float(CA_G(saturation_radiance));
             RVec3f pixel_color = ctx.camera_current_rgb_canvas[camera][pixel];
+            if (saturation_radiance > 0.0f) pixel_color = pixel_color / saturation_radiance;
             r.pixel[pixel] = RColor3f(pixel_color).linearToSrgb().clip().operator RColor3b();
         }
     }

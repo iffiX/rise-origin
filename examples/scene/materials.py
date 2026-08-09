@@ -60,8 +60,8 @@ def _opaque(name, resources, essences, *, color, roughness, metalness) -> None:
     )
 
 
-def _emissive(name, resources, essences, *, color, intensity) -> None:
-    """Emissive lobe; emitted radiance is ``color * intensity``."""
+def _emissive(name, resources, essences, *, color, radiance) -> None:
+    """Emissive lobe; emitted radiance is ``color * radiance``."""
     _fixed_material(name, resources, essences)
     resources.append(
         rsc.resource.TextureConstant(f"{name}#emit", value=_common._rgb(color))
@@ -71,7 +71,7 @@ def _emissive(name, resources, essences, *, color, intensity) -> None:
             f"{name}#optic",
             material_reference=name,
             emission_texture_reference=f"{name}#emit",
-            emission_intensity=intensity,
+            emission_radiance=radiance,
         )
     )
 
@@ -327,23 +327,23 @@ def build_materials(resources: list, essences: list) -> None:
     )
 
     # Emissive -----------------------------------------------------------
-    # EM_WHITE intensity bumped from 4.0 -> 7.0 (existing industrial strips
+    # EM_WHITE radiance bumped from 4.0 -> 7.0 (existing industrial strips
     # read too dim in eye-level renders); shape unchanged.
-    _emissive(EM_WHITE, resources, essences, color=(240, 240, 255), intensity=15.0)
+    _emissive(EM_WHITE, resources, essences, color=(240, 240, 255), radiance=15.0)
     _emissive(
-        EM_WARM_PENDANT, resources, essences, color=(255, 220, 180), intensity=5.5
+        EM_WARM_PENDANT, resources, essences, color=(255, 220, 180), radiance=5.5
     )
-    _emissive(EM_CYAN, resources, essences, color=(90, 220, 255), intensity=3.0)
-    _emissive(EM_AMBER, resources, essences, color=(255, 180, 60), intensity=3.5)
-    _emissive(EM_GREEN, resources, essences, color=(90, 230, 110), intensity=3.0)
-    _emissive(EM_RED, resources, essences, color=(255, 60, 60), intensity=3.0)
-    _emissive(EM_SEPIA, resources, essences, color=(255, 180, 90), intensity=2.2)
-    _emissive(EM_BIO_TEAL, resources, essences, color=(60, 230, 200), intensity=3.5)
-    _emissive(EM_BIO_GREEN, resources, essences, color=(120, 240, 130), intensity=3.5)
-    _emissive(EM_BIO_VIOLET, resources, essences, color=(180, 110, 240), intensity=3.5)
-    _emissive(EM_REACTOR, resources, essences, color=(200, 240, 255), intensity=100.0)
+    _emissive(EM_CYAN, resources, essences, color=(90, 220, 255), radiance=3.0)
+    _emissive(EM_AMBER, resources, essences, color=(255, 180, 60), radiance=3.5)
+    _emissive(EM_GREEN, resources, essences, color=(90, 230, 110), radiance=3.0)
+    _emissive(EM_RED, resources, essences, color=(255, 60, 60), radiance=3.0)
+    _emissive(EM_SEPIA, resources, essences, color=(255, 180, 90), radiance=2.2)
+    _emissive(EM_BIO_TEAL, resources, essences, color=(60, 230, 200), radiance=3.5)
+    _emissive(EM_BIO_GREEN, resources, essences, color=(120, 240, 130), radiance=3.5)
+    _emissive(EM_BIO_VIOLET, resources, essences, color=(180, 110, 240), radiance=3.5)
+    _emissive(EM_REACTOR, resources, essences, color=(200, 240, 255), radiance=100.0)
     _emissive(
-        EM_REACTOR_FLOOR_RING, resources, essences, color=(255, 160, 50), intensity=20
+        EM_REACTOR_FLOOR_RING, resources, essences, color=(255, 160, 50), radiance=20
     )
 
 

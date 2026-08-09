@@ -60,7 +60,7 @@ PUSH = 2.5  # steering force (N); must beat the ball's weight-times-friction to 
 WALL_COLOR = _common.PALETTE["deep_blue"]
 BALL_COLOR = (60, 140, 255)  # glowing blue
 TARGET_COLOR = (255, 45, 35)  # glowing red
-GLOW = 4.0  # emission intensity of the ball and goal
+GLOW = 4.0  # emission radiance of the ball and goal
 
 # Material reference order; per-voxel ids index into it.
 WALL_ID, TARGET_ID = 0, 1
@@ -292,14 +292,14 @@ def build():
             color=TARGET_COLOR,
             kind="fixed",
             emission_color=TARGET_COLOR,
-            emission_intensity=GLOW,
+            emission_radiance=GLOW,
         ),
         _common.MaterialSpec(
             "ball",
             color=BALL_COLOR,
             kind="rigid",
             emission_color=BALL_COLOR,
-            emission_intensity=GLOW,
+            emission_radiance=GLOW,
         ),
     ]
 

@@ -93,7 +93,7 @@ PREVIEW_GRID_LINE_WIDTH = 0.02
 # Colors are RGB 0-1 floats, converted to byte at the call site.
 PREVIEW_SKY_SUN_COLOR = (1.0, 0.97, 0.94)
 PREVIEW_SKY_GROUND_COLOR = (0.5, 0.5, 0.5)
-PREVIEW_SKY_INTENSITY = 1.3
+PREVIEW_SKY_RADIANCE_SCALE = 1.3
 
 # A torch memory forecast may claim at most this share of the free VRAM;
 # anything larger falls back to the host.

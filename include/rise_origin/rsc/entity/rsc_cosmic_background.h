@@ -38,8 +38,8 @@ class RSC_CosmicBackgroundUniform : public RSC_CosmicBackgroundBase {
     /// Reference to the texture resource.
     std::string texture_reference;
 
-    /// Scalar multiplier applied to sampled radiance.
-    RFloat intensity = 1.0;
+    /// Radiance the background emits, scaling the sampled color (unit: W/(m^2*sr)).
+    RFloat radiance = 1.0;
 
     /// Rotation around the world up axis (radians).
     RFloat rotation_rad = 0.0;
@@ -69,10 +69,13 @@ class RSC_CosmicBackgroundGradient : public RSC_CosmicBackgroundBase {
     /// Sun direction in world space; must be non-zero.
     RVec3rf sun_direction = RVec3rf(0.3, 0.4, -1.0);
 
-    /// Sun disk color along sun_direction.
+    /// Sun chromaticity.
     RColor3b sun_color = RColor3b::zero();
 
-    /// Sun disk angular radius in radians, range (0, pi/2); larger = bigger sun.
+    /// Irradiance the sun delivers to a surface facing it (unit: W/m^2).
+    RFloat sun_irradiance = 1.0;
+
+    /// Sun disk angular radius, range (0, pi/2); larger = softer shadow (unit: rad).
     RFloat sun_angular_radius = 0.00465;
 
     bool operator==(const RSC_CosmicBackgroundGradient& other) const;
@@ -88,16 +91,42 @@ class RSC_CosmicBackgroundGradient : public RSC_CosmicBackgroundBase {
 
 /**
  * @brief A Hosek-Wilkie analytic sky model.
+ *
+ * @note The model gives a radiance for every upward direction, and sampling that
+ *       as a light would need a hemisphere cdf, which is not built here. So the
+ *       sky is only gathered by rays that miss, and the sun is a separate light
+ *       that next event samples on its own. A small bright disk is the worst case
+ *       for sampling an environment and the best case for next event, so the two
+ *       are stapled together rather than solved as one.
+ *
+ * @note What agrees is the geometry, all of it driven by sun_direction. The cook
+ *       shapes the sky from an elevation of asin(sun_direction.z), and the
+ *       renderer brightens it around the sun by dot(ray_direction, sun_direction),
+ *       so the bright patch in the sky and the disk drawn on it are the same
+ *       direction by construction.
+ *
+ * @note What does not agree is brightness. sun_color and sun_irradiance are
+ *       authored rather than read out of the model, so the sun the sky implies at
+ *       a given turbidity and elevation and the sun actually drawn may differ.
+ *
+ * @note The model returns absolute radiance, which the renderer has no exposure
+ *       to hold, so the cook rescales it until the brightest point of the
+ *       hemisphere reads 0.9 luminance. One scalar across all three channels, so
+ *       the sky keeps its color, recomputed whenever turbidity, sun elevation or
+ *       ground color moves the absolute scale.
  */
 class RSC_CosmicBackgroundHosekWilkie : public RSC_CosmicBackgroundBase {
    public:
     /// Sun direction in world space; must be non-zero. Pointing toward the sun.
     RVec3rf sun_direction = RVec3rf(0.3, 0.4, 0.866);
 
-    /// Sun disk color along sun_direction.
+    /// Sun chromaticity.
     RColor3b sun_color = RColor3b::zero();
 
-    /// Sun disk angular radius in radians, range (0, pi/2); larger = bigger sun.
+    /// Irradiance the sun delivers to a surface facing it (unit: W/m^2).
+    RFloat sun_irradiance = 1.0;
+
+    /// Sun disk angular radius, range (0, pi/2); larger = softer shadow (unit: rad).
     RFloat sun_angular_radius = 0.00465;
 
     /// Atmospheric turbidity in [1, 10]; 1 is pure Rayleigh, 10 is hazy.
@@ -106,8 +135,8 @@ class RSC_CosmicBackgroundHosekWilkie : public RSC_CosmicBackgroundBase {
     /// Ground color in [0, 1] per channel; feeds bounce light back into the sky.
     RColor3b ground_color = RColor3b::zero();
 
-    /// Sky radiance multiplier; scales the final analytic radiance.
-    RFloat intensity = 1.0;
+    /// Dimensionless scale on the radiance the sky model returns.
+    RFloat radiance_scale = 1.0;
 
     bool operator==(const RSC_CosmicBackgroundHosekWilkie& other) const;
 

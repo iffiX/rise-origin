@@ -6,15 +6,15 @@
 
 #include "rise_origin/logic/vision/rs_vision_texture_m.h"
 #include "rise_origin/utils/math/rs_color.h"
-#include "rise_origin/utils/rs_def.h"
 #include "rise_origin/utils/math/rs_vec.h"
+#include "rise_origin/utils/rs_def.h"
 
 namespace rise {
 
 namespace logic {
 
 /**
- * @brief Cosmic background render kind. 
+ * @brief Cosmic background render kind.
  */
 RS_ENUM(
     RSE_VisionCosmicBackgroundType,
@@ -52,23 +52,26 @@ class RS_VisionCosmicBackgroundMem {
     /// Sun direction in world space.
     RVec3f sun_direction = RVec3f(0, 0, 1);
 
-    /// Sun disk color.
+    /// Sun chromaticity.
     RColor3f sun_color = RColor3f::zero();
 
-    /// Sun disk angular radius in radians.
-    RFloat sun_angular_radius = 0;
+    /// Irradiance the sun delivers to a surface facing it (unit: W/m^2).
+    float sun_irradiance = 0;
 
-    /// Scalar multiplier applied to sampled radiance.
-    RFloat intensity = 1;
+    /// Sun disk angular radius in radians.
+    float sun_angular_radius = 0;
+
+    /// Scale applied to the sampled or computed radiance.
+    float radiance_scale = 1;
 
     /// Rotation around the world up axis (radians), applied to the equirect UV.
-    RFloat rotation_rad = 0;
+    float rotation_rad = 0;
 
     /// Hosek-Wilkie cooked state: 3 channels x 9 coefficients per channel.
-    RFloat hw_config[27] = {0};
+    float hw_config[27] = {0};
 
     /// Hosek-Wilkie per-channel radiance multipliers.
-    RFloat hw_radiance[3] = {0, 0, 0};
+    float hw_radiance[3] = {0, 0, 0};
 };
 
 }  // namespace logic

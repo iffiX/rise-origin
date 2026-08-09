@@ -67,8 +67,8 @@ class RS_VisionMaterialMem {
     /// Index of refraction (transparent materials).
     FloatM ior = FloatM(1.5);
 
-    /// Emission intensity scalar multiplier.
-    FloatM emission_intensity = 0;
+    /// Radiance the surface emits, scaling the emission color (unit: W/(m^2*sr)).
+    FloatM emission_radiance = 0;
 };
 
 }  // namespace logic
@@ -84,7 +84,7 @@ class RS_VisionMaterialMem {
         field(roughness_metalness),                           \
         field(emission_color),                                \
         field(ior),                                           \
-        field(emission_intensity)                             \
+        field(emission_radiance)                              \
     );
 
 REFLECT_VISION_MATERIAL_MEM(rise::logic::RS_VisionMaterialMem<rise::RSE_FLOAT_32>);

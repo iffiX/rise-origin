@@ -141,7 +141,7 @@ void RS_KernelMaterialManager::_createLutTables() {
                   it != m.end()) {
                   const auto& p =
                       it->second.front().as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
-                  return !p.emission_texture_reference.empty() && p.emission_intensity > 0;
+                  return !p.emission_texture_reference.empty() && p.emission_radiance > 0;
               }
               return false;
           },
@@ -478,9 +478,9 @@ void RS_KernelMaterialManager::addMaterialProperty(const UnaryPropertyVariant& p
                 const auto& first =
                     type_it->second.front().as<RSC_MaterialOpticalPropertySimpleMicrofacet>();
                 const bool first_emissive = !first.emission_texture_reference.empty() &&
-                                            first.emission_intensity > 0;
+                                            first.emission_radiance > 0;
                 const bool this_emissive = !p.emission_texture_reference.empty() &&
-                                           p.emission_intensity > 0;
+                                           p.emission_radiance > 0;
                 if (first.is_transparent != p.is_transparent || first_emissive != this_emissive) {
                     RS_THROW(RS_InvalidCharacterizationException(
                         "Material optical property '{}' category differs from the first optical "
@@ -836,7 +836,7 @@ void RS_KernelMaterialManager::_resolveVisionSlot(RIndex material_gid) {
                             : nullptr;
     const bool current_is_emissive = first != nullptr &&
                                      !first->emission_texture_reference.empty() &&
-                                     first->emission_intensity > 0;
+                                     first->emission_radiance > 0;
     auto init_it = _material_is_emissive_at_init.find(material_gid);
     if (init_it == _material_is_emissive_at_init.end()) {
         _material_is_emissive_at_init.emplace(material_gid, current_is_emissive);
@@ -988,13 +988,13 @@ void RS_KernelMaterialManager::_initKernelVisionSlotData(RIndex material_gid) {
                     : nullptr;
             if (optical != nullptr) {
                 vm.ior = static_cast<FloatM>(optical->ior);
-                vm.emission_intensity = static_cast<FloatM>(optical->emission_intensity);
+                vm.emission_radiance = static_cast<FloatM>(optical->emission_radiance);
             }
 
             // Emission precedence over transparency over opaque, because
             // emission required special data flow in the vision system.
             RSE_VisionMaterialType inferred_type;
-            if (optical != nullptr && optical->emission_intensity > 0) {
+            if (optical != nullptr && optical->emission_radiance > 0) {
                 inferred_type = RSE_VISION_MATERIAL_EMISSIVE;
             } else if (optical != nullptr && optical->is_transparent) {
                 inferred_type = RSE_VISION_MATERIAL_TRANSPARENT;

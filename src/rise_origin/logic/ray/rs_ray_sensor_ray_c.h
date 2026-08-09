@@ -791,7 +791,7 @@ class RS_RaySensorRayCompute {
         rec_in_out.material_gid =
             RS_VisionMaterialKeyUnion{VSM_G(vision_material, vision_material_key)}
                 .vision_material_key.material_gid;
-        rec_in_out.emission = FloatC(VSM_G(vision_material, emission_intensity));
+        rec_in_out.emission = FloatC(VSM_G(vision_material, emission_radiance));
     }
 
     /*****************************************************************

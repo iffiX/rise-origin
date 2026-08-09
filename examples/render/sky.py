@@ -110,7 +110,7 @@ def hosek_wilkie_sky(resources):
         sun_color=(255, 245, 220),
         turbidity=3.0,  # [1, 10]; 1 clear, 10 hazy
         ground_color=(128, 128, 128),  # albedo bounced into sky
-        intensity=1.0,
+        radiance_scale=1.0,
     )
 
 

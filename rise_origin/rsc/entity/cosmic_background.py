@@ -28,8 +28,9 @@ class CosmicBackgroundUniform(RSC_CosmicBackgroundUniform):
     Args:
         name: Unique entity name.
         texture_reference: Environment texture resource name; empty uses a flat
-            color of unit value scaled by ``intensity``.
-        intensity: Scalar multiplier on the environment radiance.
+            color of unit value scaled by ``radiance``.
+        radiance: Radiance the background emits, scaling the sampled color, in
+            W/(m^2*sr).
         rotation_rad: Rotation of the environment about the up axis, in radians.
     """
 
@@ -38,13 +39,13 @@ class CosmicBackgroundUniform(RSC_CosmicBackgroundUniform):
         name: str = "cosmic_background",
         *,
         texture_reference: str = "",
-        intensity: float = 1.0,
+        radiance: float = 1.0,
         rotation_rad: float = 0.0,
     ) -> None:
         super().__init__()
         self.name = name
         self.texture_reference = texture_reference
-        self.intensity = intensity
+        self.radiance = radiance
         self.rotation_rad = rotation_rad
 
 
@@ -52,16 +53,19 @@ class CosmicBackgroundGradient(RSC_CosmicBackgroundGradient):
     """An analytic sky: a zenith-to-horizon color gradient with a sun disk.
 
     The sky color blends ``zenith_color`` and ``horizon_color`` by the ray's
-    vertical angle; a disk of ``sun_color`` and angular radius
-    ``sun_angular_radius`` is painted along ``sun_direction``.
+    vertical angle; a disk of angular radius ``sun_angular_radius`` is painted
+    along ``sun_direction``.
 
     Args:
         name: Unique entity name.
         zenith_color: Sky color at the zenith (byte RGB).
         horizon_color: Sky color at the horizon (byte RGB).
         sun_direction: Direction to the sun ``(x, y, z)`` (need not be unit).
-        sun_color: Sun-disk color (byte RGB).
-        sun_angular_radius: Angular radius of the sun disk, in radians.
+        sun_color: Sun chromaticity (byte RGB).
+        sun_irradiance: Irradiance the sun delivers to a surface facing it, in
+            W/m^2.
+        sun_angular_radius: Angular radius of the sun disk, in radians. Larger
+            is a softer shadow.
     """
 
     def __init__(
@@ -72,6 +76,7 @@ class CosmicBackgroundGradient(RSC_CosmicBackgroundGradient):
         horizon_color: RColor3b = RColor3b.zero(),
         sun_direction: RVec3rf = RVec3rf(0.3, 0.4, -1.0),
         sun_color: RColor3b = RColor3b.zero(),
+        sun_irradiance: float = 1.0,
         sun_angular_radius: float = 0.00465,
     ) -> None:
         super().__init__()
@@ -80,6 +85,7 @@ class CosmicBackgroundGradient(RSC_CosmicBackgroundGradient):
         self.horizon_color = horizon_color
         self.sun_direction = sun_direction
         self.sun_color = sun_color
+        self.sun_irradiance = sun_irradiance
         self.sun_angular_radius = sun_angular_radius
 
 
@@ -89,11 +95,15 @@ class CosmicBackgroundHosekWilkie(RSC_CosmicBackgroundHosekWilkie):
     Args:
         name: Unique entity name.
         sun_direction: Direction to the sun ``(x, y, z)`` (need not be unit).
-        sun_color: Sun-disk color (byte RGB).
-        sun_angular_radius: Angular radius of the sun disk, in radians.
+        sun_color: Sun chromaticity (byte RGB).
+        sun_irradiance: Irradiance the sun delivers to a surface facing it, in
+            W/m^2.
+        sun_angular_radius: Angular radius of the sun disk, in radians. Larger
+            is a softer shadow.
         turbidity: Atmospheric turbidity in [1, 10]; 1 is clear, 10 is hazy.
         ground_color: Ground albedo color used by the sky model (byte RGB).
-        intensity: Scalar multiplier on the sky radiance.
+        radiance_scale: Dimensionless scale on the radiance the sky model
+            returns.
     """
 
     def __init__(
@@ -102,16 +112,18 @@ class CosmicBackgroundHosekWilkie(RSC_CosmicBackgroundHosekWilkie):
         *,
         sun_direction: RVec3rf = RVec3rf(0.3, 0.4, 0.866),
         sun_color: RColor3b = RColor3b.zero(),
+        sun_irradiance: float = 1.0,
         sun_angular_radius: float = 0.00465,
         turbidity: float = 3.0,
         ground_color: RColor3b = RColor3b.zero(),
-        intensity: float = 1.0,
+        radiance_scale: float = 1.0,
     ) -> None:
         super().__init__()
         self.name = name
         self.sun_direction = sun_direction
         self.sun_color = sun_color
+        self.sun_irradiance = sun_irradiance
         self.sun_angular_radius = sun_angular_radius
         self.turbidity = turbidity
         self.ground_color = ground_color
-        self.intensity = intensity
+        self.radiance_scale = radiance_scale

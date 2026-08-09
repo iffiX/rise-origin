@@ -114,9 +114,7 @@ int main(int argc, char **argv) {
     runtime.log_level = vm["log_level"].as<string>();
 
     // Start the world
-    auto handle = rise.hello(
-        world, {}  // callback (not exposable via CLI)
-    );
+    auto [handle, callback] = rise.hello(world);
 
     handle->waitForEnd();
     auto status = handle->getStatus();

@@ -21,12 +21,19 @@ namespace rsc {
 
 class RSC_CameraBase : public RSC_EntityBase {
    public:
-    bool operator==(const RSC_CameraBase& other) const { return RSC_EntityBase::operator==(other); }
+    /// Scene radiance the sensor saturates at, mapping to full scale output
+    /// (unit: W/(m^2*sr)).
+    RFloat saturation_radiance = 1.0;
+
+    bool operator==(const RSC_CameraBase& other) const {
+        return RSC_EntityBase::operator==(other) &&
+               saturation_radiance == other.saturation_radiance;
+    }
 
    protected:
-    void _validate(RS_RSCValidator& validator) const override { (void)validator; }
-    void _read(const RS_RSCFileTreeReader& tree) override { (void)tree; }
-    void _write(RS_RSCFileTreeWriter& tree) const override { (void)tree; }
+    void _validate(RS_RSCValidator& validator) const override;
+    void _read(const RS_RSCFileTreeReader& tree) override;
+    void _write(RS_RSCFileTreeWriter& tree) const override;
     void _deserialize(RS_RSCArchive& archive) override;
     void _serialize(RS_RSCArchive& archive) const override;
 };

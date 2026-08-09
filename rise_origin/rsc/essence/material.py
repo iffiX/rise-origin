@@ -194,7 +194,8 @@ class MaterialOpticalPropertySimpleMicrofacet(
             smoothed normal instead of the flat face normal.
         ior: Index of refraction (used when transparent).
         emission_texture_reference: Texture resource for emitted color.
-        emission_intensity: Scalar multiplier on the emission color.
+        emission_radiance: Radiance the surface emits, scaling the emission
+            color; 0 does not emit (unit: W/(m^2*sr)).
     """
 
     def __init__(
@@ -208,7 +209,7 @@ class MaterialOpticalPropertySimpleMicrofacet(
         is_smooth_surface: bool = False,
         ior: float = 1.5,
         emission_texture_reference: str = "",
-        emission_intensity: float = 0.0,
+        emission_radiance: float = 0.0,
     ) -> None:
         super().__init__()
         self.name = name
@@ -221,7 +222,7 @@ class MaterialOpticalPropertySimpleMicrofacet(
         self.is_smooth_surface = is_smooth_surface
         self.ior = ior
         self.emission_texture_reference = emission_texture_reference
-        self.emission_intensity = emission_intensity
+        self.emission_radiance = emission_radiance
 
 
 class MaterialPairPropertyCoulombFriction(RSC_MaterialPairPropertyCoulombFriction):

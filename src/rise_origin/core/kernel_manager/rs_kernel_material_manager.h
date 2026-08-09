@@ -90,7 +90,7 @@ class RS_KernelManager;
  * - "is_emissive" :
  *     Return type: bool
  *     Detail: True iff the material's optical SimpleMicrofacet property has both a
- *             populated emission texture reference and a positive emission_intensity,
+ *             populated emission texture reference and a positive emission_radiance,
  *             return false if the optical property is absent
  *
  * Unordered Pair Properties:

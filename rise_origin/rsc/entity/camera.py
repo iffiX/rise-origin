@@ -180,6 +180,8 @@ class CameraPerspectiveFree(RSC_CameraPerspectiveFree):
 
     Args:
         name: Unique entity name.
+        saturation_radiance: Scene radiance the sensor saturates at, mapping
+            to full scale output, in W/(m^2*sr).
         origin_position: World position ``(x, y, z)`` in meters.
         orientation: Orientation quaternion ``(x, y, z, w)``.
         image_width: Image width in pixels.
@@ -201,6 +203,7 @@ class CameraPerspectiveFree(RSC_CameraPerspectiveFree):
         self,
         name: str = "camera",
         *,
+        saturation_radiance: float = 1.0,
         origin_position: RVec3rf = RVec3rf.zero(),
         orientation: RQuat3rf = RQuat3rf.unit(),
         image_width: int = 1280,
@@ -215,6 +218,7 @@ class CameraPerspectiveFree(RSC_CameraPerspectiveFree):
     ) -> None:
         super().__init__()
         self.name = name
+        self.saturation_radiance = saturation_radiance
         self.origin_position = origin_position
         self.orientation = orientation
         _apply_perspective(
@@ -240,6 +244,8 @@ class CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveRigidBodyLinked):
 
     Args:
         name: Unique entity name.
+        saturation_radiance: Scene radiance the sensor saturates at, mapping
+            to full scale output, in W/(m^2*sr).
         structure_name: Name of the structure to attach to.
         body_sid: Body sub-id within the structure the camera rides.
         segment_bid: Segment id of that body the camera rides.
@@ -265,6 +271,7 @@ class CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveRigidBodyLinked):
         self,
         name: str = "camera",
         *,
+        saturation_radiance: float = 1.0,
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
@@ -282,6 +289,7 @@ class CameraPerspectiveRigidBodyLinked(RSC_CameraPerspectiveRigidBodyLinked):
     ) -> None:
         super().__init__()
         self.name = name
+        self.saturation_radiance = saturation_radiance
         self.structure_name = structure_name
         self.body_sid = body_sid
         self.segment_bid = segment_bid
@@ -375,6 +383,8 @@ class CameraStereoFree(RSC_CameraStereoFree):
 
     Args:
         name: Unique entity name.
+        saturation_radiance: Scene radiance the sensor saturates at, mapping
+            to full scale output, in W/(m^2*sr).
         origin_position: World head position ``(x, y, z)`` in meters.
         orientation: Head orientation quaternion ``(x, y, z, w)``.
         image_width: Per-eye image width in pixels.
@@ -398,6 +408,7 @@ class CameraStereoFree(RSC_CameraStereoFree):
         self,
         name: str = "camera",
         *,
+        saturation_radiance: float = 1.0,
         origin_position: RVec3rf = RVec3rf.zero(),
         orientation: RQuat3rf = RQuat3rf.unit(),
         image_width: int = 1280,
@@ -415,6 +426,7 @@ class CameraStereoFree(RSC_CameraStereoFree):
     ) -> None:
         super().__init__()
         self.name = name
+        self.saturation_radiance = saturation_radiance
         self.origin_position = origin_position
         self.orientation = orientation
         _apply_stereo(
@@ -443,6 +455,8 @@ class CameraStereoRigidBodyLinked(RSC_CameraStereoRigidBodyLinked):
 
     Args:
         name: Unique entity name.
+        saturation_radiance: Scene radiance the sensor saturates at, mapping
+            to full scale output, in W/(m^2*sr).
         structure_name: Name of the structure to attach to.
         body_sid: Body sub-id within the structure the camera rides.
         segment_bid: Segment id of that body the camera rides.
@@ -470,6 +484,7 @@ class CameraStereoRigidBodyLinked(RSC_CameraStereoRigidBodyLinked):
         self,
         name: str = "camera",
         *,
+        saturation_radiance: float = 1.0,
         structure_name: str = "",
         body_sid: int = 0,
         segment_bid: int = 0,
@@ -490,6 +505,7 @@ class CameraStereoRigidBodyLinked(RSC_CameraStereoRigidBodyLinked):
     ) -> None:
         super().__init__()
         self.name = name
+        self.saturation_radiance = saturation_radiance
         self.structure_name = structure_name
         self.body_sid = body_sid
         self.segment_bid = segment_bid

@@ -240,7 +240,7 @@ class RS_KernelCameraPerspectiveManager {
     logic::RS_CameraAuxAlbedo _camera_aux_endpoint_albedo;
     logic::RS_CameraAuxRoughness _camera_aux_endpoint_roughness;
     logic::RS_CameraAuxMetalness _camera_aux_endpoint_metalness;
-    logic::RS_CameraAuxIntensity _camera_aux_endpoint_intensity;
+    logic::RS_CameraAuxEmissionRadiance _camera_aux_endpoint_emission_radiance;
     logic::RS_CameraAuxMaterialType _camera_aux_endpoint_material_type;
     logic::RS_CameraAuxScreenMotion _camera_aux_endpoint_screen_motion;
     logic::RS_CameraAuxChainThroughput _camera_aux_chain_throughput;

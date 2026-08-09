@@ -14,7 +14,7 @@ void initRSPYEntity(py::module &m) {
     rspyRSC<RSC_CosmicBackgroundUniform, RSC_CosmicBackgroundBase>(m, "RSC_CosmicBackgroundUniform")
         .def(py::init<>())
         .def_readwrite("texture_reference", &RSC_CosmicBackgroundUniform::texture_reference)
-        .def_readwrite("intensity", &RSC_CosmicBackgroundUniform::intensity)
+        .def_readwrite("radiance", &RSC_CosmicBackgroundUniform::radiance)
         .def_readwrite("rotation_rad", &RSC_CosmicBackgroundUniform::rotation_rad);
 
     rspyRSC<RSC_CosmicBackgroundGradient, RSC_CosmicBackgroundBase>(
@@ -25,6 +25,7 @@ void initRSPYEntity(py::module &m) {
         .def_readwrite("horizon_color", &RSC_CosmicBackgroundGradient::horizon_color)
         .def_readwrite("sun_direction", &RSC_CosmicBackgroundGradient::sun_direction)
         .def_readwrite("sun_color", &RSC_CosmicBackgroundGradient::sun_color)
+        .def_readwrite("sun_irradiance", &RSC_CosmicBackgroundGradient::sun_irradiance)
         .def_readwrite("sun_angular_radius", &RSC_CosmicBackgroundGradient::sun_angular_radius);
 
     rspyRSC<RSC_CosmicBackgroundHosekWilkie, RSC_CosmicBackgroundBase>(
@@ -33,10 +34,11 @@ void initRSPYEntity(py::module &m) {
         .def(py::init<>())
         .def_readwrite("sun_direction", &RSC_CosmicBackgroundHosekWilkie::sun_direction)
         .def_readwrite("sun_color", &RSC_CosmicBackgroundHosekWilkie::sun_color)
+        .def_readwrite("sun_irradiance", &RSC_CosmicBackgroundHosekWilkie::sun_irradiance)
         .def_readwrite("sun_angular_radius", &RSC_CosmicBackgroundHosekWilkie::sun_angular_radius)
         .def_readwrite("turbidity", &RSC_CosmicBackgroundHosekWilkie::turbidity)
         .def_readwrite("ground_color", &RSC_CosmicBackgroundHosekWilkie::ground_color)
-        .def_readwrite("intensity", &RSC_CosmicBackgroundHosekWilkie::intensity);
+        .def_readwrite("radiance_scale", &RSC_CosmicBackgroundHosekWilkie::radiance_scale);
 
     // --- Floor ---
     rspyRSC<RSC_FloorBase, RSC_EntityBase>(m, "RSC_FloorBase")
@@ -282,7 +284,8 @@ void initRSPYEntity(py::module &m) {
         )
         .def_readwrite("optics_signal_num", &RSC_CameraPerspectiveSignal::optics_signal_num);
 
-    rspyRSC<RSC_CameraBase, RSC_EntityBase>(m, "RSC_CameraBase");
+    rspyRSC<RSC_CameraBase, RSC_EntityBase>(m, "RSC_CameraBase")
+        .def_readwrite("saturation_radiance", &RSC_CameraBase::saturation_radiance);
 
     rspyRSC<RSC_CameraPerspectiveBase, RSC_CameraBase>(m, "RSC_CameraPerspectiveBase")
         .def_readwrite("image_width", &RSC_CameraPerspectiveBase::image_width)
