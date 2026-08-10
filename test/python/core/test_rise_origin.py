@@ -185,7 +185,7 @@ def test_adding_an_invalid_characterization_raises():
 # ---------------------------------------------------------------------------
 
 
-def test_mutators_return_null_after_the_world_ends():
+def test_mutators_fail_after_the_world_ends():
     world = rsc.World(
         "mutators",
         essences=[
@@ -211,37 +211,46 @@ def test_mutators_return_null_after_the_world_ends():
     handle.wait_for_end()
     assert handle.is_end() is True
 
-    null = rs.RS_NULL_INDEX
-    assert handle.set_simulation(rsc.simulation.Simulation()) == null
-
-    assert handle.add_resource(rs.RSC_ResourceVariant(rsc.resource.TextureConstant("t"))) == null
-    assert handle.remove_resource("t") == null
-
     essence = rs.RSC_EssenceVariant(rsc.essence.Material("m2"))
-    assert handle.add_essence(essence) == null
-    assert handle.update_essence("m2", essence) == null
-    assert handle.remove_essence("m2") == null
-
-    assert handle.add_entity(rs.RSC_EntityVariant(rsc.entity.FloorFlat("floor"))) == null
-    assert handle.remove_entity("cube") == null
-    assert handle.freeze_entity("cube") == null
-    assert handle.unfreeze_entity("cube") == null
-    assert handle.is_entity_frozen("cube") is False
-
-    assert handle.add_record(rs.RSC_RecordVariant(rsc.record.IntersectRegionSphere("z", radius=1.0))) == null
-    assert handle.remove_record("z") == null
-
     signal = rs.RSC_SignalVariant(rsc.signal.Force("f", structure_name="cube"))
-    assert handle.add_signal(signal) == null
-    assert handle.remove_signal("f") == null
-
-    recorder = rs.RSC_RecorderVariant(rsc.recorder.RecorderHDF5("rec", path="/tmp/guard.h5"))
-    assert handle.add_recorder(recorder) == null
-    assert handle.remove_recorder("rec") == null
-
+    recorder = rs.RSC_RecorderVariant(
+        rsc.recorder.RecorderHDF5("rec", path="/tmp/guard.h5")
+    )
     controller = rs.RSC_ControllerVariant(rsc.controller.ControllerCallback("c"))
-    assert handle.add_controller(controller) == null
-    assert handle.remove_controller("c") == null
+    tasks = {
+        "set_simulation": handle.set_simulation(rsc.simulation.Simulation()),
+        "add_resource": handle.add_resource(
+            rs.RSC_ResourceVariant(rsc.resource.TextureConstant("t"))
+        ),
+        "remove_resource": handle.remove_resource("t"),
+        "add_essence": handle.add_essence(essence),
+        "update_essence": handle.update_essence("m2", essence),
+        "remove_essence": handle.remove_essence("m2"),
+        "add_entity": handle.add_entity(
+            rs.RSC_EntityVariant(rsc.entity.FloorFlat("floor"))
+        ),
+        "remove_entity": handle.remove_entity("cube"),
+        "freeze_entity": handle.freeze_entity("cube"),
+        "unfreeze_entity": handle.unfreeze_entity("cube"),
+        "add_record": handle.add_record(
+            rs.RSC_RecordVariant(rsc.record.IntersectRegionSphere("z", radius=1.0))
+        ),
+        "remove_record": handle.remove_record("z"),
+        "add_signal": handle.add_signal(signal),
+        "remove_signal": handle.remove_signal("f"),
+        "add_recorder": handle.add_recorder(recorder),
+        "remove_recorder": handle.remove_recorder("rec"),
+        "add_controller": handle.add_controller(controller),
+        "remove_controller": handle.remove_controller("c"),
+    }
+
+    # Every mutator short-circuits into a finished failed task, so nothing is
+    # queued against a world that is no longer running.
+    for name, task in tasks.items():
+        assert task.state() == rs.RSE_WORLD_TASK_FAIL, name
+        assert task.get().value.error == "world is not running", name
+
+    assert handle.is_entity_frozen("cube") is False
 
 
 def test_finders_return_an_empty_variant_after_the_world_ends():

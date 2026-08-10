@@ -196,7 +196,7 @@ class RS_RSCArchive {
     }
 
     /**
-     * @brief Read a single variant, stored inline as a type name and its data.
+     * @brief Read a single variant, stored inline as its alternative position and its data.
      * @param key The field name, used by the JSON backend and ignored by the byte backend.
      * @param variant The variant to fill.
      */
@@ -214,17 +214,14 @@ class RS_RSCArchive {
             saved = _json_node;
             _json_node = &_getChild(entry, RSC_Base::VAR_DATA_KEY);
         }
-        switchOver<0, sizeof...(Ts)>(index, [this, &variant](auto i) {
-            auto& held = variant.template emplace<i.value>();
-            held.deserialize(*this);
-        });
+        _deserializeVariantAt(index, variant);
         if (saved != nullptr) {
             _json_node = saved;
         }
     }
 
     /**
-     * @brief Read a vector of variants, each element inline as a type name and its data.
+     * @brief Read a vector of variants, each element inline as its alternative position and data.
      * @param key The field name, used by the JSON backend and ignored by the byte backend.
      * @param vec The vector to fill.
      */
@@ -235,27 +232,19 @@ class RS_RSCArchive {
             uint64_t count = 0;
             _fast_deserializer(key, count);
             for (uint64_t i = 0; i < count; i++) {
-                std::string type;
-                _fast_deserializer(key, type);
-                RSC_Base::RSCRef<RSC_Base> node = RS_RSCRegistry::getExample(type);
-                node->deserialize(*this);
+                uint64_t raw = 0;
+                _fast_deserializer("index", raw);
                 RS_Variant<Ts...> variant;
-                if (!RS_RSCRegistry::tryAssign(variant, node)) {
-                    RS_THROW(RS_RSCArchiveException("Unexpected RSC type {}", type));
-                }
+                _deserializeVariantAt(static_cast<RIndex>(raw), variant);
                 vec.push_back(variant);
             }
         } else {
             RS_JSON* saved = _json_node;
             for (RS_JSON& element : _getChild(*saved, key)) {
-                std::string type = _getChild(element, RSC_Base::VAR_TYPE_KEY).get<std::string>();
-                RSC_Base::RSCRef<RSC_Base> node = RS_RSCRegistry::getExample(type);
+                RIndex index = _getChild(element, RSC_Base::VAR_INDEX_KEY).get<RIndex>();
                 _json_node = &_getChild(element, RSC_Base::VAR_DATA_KEY);
-                node->deserialize(*this);
                 RS_Variant<Ts...> variant;
-                if (!RS_RSCRegistry::tryAssign(variant, node)) {
-                    RS_THROW(RS_RSCArchiveException("Unexpected RSC type {}", type));
-                }
+                _deserializeVariantAt(index, variant);
                 vec.push_back(variant);
             }
             _json_node = saved;
@@ -367,7 +356,7 @@ class RS_RSCArchive {
     }
 
     /**
-     * @brief Write a vector of variants, each element inline as a type name and its data.
+     * @brief Write a vector of variants, each element inline as its alternative position and data.
      * @param key The field name, used by the JSON backend and ignored by the byte backend.
      * @param vec The vector to write.
      */
@@ -382,24 +371,20 @@ class RS_RSCArchive {
         if (_mode == Mode::WriteBytes) {
             _fast_serializer(key, static_cast<uint64_t>(vec.size()));
             for (std::size_t i = 0; i < vec.size(); i++) {
-                vec[i].visit([this](const auto& held) {
-                    _fast_serializer("type", RS_RSCRegistry::getName(typeid(held)));
-                    held.serialize(*this);
-                });
+                _fast_serializer("index", static_cast<uint64_t>(vec[i].index()));
+                vec[i].visit([this](const auto& held) { held.serialize(*this); });
             }
         } else {
             RS_JSON array = RS_JSON::array();
             RS_JSON* saved = _json_node;
             for (std::size_t i = 0; i < vec.size(); i++) {
-                vec[i].visit([this, &array](const auto& held) {
-                    RS_JSON entry = RS_JSON::object();
-                    RS_JSON data = RS_JSON::object();
-                    _json_node = &data;
-                    held.serialize(*this);
-                    entry[RSC_Base::VAR_TYPE_KEY] = RS_RSCRegistry::getName(typeid(held));
-                    entry[RSC_Base::VAR_DATA_KEY] = std::move(data);
-                    array.push_back(std::move(entry));
-                });
+                RS_JSON entry = RS_JSON::object();
+                RS_JSON data = RS_JSON::object();
+                _json_node = &data;
+                vec[i].visit([this](const auto& held) { held.serialize(*this); });
+                entry[RSC_Base::VAR_INDEX_KEY] = vec[i].index();
+                entry[RSC_Base::VAR_DATA_KEY] = std::move(data);
+                array.push_back(std::move(entry));
             }
             _json_node = saved;
             (*_json_node)[std::string(key)] = std::move(array);
@@ -463,6 +448,23 @@ class RS_RSCArchive {
      * @brief Write a pool index under key to the active backend.
      */
     void _serializeIndex(std::string_view key, RIndex index);
+
+    /**
+     * @brief Read the alternative at index into a variant, throwing when the variant has no such
+     * alternative.
+     */
+    template <typename... Ts>
+    void _deserializeVariantAt(RIndex index, RS_Variant<Ts...>& variant) {
+        if (static_cast<std::size_t>(index) >= sizeof...(Ts)) {
+            RS_THROW(RS_RSCArchiveException(
+                "RSC archive names alternative {} of a variant holding {}", index, sizeof...(Ts)
+            ));
+        }
+        switchOver<0, sizeof...(Ts)>(index, [this, &variant](auto alternative) {
+            auto& held = variant.template emplace<alternative.value>();
+            held.deserialize(*this);
+        });
+    }
 
     /**
      * @brief Get the pool node at index, throwing when the file names an unknown index.
